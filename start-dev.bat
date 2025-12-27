@@ -1,0 +1,6 @@
+@echo off
+echo Killing any process on port 4001...
+npx kill-port 4001
+timeout /t 2 /nobreak >nul
+echo Starting development server...
+npm run dev
