@@ -32,7 +32,7 @@ class CronService {
    * Runs every hour
    */
   private startTaskDeadlineReminders() {
-    // Run every hour at minute 0
+    // Run every hour at the start of the hour
     const task = cron.schedule('0 * * * *', async () => {
       try {
         logger.info('Running task deadline reminder check...');
@@ -76,32 +76,36 @@ class CronService {
 
         // Determine if we should send reminder based on frequency
         let shouldSend = false;
-        let frequencyHours = 24; // default
+        let frequencyMinutes = 1440; // default (24 hours in minutes)
 
         switch (reminderFreq) {
           case '1hour':
-            frequencyHours = 1;
+            frequencyMinutes = 60;
             break;
           case '3hours':
-            frequencyHours = 3;
+            frequencyMinutes = 180;
             break;
           case '12hours':
-            frequencyHours = 12;
+            frequencyMinutes = 720;
             break;
           case '24hours':
-            frequencyHours = 24;
+            frequencyMinutes = 1440;
+            break;
+          case '48hours':
+            frequencyMinutes = 2880;
             break;
         }
 
         // Check if it's time to send based on last reminder sent
         if (lastReminder) {
-          const hoursSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60 * 60));
-          if (hoursSinceLastReminder >= frequencyHours) {
+          const minutesSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60));
+          if (minutesSinceLastReminder >= frequencyMinutes) {
             shouldSend = true;
           }
         } else {
           // No reminder sent yet, send if within reminder window
-          if (hoursUntilDue <= frequencyHours && hoursUntilDue > -24) {
+          const minutesUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60));
+          if (minutesUntilDue <= frequencyMinutes && minutesUntilDue > -1440) {
             shouldSend = true;
           }
         }

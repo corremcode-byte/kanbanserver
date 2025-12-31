@@ -161,7 +161,7 @@ const getTask = async (req, res) => {
 exports.getTask = getTask;
 const createTask = async (req, res) => {
     try {
-        const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate } = req.body;
+        const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency } = req.body;
         if (!title?.trim()) {
             return (0, responses_1.errorResponse)(res, 'Task title is required', 400);
         }
@@ -231,6 +231,7 @@ const createTask = async (req, res) => {
             status: status || validatedListId || 'todo',
             priority: priority || 'medium',
             dueDate: dueDate ? new Date(dueDate) : undefined,
+            reminderFrequency: reminderFrequency || '24hours',
             createdBy: req.user._id,
             order
         });
@@ -387,6 +388,12 @@ const updateTask = async (req, res) => {
         if (currentStatus && !isNowCompleted && wasCompleted) {
             updates.completedAt = undefined;
             logger_1.logger.info(`Task "${existingTask.title}" moved back from completed status`);
+        }
+        if (updates.reminderFrequency !== undefined) {
+            const validFrequencies = ['none', '1min', '1hour', '3hours', '12hours', '24hours'];
+            if (!validFrequencies.includes(updates.reminderFrequency)) {
+                return (0, responses_1.errorResponse)(res, 'Invalid reminder frequency', 400);
+            }
         }
         const task = await models_1.Task.findByIdAndUpdate(id, { ...updates }, { new: true, runValidators: true }).populate('assignedTo', 'name email avatar')
             .populate('assignees', 'name email avatar')

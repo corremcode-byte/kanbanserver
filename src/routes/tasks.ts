@@ -14,7 +14,7 @@ router.post('/', checkPermission('canCreateTasks'), tasksController.createTask);
 router.put('/:id', checkCanEditTask, tasksController.updateTask);
 router.delete('/:id', checkCanDeleteTask, tasksController.deleteTask);
 
-// Task reordering (requires canEditTasks since it changes task status/position)
-router.post('/reorder', checkCanEditTask, tasksController.reorderTasks);
+// Task reordering (permission check handled in controller since it's a batch operation)
+router.post('/reorder', tasksController.reorderTasks);
 
 export default router;

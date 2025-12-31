@@ -24,7 +24,7 @@ class CronService {
         this.tasks.clear();
     }
     startTaskDeadlineReminders() {
-        const task = node_cron_1.default.schedule('0 * * * *', async () => {
+        const task = node_cron_1.default.schedule('* * * * *', async () => {
             try {
                 logger_1.logger.info('Running task deadline reminder check...');
                 await this.checkTaskDeadlines();
@@ -34,7 +34,7 @@ class CronService {
             }
         });
         this.tasks.set('taskDeadlineReminders', task);
-        logger_1.logger.info('Task deadline reminder cron job scheduled (runs every hour)');
+        logger_1.logger.info('Task deadline reminder cron job scheduled (runs every minute for testing)');
     }
     async checkTaskDeadlines() {
         const now = new Date();
@@ -55,29 +55,33 @@ class CronService {
                 const lastReminder = task.lastReminderSent ? new Date(task.lastReminderSent) : null;
                 const hoursUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60));
                 let shouldSend = false;
-                let frequencyHours = 24;
+                let frequencyMinutes = 1440;
                 switch (reminderFreq) {
+                    case '1min':
+                        frequencyMinutes = 1;
+                        break;
                     case '1hour':
-                        frequencyHours = 1;
+                        frequencyMinutes = 60;
                         break;
                     case '3hours':
-                        frequencyHours = 3;
+                        frequencyMinutes = 180;
                         break;
                     case '12hours':
-                        frequencyHours = 12;
+                        frequencyMinutes = 720;
                         break;
                     case '24hours':
-                        frequencyHours = 24;
+                        frequencyMinutes = 1440;
                         break;
                 }
                 if (lastReminder) {
-                    const hoursSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60 * 60));
-                    if (hoursSinceLastReminder >= frequencyHours) {
+                    const minutesSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60));
+                    if (minutesSinceLastReminder >= frequencyMinutes) {
                         shouldSend = true;
                     }
                 }
                 else {
-                    if (hoursUntilDue <= frequencyHours && hoursUntilDue > -24) {
+                    const minutesUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60));
+                    if (minutesUntilDue <= frequencyMinutes && minutesUntilDue > -1440) {
                         shouldSend = true;
                     }
                 }

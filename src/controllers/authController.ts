@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { User, Task, Project } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
+import { emailService } from '../services/emailService';
+import { getAuth } from 'firebase-admin/auth';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -718,8 +720,10 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       return errorResponse(res, 'Email is required', 400);
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+
     // Check if user exists
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    const user = await User.findOne({ email: normalizedEmail });
 
     // For security, always return success even if user doesn't exist
     // This prevents email enumeration attacks
@@ -728,14 +732,42 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       return successResponse(res, 'If this email exists in our system, a password reset link has been sent');
     }
 
-    // Firebase handles password reset emails directly
-    // We just log the request and return success
-    logger.info(`Password reset requested for user: ${email}`);
+    // Generate Firebase password reset link
+    try {
+      const auth = getAuth();
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
 
-    return successResponse(
-      res,
-      'Password reset instructions have been sent to your email. Please check your inbox and use the Firebase password reset link.'
-    );
+      // Generate password reset link using Firebase Admin SDK
+      const resetLink = await auth.generatePasswordResetLink(normalizedEmail, {
+        url: `${appUrl}/login`, // Redirect URL after password reset
+      });
+
+      // Send password reset email
+      const emailSent = await emailService.sendPasswordResetEmail(normalizedEmail, {
+        userName: user.displayName || user.email,
+        resetLink,
+        expiresInMinutes: 60
+      });
+
+      if (emailSent) {
+        logger.info(`Password reset email sent to: ${email}`);
+      } else {
+        logger.warn(`Failed to send password reset email to: ${email}, but link was generated`);
+      }
+
+      return successResponse(
+        res,
+        'If this email exists in our system, a password reset link has been sent'
+      );
+    } catch (firebaseError: any) {
+      logger.error('Firebase password reset error:', firebaseError);
+
+      // Even on error, return generic success message for security
+      return successResponse(
+        res,
+        'If this email exists in our system, a password reset link has been sent'
+      );
+    }
   } catch (error) {
     logger.error('Error requesting password reset:', error);
     return internalServerErrorResponse(res, 'Failed to process password reset request');

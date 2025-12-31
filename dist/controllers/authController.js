@@ -4,6 +4,8 @@ exports.requestPasswordReset = exports.uploadAvatar = exports.deleteAccount = ex
 const models_1 = require("../models");
 const responses_1 = require("../utils/responses");
 const logger_1 = require("../utils/logger");
+const emailService_1 = require("../services/emailService");
+const auth_1 = require("firebase-admin/auth");
 const syncFirebaseUser = async (req, res) => {
     try {
         const { firebaseUid, email, displayName, photoURL, role = 'member' } = req.body;
@@ -576,13 +578,35 @@ const requestPasswordReset = async (req, res) => {
         if (!email || typeof email !== 'string') {
             return (0, responses_1.errorResponse)(res, 'Email is required', 400);
         }
-        const user = await models_1.User.findOne({ email: email.toLowerCase().trim() });
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await models_1.User.findOne({ email: normalizedEmail });
         if (!user) {
             logger_1.logger.info(`Password reset requested for non-existent email: ${email}`);
             return (0, responses_1.successResponse)(res, 'If this email exists in our system, a password reset link has been sent');
         }
-        logger_1.logger.info(`Password reset requested for user: ${email}`);
-        return (0, responses_1.successResponse)(res, 'Password reset instructions have been sent to your email. Please check your inbox and use the Firebase password reset link.');
+        try {
+            const auth = (0, auth_1.getAuth)();
+            const appUrl = process.env.APP_URL || 'http://localhost:3000';
+            const resetLink = await auth.generatePasswordResetLink(normalizedEmail, {
+                url: `${appUrl}/login`,
+            });
+            const emailSent = await emailService_1.emailService.sendPasswordResetEmail(normalizedEmail, {
+                userName: user.displayName || user.email,
+                resetLink,
+                expiresInMinutes: 60
+            });
+            if (emailSent) {
+                logger_1.logger.info(`Password reset email sent to: ${email}`);
+            }
+            else {
+                logger_1.logger.warn(`Failed to send password reset email to: ${email}, but link was generated`);
+            }
+            return (0, responses_1.successResponse)(res, 'If this email exists in our system, a password reset link has been sent');
+        }
+        catch (firebaseError) {
+            logger_1.logger.error('Firebase password reset error:', firebaseError);
+            return (0, responses_1.successResponse)(res, 'If this email exists in our system, a password reset link has been sent');
+        }
     }
     catch (error) {
         logger_1.logger.error('Error requesting password reset:', error);

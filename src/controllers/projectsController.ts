@@ -306,11 +306,12 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     let columns;
     if (lists && Array.isArray(lists) && lists.length > 0) {
       // Validate and create custom lists
-      columns = lists.map((list: { title: string; color?: string }, index: number) => ({
+      columns = lists.map((list: { title: string; color?: string; assignedMembers?: string[] }, index: number) => ({
         id: list.title.toLowerCase().replace(/\s+/g, '-'),
         title: list.title.trim(),
         color: list.color || '#6B7280',
-        order: index
+        order: index,
+        assignedMembers: list.assignedMembers || []
       }));
     }
     // If no lists provided, the pre-save hook will create defaults
@@ -1140,7 +1141,7 @@ export const addList = async (req: AuthenticatedRequest, res: Response) => {
 export const updateList = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id, listId } = req.params;
-    const { title, color } = req.body;
+    const { title, color, assignedMembers } = req.body;
 
     const project = await Project.findById(id);
     if (!project) {
@@ -1167,6 +1168,10 @@ export const updateList = async (req: AuthenticatedRequest, res: Response) => {
 
     if (color !== undefined) {
       project.columns![listIndex].color = color;
+    }
+
+    if (assignedMembers !== undefined) {
+      project.columns![listIndex].assignedMembers = assignedMembers;
     }
 
     await project.save();

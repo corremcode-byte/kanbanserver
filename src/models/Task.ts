@@ -25,7 +25,7 @@ export interface ITask extends Document {
   createdBy: mongoose.Types.ObjectId;
   dueDate?: Date;
   completedAt?: Date; // Track when task was marked as completed
-  reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours';
+  reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours';
   lastReminderSent?: Date;
   attachments: ITaskAttachment[];
   order: number;
@@ -102,7 +102,7 @@ const TaskSchema = new Schema<ITask>({
   },
   reminderFrequency: {
     type: String,
-    enum: ['none', '1hour', '3hours', '12hours', '24hours'],
+    enum: ['none', '1hour', '3hours', '12hours', '24hours', '48hours'],
     default: '24hours'
   },
   lastReminderSent: { type: Date },

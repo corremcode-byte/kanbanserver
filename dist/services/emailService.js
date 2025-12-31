@@ -10,9 +10,16 @@ class EmailService {
     constructor() {
         this.transporter = null;
         this.isConfigured = false;
-        this.initialize();
+        this.initPromise = null;
     }
     async initialize() {
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+        this.initPromise = this.doInitialize();
+        return this.initPromise;
+    }
+    async doInitialize() {
         try {
             const { EMAIL_SERVICE, EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM, APP_URL } = process.env;
             if (!EMAIL_USER || !EMAIL_PASS) {
@@ -64,6 +71,7 @@ class EmailService {
         }
     }
     async sendEmail(options) {
+        await this.initialize();
         if (!this.isConfigured || !this.transporter) {
             logger_1.logger.warn('Email service not configured. Skipping email send.');
             return false;
@@ -72,7 +80,7 @@ class EmailService {
             const from = process.env.EMAIL_FROM || process.env.EMAIL_USER;
             const recipients = Array.isArray(options.to) ? options.to.join(', ') : options.to;
             await this.transporter.sendMail({
-                from: `"Asana Clone" <${from}>`,
+                from: `"Kanban" <${from}>`,
                 to: recipients,
                 subject: options.subject,
                 text: options.text,
@@ -116,7 +124,7 @@ class EmailService {
               <a href="${projectUrl}" class="button">View Project</a>
             </div>
             <div class="footer">
-              <p>This is an automated notification from Asana Clone. Please do not reply to this email.</p>
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
             </div>
           </div>
         </body>
@@ -177,7 +185,7 @@ class EmailService {
               <a href="${taskUrl}" class="button">View Task</a>
             </div>
             <div class="footer">
-              <p>This is an automated notification from Asana Clone. Please do not reply to this email.</p>
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
             </div>
           </div>
         </body>
@@ -240,7 +248,7 @@ class EmailService {
               <a href="${taskUrl}" class="button">View Task</a>
             </div>
             <div class="footer">
-              <p>This is an automated reminder from Asana Clone. Please do not reply to this email.</p>
+              <p>This is an automated reminder from Kanban. Please do not reply to this email.</p>
             </div>
           </div>
         </body>
@@ -300,7 +308,7 @@ class EmailService {
             </div>
             <div class="footer">
               <p>This invitation will expire on ${new Date(data.expiresAt).toLocaleDateString()}.</p>
-              <p>This is an automated notification from Asana Clone. Please do not reply to this email.</p>
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
             </div>
           </div>
         </body>
@@ -357,7 +365,7 @@ class EmailService {
               <a href="${projectsUrl}" class="button">View Projects</a>
             </div>
             <div class="footer">
-              <p>This is an automated notification from Asana Clone. Please do not reply to this email.</p>
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
             </div>
           </div>
         </body>
@@ -376,6 +384,77 @@ class EmailService {
         return this.sendEmail({
             to: recipient,
             subject: `${data.memberName} joined ${data.projectName}`,
+            html,
+            text
+        });
+    }
+    async sendPasswordResetEmail(recipient, data) {
+        const expiryTime = data.expiresInMinutes || 60;
+        const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #ef4444; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px; }
+            .warning-box { background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 15px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔐 Password Reset Request</h1>
+            </div>
+            <div class="content">
+              <p>Hello ${data.userName},</p>
+              <p>We received a request to reset your password for your Kanban account.</p>
+              <p>Click the button below to reset your password:</p>
+              <a href="${data.resetLink}" class="button">Reset Password</a>
+              <div class="warning-box">
+                <p><strong>⚠️ Security Notice:</strong></p>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                  <li>This link will expire in ${expiryTime} minutes</li>
+                  <li>If you didn't request this reset, please ignore this email</li>
+                  <li>Never share this link with anyone</li>
+                </ul>
+              </div>
+              <p style="margin-top: 20px; font-size: 14px; color: #6b7280;">
+                Or copy and paste this link into your browser:<br>
+                <a href="${data.resetLink}">${data.resetLink}</a>
+              </p>
+            </div>
+            <div class="footer">
+              <p>This link will expire in ${expiryTime} minutes.</p>
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+        const text = `
+      Password Reset Request
+
+      Hello ${data.userName},
+
+      We received a request to reset your password for your Kanban account.
+
+      Click the link below to reset your password:
+      ${data.resetLink}
+
+      SECURITY NOTICE:
+      - This link will expire in ${expiryTime} minutes
+      - If you didn't request this reset, please ignore this email
+      - Never share this link with anyone
+
+      This is an automated notification from Kanban. Please do not reply to this email.
+    `;
+        return this.sendEmail({
+            to: recipient,
+            subject: 'Reset Your Password - Kanban',
             html,
             text
         });

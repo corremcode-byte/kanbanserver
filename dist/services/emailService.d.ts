@@ -24,8 +24,10 @@ interface TaskReminderNotification {
 declare class EmailService {
     private transporter;
     private isConfigured;
+    private initPromise;
     constructor();
     private initialize;
+    private doInitialize;
     private sendEmail;
     sendProjectCreatedNotification(recipients: string[], data: ProjectNotification): Promise<boolean>;
     sendTaskAssignedNotification(recipients: string[], data: TaskNotification): Promise<boolean>;
@@ -43,6 +45,11 @@ declare class EmailService {
         memberName: string;
         memberEmail: string;
         role: string;
+    }): Promise<boolean>;
+    sendPasswordResetEmail(recipient: string, data: {
+        userName: string;
+        resetLink: string;
+        expiresInMinutes?: number;
     }): Promise<boolean>;
     sendTestEmail(to: string): Promise<boolean>;
 }

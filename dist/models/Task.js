@@ -96,7 +96,7 @@ const TaskSchema = new mongoose_1.Schema({
     },
     reminderFrequency: {
         type: String,
-        enum: ['none', '1hour', '3hours', '12hours', '24hours'],
+        enum: ['none', '1min', '1hour', '3hours', '12hours', '24hours'],
         default: '24hours'
     },
     lastReminderSent: { type: Date },

@@ -14,6 +14,7 @@ export interface IProject extends Document {
     title: string;
     color?: string;
     order: number;
+    assignedMembers?: mongoose.Types.ObjectId[];
   }>;
   createdAt: Date;
   updatedAt: Date;
@@ -63,7 +64,8 @@ const ProjectSchema = new Schema<IProject>({
     id: { type: String, required: true },
     title: { type: String, required: true },
     color: { type: String },
-    order: { type: Number, default: 0 }
+    order: { type: Number, default: 0 },
+    assignedMembers: [{ type: Schema.Types.ObjectId, ref: 'User' }]
   }]
 }, {
   timestamps: true,

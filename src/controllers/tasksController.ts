@@ -215,7 +215,7 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate } = req.body;
+    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency } = req.body;
 
     if (!title?.trim()) {
       return errorResponse(res, 'Task title is required', 400);
@@ -308,6 +308,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       status: status || validatedListId || 'todo', // For backward compatibility
       priority: priority || 'medium',
       dueDate: dueDate ? new Date(dueDate) : undefined,
+      reminderFrequency: reminderFrequency || '24hours', // Default to 24 hours if not specified
       createdBy: req.user._id,
       order
     });
@@ -443,6 +444,10 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
     const allValidUserIds = [...projectMemberIds, ...projectManagerIds];
 
+    // Track old assignees for notification comparison
+    const oldAssignees = existingTask.assignees ? existingTask.assignees.map((a: any) => a.toString()) : [];
+    let newlyAssignedUsers: string[] = [];
+
     // Validate assignees array - allow assigning to both members and managers
     if (updates.assignees && Array.isArray(updates.assignees) && updates.assignees.length > 0) {
       const validatedAssignees = updates.assignees.filter((userId: string) => allValidUserIds.includes(userId));
@@ -457,6 +462,9 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       if (!existingTask.assignedAt && validatedAssignees.length > 0) {
         updates.assignedAt = new Date();
       }
+
+      // Find newly assigned users (who weren't previously assigned)
+      newlyAssignedUsers = validatedAssignees.filter((userId: string) => !oldAssignees.includes(userId));
     }
 
     // For backward compatibility: if assignedTo is provided but not assignees
@@ -469,6 +477,11 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       // Set assignedAt timestamp if task wasn't previously assigned
       if (!existingTask.assignedAt) {
         updates.assignedAt = new Date();
+      }
+
+      // Check if this is a newly assigned user
+      if (!oldAssignees.includes(updates.assignedTo)) {
+        newlyAssignedUsers = [updates.assignedTo];
       }
     }
 
@@ -508,6 +521,14 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     if (currentStatus && !isNowCompleted && wasCompleted) {
       updates.completedAt = undefined;
       logger.info(`Task "${existingTask.title}" moved back from completed status`);
+    }
+
+    // Validate reminderFrequency if provided
+    if (updates.reminderFrequency !== undefined) {
+      const validFrequencies = ['none', '1hour', '3hours', '12hours', '24hours', '48hours'];
+      if (!validFrequencies.includes(updates.reminderFrequency)) {
+        return errorResponse(res, 'Invalid reminder frequency', 400);
+      }
     }
 
     // Apply updates
@@ -575,6 +596,133 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         message: 'Task completed - performance metrics updated'
       });
       logger.info(`Performance update triggered: Task ${task.title} completed by ${req.user.displayName}`);
+    }
+
+    // Send notification to list members if task moved to a different list
+    const listChanged = updates.listId && updates.listId !== existingTask.listId;
+    logger.info(`Task update - listChanged: ${listChanged}, updates.listId: ${updates.listId}, existingTask.listId: ${existingTask.listId}`);
+
+    if (listChanged) {
+      try {
+        // Get the project to find list members
+        const User = (await import('../models/User')).default;
+        const projectWithColumns = await Project.findById(existingTask.projectId);
+        logger.info(`Project columns: ${JSON.stringify(projectWithColumns?.columns || [])}`);
+
+        if (projectWithColumns) {
+          // Find the target list/column
+          const targetColumn = projectWithColumns.columns.find((col: any) => col.id === updates.listId);
+          logger.info(`Target column found: ${targetColumn ? targetColumn.title : 'NOT FOUND'}`);
+          logger.info(`Target column assignedMembers: ${JSON.stringify(targetColumn?.assignedMembers || [])}`);
+
+          if (targetColumn) {
+            const memberEmails: string[] = [];
+
+            // Check if column has assigned members
+            if (targetColumn.assignedMembers && targetColumn.assignedMembers.length > 0) {
+              // Manually populate the assignedMembers to get their emails
+              const assignedMemberIds = targetColumn.assignedMembers.map((id: any) => id.toString());
+              const assignedMembersData = await User.find({
+                _id: { $in: assignedMemberIds }
+              }).select('email displayName');
+
+              logger.info(`Found ${assignedMembersData.length} assigned members for the target column`);
+
+              // Get emails of assigned members
+              assignedMembersData.forEach((member: any) => {
+                if (member.email && member.email !== req.user.email) {
+                  memberEmails.push(member.email);
+                }
+              });
+            }
+
+            // Also check if the list title itself is an email address
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (emailRegex.test(targetColumn.title)) {
+              logger.info(`List title "${targetColumn.title}" appears to be an email address`);
+
+              // Check if this email belongs to a project member
+              const userByEmail = await User.findOne({ email: targetColumn.title }).select('email displayName _id');
+
+              if (userByEmail) {
+                // Check if user is a project member, manager, or owner
+                const isProjectMember = projectWithColumns.members.some((m: any) => m.toString() === userByEmail._id.toString()) ||
+                                       projectWithColumns.managers?.some((m: any) => m.toString() === userByEmail._id.toString()) ||
+                                       projectWithColumns.ownerId.toString() === userByEmail._id.toString();
+
+                if (isProjectMember && userByEmail.email !== req.user.email && !memberEmails.includes(userByEmail.email)) {
+                  memberEmails.push(userByEmail.email);
+                  logger.info(`Added list title email "${userByEmail.email}" to notification recipients`);
+                }
+              }
+            }
+
+            logger.info(`Member emails to notify: ${JSON.stringify(memberEmails)}`);
+
+            if (memberEmails.length > 0) {
+              // Send notification email
+              await emailService.sendTaskMovedToListNotification(memberEmails, {
+                taskTitle: task.title,
+                taskId: task._id.toString(),
+                projectName: projectWithColumns.name,
+                projectId: projectWithColumns._id.toString(),
+                listTitle: targetColumn.title,
+                movedByName: req.user.displayName || req.user.email,
+                priority: task.priority
+              });
+              logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${memberEmails.length} members`);
+            } else {
+              logger.info(`No member emails to notify (all filtered out or empty)`);
+            }
+          } else {
+            logger.info(`Target column not found`);
+          }
+        } else {
+          logger.warn(`Project not found when trying to send list notification`);
+        }
+      } catch (emailError) {
+        logger.error('Error sending list notification email:', emailError);
+        // Don't fail the request if email fails
+      }
+    }
+
+    // Send notification to newly assigned users
+    if (newlyAssignedUsers.length > 0) {
+      try {
+        logger.info(`Sending assignment notifications to ${newlyAssignedUsers.length} newly assigned users`);
+
+        // Fetch user details for the newly assigned users
+        const User = (await import('../models/User')).default;
+        const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName');
+
+        logger.info(`Found ${users.length} users to notify: ${users.map(u => u.email).join(', ')}`);
+
+        // Filter out the person who assigned themselves and collect email addresses
+        const recipientEmails = users
+          .filter(user => user._id.toString() !== req.user._id)
+          .map(user => user.email);
+
+        if (recipientEmails.length > 0) {
+          await emailService.sendTaskAssignedNotification(
+            recipientEmails,
+            {
+              taskTitle: task.title,
+              taskId: task._id.toString(),
+              projectName: project.name,
+              projectId: project._id.toString(),
+              assignedByName: req.user.displayName || req.user.email,
+              priority: task.priority,
+              dueDate: task.dueDate
+            }
+          );
+          logger.info(`Sent assignment notification for task "${task.title}" to ${recipientEmails.length} users: ${recipientEmails.join(', ')}`);
+        } else {
+          logger.info(`No users to notify (user assigned themselves)`);
+        }
+      } catch (emailError) {
+        logger.error('Error sending assignment notification emails:', emailError);
+        // Don't fail the request if email fails
+      }
     }
 
     logger.info(`Task updated: ${task.title}`);
@@ -646,13 +794,19 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
 
 export const reorderTasks = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    logger.info('=== REORDER TASKS REQUEST ===');
+    logger.info(`Request body: ${JSON.stringify(req.body, null, 2)}`);
+    logger.info(`User: ${req.user?.email || 'unknown'}`);
+
     const { projectId, tasks } = req.body;
 
     if (!projectId) {
+      logger.error('Missing projectId in request');
       return errorResponse(res, 'Project ID is required', 400);
     }
 
     if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+      logger.error(`Invalid tasks array - tasks: ${JSON.stringify(tasks)}, isArray: ${Array.isArray(tasks)}, length: ${tasks?.length}`);
       return errorResponse(res, 'Tasks array is required', 400);
     }
 
