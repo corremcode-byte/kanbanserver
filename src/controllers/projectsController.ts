@@ -276,6 +276,12 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createProject = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Check if user is admin
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') {
+      return errorResponse(res, 'Only admin users can create projects', 403);
+    }
+
     const { name, description, members = [], lists } = req.body;
 
     if (!name?.trim()) {
