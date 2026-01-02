@@ -53,7 +53,9 @@ const userSchema = new mongoose_1.Schema({
     displayName: {
         type: String,
         required: true,
-        trim: true
+        unique: true,
+        trim: true,
+        index: true
     },
     photoURL: {
         type: String,

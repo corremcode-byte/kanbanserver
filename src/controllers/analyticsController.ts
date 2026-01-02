@@ -294,6 +294,300 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
     const { projectId } = req.params;
     const { startDate, endDate } = req.query;
 
+    // Set date range (default to last 30 days)
+    const end = endDate ? new Date(endDate as string) : new Date();
+    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // Handle "all" projects case
+    if (projectId === 'all') {
+      // Get all projects where user is owner, in owners list, or a member
+      const allProjects = await Project.find({
+        $or: [
+          { ownerId: req.user._id },
+          { owners: req.user._id },
+          { members: req.user._id }
+        ]
+      }).populate('members', 'displayName email photoURL')
+        .populate('managers', 'displayName email photoURL');
+
+      if (allProjects.length === 0) {
+        return successResponse(res, 'Performance matrix retrieved successfully', {
+          projectId: 'all',
+          projectName: 'All Projects',
+          startDate: start,
+          endDate: end,
+          members: [],
+          summary: {
+            totalMembers: 0,
+            avgProductivityScore: 0,
+            totalTasksAssigned: 0,
+            totalTasksCompleted: 0,
+            totalActionsCount: 0
+          }
+        });
+      }
+
+      // Collect all unique members from all projects
+      const memberMap = new Map<string, any>();
+
+      for (const project of allProjects) {
+        const allMembers = [...project.members];
+        if (project.managers) {
+          project.managers.forEach((manager: any) => {
+            const managerId = typeof manager === 'object' && manager._id ? manager._id.toString() : manager.toString();
+            if (!allMembers.some((m: any) => {
+              const mId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
+              return mId === managerId;
+            })) {
+              allMembers.push(manager);
+            }
+          });
+        }
+
+        for (const member of allMembers) {
+          const memberId = typeof member === 'object' && member._id ? member._id.toString() : member.toString();
+          const memberData = typeof member === 'object' ? member : await User.findById(member);
+
+          if (!memberMap.has(memberId) && memberData) {
+            memberMap.set(memberId, memberData);
+          }
+        }
+      }
+
+      // Get performance data for each unique member across all projects
+      const performanceData = await Promise.all(
+        Array.from(memberMap.entries()).map(async ([memberId, memberData]) => {
+          let totalTasksAssigned = 0;
+          let totalTasksInProgress = 0;
+          let totalTasksCompleted = 0;
+          let totalOverdueTasks = 0;
+          let totalTasksCreated = 0;
+          let totalTasksUpdated = 0;
+          let totalTimeLogged = 0;
+          let totalActionsCount = 0;
+          let totalCompletionTime = 0;
+          let completedTasksCount = 0;
+
+          // Aggregate stats across all projects
+          for (const project of allProjects) {
+            // Get audit log stats
+            const stats = await AuditLog.getUserStats(project._id.toString(), memberId, start, end);
+
+            // Get task statistics - check all assignment fields AND createdBy to match dashboard behavior
+            const tasksAssigned = await Task.countDocuments({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ]
+            });
+
+            const tasksInProgress = await Task.countDocuments({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ],
+              status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
+            });
+
+            const tasksCompleted = await Task.countDocuments({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ],
+              status: 'completed'
+            });
+
+            const overdueTasks = await Task.countDocuments({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ],
+              status: { $ne: 'completed' },
+              dueDate: { $exists: true, $lt: new Date() }
+            });
+
+            // Get completed tasks for time calculation
+            const completedTasksForTime = await Task.find({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ],
+              status: 'completed',
+              assignedAt: { $exists: true },
+              completedAt: { $exists: true, $gte: start, $lte: end }
+            }).select('assignedAt completedAt');
+
+            if (completedTasksForTime.length > 0) {
+              const projectTime = completedTasksForTime.reduce((sum, task: any) => {
+                if (task.completedAt && task.assignedAt) {
+                  const diff = new Date(task.completedAt).getTime() - new Date(task.assignedAt).getTime();
+                  return sum + diff;
+                }
+                return sum;
+              }, 0);
+              totalCompletionTime += projectTime;
+              completedTasksCount += completedTasksForTime.length;
+            }
+
+            // Aggregate totals
+            totalTasksAssigned += tasksAssigned;
+            totalTasksInProgress += tasksInProgress;
+            totalTasksCompleted += tasksCompleted;
+            totalOverdueTasks += overdueTasks;
+            totalTasksCreated += stats.tasksCreated;
+            totalTasksUpdated += stats.tasksUpdated;
+            totalTimeLogged += stats.totalTimeLogged;
+            totalActionsCount += stats.actionsCount;
+          }
+
+          // Calculate average completion time
+          let avgCompletionTime = 0;
+          if (completedTasksCount > 0) {
+            avgCompletionTime = totalCompletionTime / completedTasksCount / (1000 * 60 * 60); // Convert to hours
+          }
+
+          // Calculate productivity score
+          let productivityScore = 0;
+          if (totalTasksAssigned > 0) {
+            const completionRate = (totalTasksCompleted / totalTasksAssigned) * 35;
+
+            let speedBonus = 0;
+            if (avgCompletionTime > 0 && totalTasksCompleted > 0) {
+              if (avgCompletionTime < 1) {
+                speedBonus = 15;
+              } else if (avgCompletionTime < 4) {
+                speedBonus = 12;
+              } else if (avgCompletionTime < 8) {
+                speedBonus = 9;
+              } else if (avgCompletionTime < 24) {
+                speedBonus = 6;
+              } else if (avgCompletionTime < 48) {
+                speedBonus = 3;
+              }
+            }
+
+            const activityRate = Math.min((totalActionsCount / 100) * 25, 25);
+            const timeScore = Math.min((totalTimeLogged / 600) * 15, 15);
+            const overdueDeduction = Math.min(totalOverdueTasks * 2, 10);
+
+            productivityScore = Math.round(completionRate + speedBonus + activityRate + timeScore - overdueDeduction);
+            productivityScore = Math.max(0, Math.min(100, productivityScore));
+          }
+
+          // Get recent activity from all projects
+          const recentActivities = [];
+          for (const project of allProjects) {
+            const activity = await AuditLog.getProjectActivity(project._id.toString(), {
+              userId: memberId,
+              startDate: start,
+              endDate: end,
+              limit: 5
+            });
+            recentActivities.push(...activity);
+          }
+
+          // Sort by date and take the most recent ones
+          recentActivities.sort((a: any, b: any) => b.createdAt - a.createdAt);
+
+          // Get task details for this member across all projects - don't filter by date
+          const tasks: any[] = [];
+          for (const project of allProjects) {
+            const memberTasks = await Task.find({
+              projectId: project._id,
+              $or: [
+                { assigneeId: memberId },
+                { assignedTo: memberId },
+                { assignees: memberId },
+                { createdBy: memberId }
+              ]
+            }).select('title assignees assignedAt completedAt status priority createdAt');
+
+            for (const task of memberTasks) {
+              const assignedAt = task.assignedAt || task.createdAt;
+              const completedAt = task.completedAt;
+
+              // Calculate time spent: either from assigned to completed, or from assigned to now if not completed
+              let timeSpent = 0;
+              if (completedAt && assignedAt) {
+                timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+              } else if (assignedAt) {
+                timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+              }
+
+              tasks.push({
+                taskId: task._id.toString(),
+                taskTitle: task.title,
+                assignedTo: memberId,
+                assignedToName: memberData?.displayName || 'Unknown',
+                assignedAt: assignedAt,
+                completedAt: completedAt,
+                timeSpent: Math.round(timeSpent * 10) / 10,
+                status: task.status,
+                priority: task.priority,
+                assignmentHistory: [] // Simplified for "all projects" view - can add full history if needed
+              });
+            }
+          }
+
+          return {
+            userId: memberId,
+            userName: memberData?.displayName || 'Unknown',
+            userEmail: memberData?.email || '',
+            userPhoto: memberData?.photoURL || null,
+            tasksAssigned: totalTasksAssigned,
+            tasksInProgress: totalTasksInProgress,
+            tasksCompleted: totalTasksCompleted,
+            overdueTasks: totalOverdueTasks,
+            tasksCreated: totalTasksCreated,
+            tasksUpdated: totalTasksUpdated,
+            totalTimeLogged: totalTimeLogged,
+            actionsCount: totalActionsCount,
+            avgCompletionTime: Math.round(avgCompletionTime * 10) / 10,
+            productivityScore,
+            completionRate: totalTasksAssigned > 0 ? Math.round((totalTasksCompleted / totalTasksAssigned) * 100) : 0,
+            recentActivity: recentActivities.slice(0, 5),
+            tasks: tasks
+          };
+        })
+      );
+
+      // Sort by productivity score
+      performanceData.sort((a, b) => b.productivityScore - a.productivityScore);
+
+      return successResponse(res, 'Performance matrix retrieved successfully', {
+        projectId: 'all',
+        projectName: 'All Projects',
+        startDate: start,
+        endDate: end,
+        members: performanceData,
+        summary: {
+          totalMembers: performanceData.length,
+          avgProductivityScore: performanceData.length > 0
+            ? Math.round(performanceData.reduce((sum, m) => sum + m.productivityScore, 0) / performanceData.length)
+            : 0,
+          totalTasksAssigned: performanceData.reduce((sum, m) => sum + m.tasksAssigned, 0),
+          totalTasksCompleted: performanceData.reduce((sum, m) => sum + m.tasksCompleted, 0),
+          totalActionsCount: performanceData.reduce((sum, m) => sum + m.actionsCount, 0)
+        }
+      });
+    }
+
+    // Single project case
     // Check if project exists
     const project = await Project.findById(projectId)
       .populate('members', 'displayName email photoURL')
@@ -323,10 +617,6 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
       return errorResponse(res, 'Access denied to this project', 403);
     }
 
-    // Set date range (default to last 30 days)
-    const end = endDate ? new Date(endDate as string) : new Date();
-    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
     // Get all members (including managers)
     const allMembers = [...project.members];
     if (project.managers) {
@@ -350,37 +640,61 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
         // Get audit log stats
         const stats = await AuditLog.getUserStats(projectId, memberId, start, end);
 
-        // Get task statistics using assignees array
+        // Get task statistics - check all assignment fields AND createdBy to match dashboard behavior
         const tasksAssigned = await Task.countDocuments({
           projectId,
-          assignees: memberId
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ]
         });
 
         const tasksInProgress = await Task.countDocuments({
           projectId,
-          assignees: memberId,
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ],
           status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
         });
 
         const tasksCompleted = await Task.countDocuments({
           projectId,
-          assignees: memberId,
-          status: { $in: ['completed', 'done'] },
-          completedAt: { $exists: true, $gte: start, $lte: end }
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ],
+          status: 'completed'
         });
 
         const overdueTasks = await Task.countDocuments({
           projectId,
-          assignees: memberId,
-          status: { $nin: ['completed', 'done'] },  // Not completed (includes todo, in-progress, etc.)
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ],
+          status: { $ne: 'completed' },  // Not completed
           dueDate: { $exists: true, $lt: new Date() }  // Has due date in the past
         });
 
         // Calculate average completion time (from assignment to completion)
         const completedTasksForTime = await Task.find({
           projectId,
-          assignees: memberId,
-          status: { $in: ['completed', 'done'] },
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ],
+          status: 'completed',
           assignedAt: { $exists: true },
           completedAt: { $exists: true, $gte: start, $lte: end }
         }).select('assignedAt completedAt title');
@@ -448,6 +762,160 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           limit: 10
         });
 
+        // Get task details for this member - don't filter by date to show all current assignments
+        const memberTasks = await Task.find({
+          projectId,
+          $or: [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ]
+        }).select('title assignees assignedAt completedAt status priority createdAt');
+
+        const tasks = await Promise.all(memberTasks.map(async (task: any) => {
+          const assignedAt = task.assignedAt || task.createdAt;
+          const completedAt = task.completedAt;
+
+          // Calculate time spent: either from assigned to completed, or from assigned to now if not completed
+          let timeSpent = 0;
+          if (completedAt && assignedAt) {
+            timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+          } else if (assignedAt) {
+            timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+          }
+
+          // Build assignment history from audit logs
+          const assignmentHistory: any[] = [];
+
+          // Get all audit logs related to this task (don't filter by date to get complete history)
+          const taskAudits = await AuditLog.find({
+            projectId,
+            entityType: 'task',
+            entityId: task._id.toString(),
+            action: { $in: ['task_created', 'task_updated', 'task_completed'] }
+          }).populate('userId', 'displayName email').sort({ createdAt: 1 });
+
+          // Track assignment changes - map of userId to their assignment start time
+          const assignmentTimes = new Map<string, Date>();
+          let currentAssignees = new Set<string>();
+
+          for (const audit of taskAudits) {
+            const auditUser = audit.userId as any;
+
+            if (audit.action === 'task_created') {
+              // Task was created - record initial assignment
+              if (task.assignees && task.assignees.length > 0) {
+                for (const assigneeId of task.assignees) {
+                  const assignee = await User.findById(assigneeId).select('displayName email');
+                  if (assignee) {
+                    const assigneeIdStr = assigneeId.toString();
+                    currentAssignees.add(assigneeIdStr);
+                    assignmentTimes.set(assigneeIdStr, new Date(audit.createdAt));
+                    assignmentHistory.push({
+                      assignedTo: assigneeIdStr,
+                      assignedToName: assignee.displayName,
+                      assignedToEmail: assignee.email,
+                      assignedAt: audit.createdAt,
+                      timeSpent: 0,
+                      action: 'assigned'
+                    });
+                  }
+                }
+              }
+            } else if (audit.action === 'task_updated') {
+              // Check if assignees changed in this update
+              const metadata = audit.metadata as any;
+              if (metadata && metadata.assigneesChanged) {
+                // Get current assignees from task
+                const newAssignees = task.assignees || [];
+                const newAssigneeSet = new Set<string>(newAssignees.map((a: any) => a.toString()));
+
+                // Find removed assignees (reassigned away)
+                for (const oldAssignee of currentAssignees) {
+                  if (!newAssigneeSet.has(oldAssignee)) {
+                    const assignee = await User.findById(oldAssignee).select('displayName email');
+                    if (assignee) {
+                      // Calculate time this person had the task
+                      const assignStartTime = assignmentTimes.get(oldAssignee);
+                      const timeOnTask = assignStartTime ?
+                        (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
+
+                      assignmentHistory.push({
+                        assignedTo: oldAssignee,
+                        assignedToName: assignee.displayName,
+                        assignedToEmail: assignee.email,
+                        assignedAt: assignStartTime || audit.createdAt,
+                        reassignedAt: audit.createdAt,
+                        timeSpent: Math.round(timeOnTask * 10) / 10,
+                        action: 'reassigned'
+                      });
+
+                      // Remove from tracking
+                      assignmentTimes.delete(oldAssignee);
+                    }
+                  }
+                }
+
+                // Find new assignees
+                for (const newAssigneeId of newAssigneeSet) {
+                  if (!currentAssignees.has(newAssigneeId)) {
+                    const assignee = await User.findById(newAssigneeId).select('displayName email');
+                    if (assignee) {
+                      assignmentTimes.set(newAssigneeId, new Date(audit.createdAt));
+                      assignmentHistory.push({
+                        assignedTo: newAssigneeId,
+                        assignedToName: assignee.displayName,
+                        assignedToEmail: assignee.email,
+                        assignedAt: audit.createdAt,
+                        timeSpent: 0,
+                        action: 'assigned'
+                      });
+                    }
+                  }
+                }
+
+                currentAssignees = newAssigneeSet;
+              }
+            } else if (audit.action === 'task_completed') {
+              // Task completed - calculate final time for all current assignees
+              for (const assigneeId of currentAssignees) {
+                const assignee = await User.findById(assigneeId).select('displayName email');
+                if (assignee) {
+                  const assignStartTime = assignmentTimes.get(assigneeId);
+                  const timeOnTask = assignStartTime ?
+                    (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
+
+                  assignmentHistory.push({
+                    assignedTo: assigneeId,
+                    assignedToName: assignee.displayName,
+                    assignedToEmail: assignee.email,
+                    assignedAt: assignStartTime || audit.createdAt,
+                    completedAt: audit.createdAt,
+                    timeSpent: Math.round(timeOnTask * 10) / 10,
+                    action: 'completed'
+                  });
+
+                  assignmentTimes.delete(assigneeId);
+                }
+              }
+            }
+          }
+
+          return {
+            taskId: task._id.toString(),
+            taskTitle: task.title,
+            assignedTo: memberId,
+            assignedToName: memberData?.displayName || 'Unknown',
+            assignedAt: assignedAt,
+            completedAt: completedAt,
+            timeSpent: Math.round(timeSpent * 10) / 10,
+            status: task.status,
+            priority: task.priority,
+            assignmentHistory: assignmentHistory
+          };
+        }));
+
         return {
           userId: memberId,
           userName: memberData?.displayName || 'Unknown',
@@ -464,7 +932,8 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           avgCompletionTime: Math.round(avgCompletionTime * 10) / 10, // Round to 1 decimal
           productivityScore,
           completionRate: tasksAssigned > 0 ? Math.round((tasksCompleted / tasksAssigned) * 100) : 0,
-          recentActivity: recentActivity.slice(0, 5) // Last 5 actions
+          recentActivity: recentActivity.slice(0, 5), // Last 5 actions
+          tasks: tasks
         };
       })
     );

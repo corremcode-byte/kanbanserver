@@ -51,6 +51,15 @@ declare class EmailService {
         resetLink: string;
         expiresInMinutes?: number;
     }): Promise<boolean>;
+    sendTaskMovedToListNotification(recipients: string[], data: {
+        taskTitle: string;
+        taskId: string;
+        projectName: string;
+        projectId: string;
+        listTitle: string;
+        movedByName: string;
+        priority: string;
+    }): Promise<boolean>;
     sendTestEmail(to: string): Promise<boolean>;
 }
 export declare const emailService: EmailService;

@@ -63,20 +63,25 @@ export const canJoinRoom = async (socket: AuthenticatedSocket, roomType: string,
 
     switch (roomType) {
       case 'project': {
+        // Handle "all" projects case - any authenticated user can join
+        if (roomId === 'all') {
+          return true;
+        }
+
         const { Project } = await import('../models');
         const project = await Project.findById(roomId);
         if (!project) return false;
-        
+
         // Check if user is owner or member
-        return project.ownerId.toString() === userId || 
+        return project.ownerId.toString() === userId ||
                project.members.some((member: any) => member.toString() === userId);
       }
-      
+
       case 'user': {
         // Users can only join their own user room
         return roomId === userId;
       }
-      
+
       default:
         return false;
     }

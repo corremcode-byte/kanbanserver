@@ -74,7 +74,8 @@ const ProjectSchema = new mongoose_1.Schema({
             id: { type: String, required: true },
             title: { type: String, required: true },
             color: { type: String },
-            order: { type: Number, default: 0 }
+            order: { type: Number, default: 0 },
+            assignedMembers: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'User' }]
         }]
 }, {
     timestamps: true,

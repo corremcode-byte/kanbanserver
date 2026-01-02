@@ -14,7 +14,15 @@ const syncFirebaseUser = async (req, res) => {
         }
         let user = await models_1.User.findOne({ firebaseUid });
         if (user) {
-            user.displayName = displayName || user.displayName;
+            if (displayName && displayName !== user.displayName) {
+                const existingUser = await models_1.User.findOne({ displayName, _id: { $ne: user._id } });
+                if (existingUser) {
+                    logger_1.logger.warn(`Attempted to change displayName to existing name: ${displayName}`);
+                }
+                else {
+                    user.displayName = displayName;
+                }
+            }
             user.photoURL = photoURL || user.photoURL;
             user.email = email;
             user.lastLoginAt = new Date();
@@ -25,17 +33,36 @@ const syncFirebaseUser = async (req, res) => {
         user = await models_1.User.findOne({ email });
         if (user && !user.firebaseUid) {
             user.firebaseUid = firebaseUid;
-            user.displayName = displayName || user.displayName;
+            if (displayName && displayName !== user.displayName) {
+                const existingUser = await models_1.User.findOne({ displayName, _id: { $ne: user._id } });
+                if (existingUser) {
+                    logger_1.logger.warn(`Attempted to set displayName to existing name: ${displayName}`);
+                }
+                else {
+                    user.displayName = displayName;
+                }
+            }
             user.photoURL = photoURL || user.photoURL;
             user.lastLoginAt = new Date();
             await user.save();
             logger_1.logger.info(`Existing user linked to Firebase: ${user.email}`);
             return (0, responses_1.successResponse)(res, 'User linked successfully', user);
         }
+        let uniqueDisplayName = displayName || email.split('@')[0];
+        let existingUser = await models_1.User.findOne({ displayName: uniqueDisplayName });
+        if (existingUser) {
+            let counter = 1;
+            while (existingUser) {
+                uniqueDisplayName = `${displayName || email.split('@')[0]}_${counter}`;
+                existingUser = await models_1.User.findOne({ displayName: uniqueDisplayName });
+                counter++;
+            }
+            logger_1.logger.info(`DisplayName was taken, generated unique name: ${uniqueDisplayName}`);
+        }
         user = new models_1.User({
             firebaseUid,
             email,
-            displayName: displayName || email.split('@')[0],
+            displayName: uniqueDisplayName,
             photoURL,
             role,
             isActive: true,
@@ -47,6 +74,9 @@ const syncFirebaseUser = async (req, res) => {
     }
     catch (error) {
         logger_1.logger.error('Firebase user sync error:', error);
+        if (error.code === 11000 && error.keyPattern && error.keyPattern.displayName) {
+            return (0, responses_1.errorResponse)(res, 'This username is already taken. Please choose a different username.', 400);
+        }
         return (0, responses_1.internalServerErrorResponse)(res, 'Failed to sync user');
     }
 };
@@ -234,7 +264,18 @@ const updateProfile = async (req, res) => {
             if (!displayName?.trim()) {
                 return (0, responses_1.errorResponse)(res, 'Display name cannot be empty', 400);
             }
-            updateData.displayName = displayName.trim();
+            const trimmedDisplayName = displayName.trim();
+            const currentUser = await models_1.User.findById(req.user._id);
+            if (currentUser && trimmedDisplayName !== currentUser.displayName) {
+                const existingUser = await models_1.User.findOne({
+                    displayName: trimmedDisplayName,
+                    _id: { $ne: req.user._id }
+                });
+                if (existingUser) {
+                    return (0, responses_1.errorResponse)(res, 'This username is already taken. Please choose a different username.', 400);
+                }
+            }
+            updateData.displayName = trimmedDisplayName;
         }
         if (bio !== undefined) {
             updateData.bio = bio.trim();
@@ -251,6 +292,9 @@ const updateProfile = async (req, res) => {
     }
     catch (error) {
         logger_1.logger.error('Error updating profile:', error);
+        if (error.code === 11000 && error.keyPattern && error.keyPattern.displayName) {
+            return (0, responses_1.errorResponse)(res, 'This username is already taken. Please choose a different username.', 400);
+        }
         return (0, responses_1.internalServerErrorResponse)(res, 'Failed to update profile');
     }
 };

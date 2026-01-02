@@ -83,6 +83,9 @@ const canJoinRoom = async (socket, roomType, roomId) => {
             return false;
         switch (roomType) {
             case 'project': {
+                if (roomId === 'all') {
+                    return true;
+                }
                 const { Project } = await Promise.resolve().then(() => __importStar(require('../models')));
                 const project = await Project.findById(roomId);
                 if (!project)

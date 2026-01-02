@@ -13,5 +13,9 @@ interface AuthenticatedRequest extends Request {
 export declare const getUsers: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const searchUsers: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const getUserById: (req: Request, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getAllUsers: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const toggleUserActiveStatus: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const updateUserRole: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const deleteUser: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export {};
 //# sourceMappingURL=userController.d.ts.map

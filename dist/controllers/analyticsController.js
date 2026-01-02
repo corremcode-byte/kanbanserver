@@ -224,6 +224,195 @@ const getPerformanceMatrix = async (req, res) => {
     try {
         const { projectId } = req.params;
         const { startDate, endDate } = req.query;
+        const end = endDate ? new Date(endDate) : new Date();
+        const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        if (projectId === 'all') {
+            const allProjects = await models_1.Project.find({
+                $or: [
+                    { ownerId: req.user._id },
+                    { owners: req.user._id },
+                    { members: req.user._id }
+                ]
+            }).populate('members', 'displayName email photoURL')
+                .populate('managers', 'displayName email photoURL');
+            if (allProjects.length === 0) {
+                return (0, responses_1.successResponse)(res, 'Performance matrix retrieved successfully', {
+                    projectId: 'all',
+                    projectName: 'All Projects',
+                    startDate: start,
+                    endDate: end,
+                    members: [],
+                    summary: {
+                        totalMembers: 0,
+                        avgProductivityScore: 0,
+                        totalTasksAssigned: 0,
+                        totalTasksCompleted: 0,
+                        totalActionsCount: 0
+                    }
+                });
+            }
+            const memberMap = new Map();
+            for (const project of allProjects) {
+                const allMembers = [...project.members];
+                if (project.managers) {
+                    project.managers.forEach((manager) => {
+                        const managerId = typeof manager === 'object' && manager._id ? manager._id.toString() : manager.toString();
+                        if (!allMembers.some((m) => {
+                            const mId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
+                            return mId === managerId;
+                        })) {
+                            allMembers.push(manager);
+                        }
+                    });
+                }
+                for (const member of allMembers) {
+                    const memberId = typeof member === 'object' && member._id ? member._id.toString() : member.toString();
+                    const memberData = typeof member === 'object' ? member : await models_1.User.findById(member);
+                    if (!memberMap.has(memberId) && memberData) {
+                        memberMap.set(memberId, memberData);
+                    }
+                }
+            }
+            const performanceData = await Promise.all(Array.from(memberMap.entries()).map(async ([memberId, memberData]) => {
+                let totalTasksAssigned = 0;
+                let totalTasksInProgress = 0;
+                let totalTasksCompleted = 0;
+                let totalOverdueTasks = 0;
+                let totalTasksCreated = 0;
+                let totalTasksUpdated = 0;
+                let totalTimeLogged = 0;
+                let totalActionsCount = 0;
+                let totalCompletionTime = 0;
+                let completedTasksCount = 0;
+                for (const project of allProjects) {
+                    const stats = await models_1.AuditLog.getUserStats(project._id.toString(), memberId, start, end);
+                    const tasksAssigned = await models_1.Task.countDocuments({
+                        projectId: project._id,
+                        assignees: memberId
+                    });
+                    const tasksInProgress = await models_1.Task.countDocuments({
+                        projectId: project._id,
+                        assignees: memberId,
+                        status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
+                    });
+                    const tasksCompleted = await models_1.Task.countDocuments({
+                        projectId: project._id,
+                        assignees: memberId,
+                        status: { $in: ['completed', 'done'] },
+                        completedAt: { $exists: true, $gte: start, $lte: end }
+                    });
+                    const overdueTasks = await models_1.Task.countDocuments({
+                        projectId: project._id,
+                        assignees: memberId,
+                        status: { $nin: ['completed', 'done'] },
+                        dueDate: { $exists: true, $lt: new Date() }
+                    });
+                    const completedTasksForTime = await models_1.Task.find({
+                        projectId: project._id,
+                        assignees: memberId,
+                        status: { $in: ['completed', 'done'] },
+                        assignedAt: { $exists: true },
+                        completedAt: { $exists: true, $gte: start, $lte: end }
+                    }).select('assignedAt completedAt');
+                    if (completedTasksForTime.length > 0) {
+                        const projectTime = completedTasksForTime.reduce((sum, task) => {
+                            if (task.completedAt && task.assignedAt) {
+                                const diff = new Date(task.completedAt).getTime() - new Date(task.assignedAt).getTime();
+                                return sum + diff;
+                            }
+                            return sum;
+                        }, 0);
+                        totalCompletionTime += projectTime;
+                        completedTasksCount += completedTasksForTime.length;
+                    }
+                    totalTasksAssigned += tasksAssigned;
+                    totalTasksInProgress += tasksInProgress;
+                    totalTasksCompleted += tasksCompleted;
+                    totalOverdueTasks += overdueTasks;
+                    totalTasksCreated += stats.tasksCreated;
+                    totalTasksUpdated += stats.tasksUpdated;
+                    totalTimeLogged += stats.totalTimeLogged;
+                    totalActionsCount += stats.actionsCount;
+                }
+                let avgCompletionTime = 0;
+                if (completedTasksCount > 0) {
+                    avgCompletionTime = totalCompletionTime / completedTasksCount / (1000 * 60 * 60);
+                }
+                let productivityScore = 0;
+                if (totalTasksAssigned > 0) {
+                    const completionRate = (totalTasksCompleted / totalTasksAssigned) * 35;
+                    let speedBonus = 0;
+                    if (avgCompletionTime > 0 && totalTasksCompleted > 0) {
+                        if (avgCompletionTime < 1) {
+                            speedBonus = 15;
+                        }
+                        else if (avgCompletionTime < 4) {
+                            speedBonus = 12;
+                        }
+                        else if (avgCompletionTime < 8) {
+                            speedBonus = 9;
+                        }
+                        else if (avgCompletionTime < 24) {
+                            speedBonus = 6;
+                        }
+                        else if (avgCompletionTime < 48) {
+                            speedBonus = 3;
+                        }
+                    }
+                    const activityRate = Math.min((totalActionsCount / 100) * 25, 25);
+                    const timeScore = Math.min((totalTimeLogged / 600) * 15, 15);
+                    const overdueDeduction = Math.min(totalOverdueTasks * 2, 10);
+                    productivityScore = Math.round(completionRate + speedBonus + activityRate + timeScore - overdueDeduction);
+                    productivityScore = Math.max(0, Math.min(100, productivityScore));
+                }
+                const recentActivities = [];
+                for (const project of allProjects) {
+                    const activity = await models_1.AuditLog.getProjectActivity(project._id.toString(), {
+                        userId: memberId,
+                        startDate: start,
+                        endDate: end,
+                        limit: 5
+                    });
+                    recentActivities.push(...activity);
+                }
+                recentActivities.sort((a, b) => b.createdAt - a.createdAt);
+                return {
+                    userId: memberId,
+                    userName: memberData?.displayName || 'Unknown',
+                    userEmail: memberData?.email || '',
+                    userPhoto: memberData?.photoURL || null,
+                    tasksAssigned: totalTasksAssigned,
+                    tasksInProgress: totalTasksInProgress,
+                    tasksCompleted: totalTasksCompleted,
+                    overdueTasks: totalOverdueTasks,
+                    tasksCreated: totalTasksCreated,
+                    tasksUpdated: totalTasksUpdated,
+                    totalTimeLogged: totalTimeLogged,
+                    actionsCount: totalActionsCount,
+                    avgCompletionTime: Math.round(avgCompletionTime * 10) / 10,
+                    productivityScore,
+                    completionRate: totalTasksAssigned > 0 ? Math.round((totalTasksCompleted / totalTasksAssigned) * 100) : 0,
+                    recentActivity: recentActivities.slice(0, 5)
+                };
+            }));
+            performanceData.sort((a, b) => b.productivityScore - a.productivityScore);
+            return (0, responses_1.successResponse)(res, 'Performance matrix retrieved successfully', {
+                projectId: 'all',
+                projectName: 'All Projects',
+                startDate: start,
+                endDate: end,
+                members: performanceData,
+                summary: {
+                    totalMembers: performanceData.length,
+                    avgProductivityScore: performanceData.length > 0
+                        ? Math.round(performanceData.reduce((sum, m) => sum + m.productivityScore, 0) / performanceData.length)
+                        : 0,
+                    totalTasksAssigned: performanceData.reduce((sum, m) => sum + m.tasksAssigned, 0),
+                    totalTasksCompleted: performanceData.reduce((sum, m) => sum + m.tasksCompleted, 0),
+                    totalActionsCount: performanceData.reduce((sum, m) => sum + m.actionsCount, 0)
+                }
+            });
+        }
         const project = await models_1.Project.findById(projectId)
             .populate('members', 'displayName email photoURL')
             .populate('managers', 'displayName email photoURL');
@@ -245,8 +434,6 @@ const getPerformanceMatrix = async (req, res) => {
         if (!isOwner && !isInOwners && !isMember) {
             return (0, responses_1.errorResponse)(res, 'Access denied to this project', 403);
         }
-        const end = endDate ? new Date(endDate) : new Date();
-        const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         const allMembers = [...project.members];
         if (project.managers) {
             project.managers.forEach((manager) => {

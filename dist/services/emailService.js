@@ -459,6 +459,76 @@ class EmailService {
             text
         });
     }
+    async sendTaskMovedToListNotification(recipients, data) {
+        if (!recipients || recipients.length === 0) {
+            return false;
+        }
+        const appUrl = process.env.APP_URL || 'http://localhost:3000';
+        const taskUrl = `${appUrl}/projects/${data.projectId}`;
+        const priorityColors = {
+            low: '#10B981',
+            medium: '#F59E0B',
+            high: '#EF4444',
+            critical: '#DC2626'
+        };
+        const priorityColor = priorityColors[data.priority.toLowerCase()] || '#6B7280';
+        const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #8B5CF6; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #8B5CF6; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px; }
+            .priority { display: inline-block; padding: 4px 12px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; }
+            .list-badge { display: inline-block; padding: 6px 16px; background-color: #E0E7FF; color: #4C1D95; border-radius: 6px; font-weight: bold; margin: 10px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📋 Task Moved to Your List</h1>
+            </div>
+            <div class="content">
+              <h2>${data.taskTitle}</h2>
+              <p><strong>Project:</strong> ${data.projectName}</p>
+              <p><strong>Moved by:</strong> ${data.movedByName}</p>
+              <p><strong>Priority:</strong> <span class="priority" style="background-color: ${priorityColor}">${data.priority.toUpperCase()}</span></p>
+              <div class="list-badge">📌 ${data.listTitle}</div>
+              <p>A task has been moved to <strong>${data.listTitle}</strong>, a list you're assigned to monitor. You can view the task details and take action if needed.</p>
+              <a href="${taskUrl}" class="button">View Task</a>
+            </div>
+            <div class="footer">
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+        const text = `
+      Task Moved to Your List: ${data.taskTitle}
+
+      Project: ${data.projectName}
+      Moved by: ${data.movedByName}
+      List: ${data.listTitle}
+      Priority: ${data.priority}
+
+      A task has been moved to ${data.listTitle}, a list you're assigned to monitor.
+
+      View task: ${taskUrl}
+
+      This is an automated notification from Kanban. Please do not reply to this email.
+    `;
+        return this.sendEmail({
+            to: recipients,
+            subject: `Task moved to ${data.listTitle} - ${data.projectName}`,
+            html,
+            text
+        });
+    }
     async sendTestEmail(to) {
         return this.sendEmail({
             to,

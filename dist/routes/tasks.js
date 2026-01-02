@@ -43,6 +43,6 @@ router.get('/', tasksController.getTasks);
 router.post('/', (0, permissions_1.checkPermission)('canCreateTasks'), tasksController.createTask);
 router.put('/:id', permissions_1.checkCanEditTask, tasksController.updateTask);
 router.delete('/:id', permissions_1.checkCanDeleteTask, tasksController.deleteTask);
-router.post('/reorder', permissions_1.checkCanEditTask, tasksController.reorderTasks);
+router.post('/reorder', tasksController.reorderTasks);
 exports.default = router;
 //# sourceMappingURL=tasks.js.map

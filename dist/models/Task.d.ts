@@ -23,7 +23,7 @@ export interface ITask extends Document {
     createdBy: mongoose.Types.ObjectId;
     dueDate?: Date;
     completedAt?: Date;
-    reminderFrequency?: 'none' | '1min' | '1hour' | '3hours' | '12hours' | '24hours';
+    reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours';
     lastReminderSent?: Date;
     attachments: ITaskAttachment[];
     order: number;

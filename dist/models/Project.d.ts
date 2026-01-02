@@ -13,6 +13,7 @@ export interface IProject extends Document {
         title: string;
         color?: string;
         order: number;
+        assignedMembers?: mongoose.Types.ObjectId[];
     }>;
     createdAt: Date;
     updatedAt: Date;

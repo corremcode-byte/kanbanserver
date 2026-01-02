@@ -29,15 +29,24 @@ export const syncFirebaseUser = async (req: AuthenticatedRequest, res: Response)
 
     // Check if user already exists by Firebase UID
     let user = await User.findOne({ firebaseUid });
-    
+
     if (user) {
-      // Update existing user
-      user.displayName = displayName || user.displayName;
+      // Update existing user (but don't change displayName if it would cause a conflict)
+      if (displayName && displayName !== user.displayName) {
+        // Check if new displayName is already taken by another user
+        const existingUser = await User.findOne({ displayName, _id: { $ne: user._id } });
+        if (existingUser) {
+          logger.warn(`Attempted to change displayName to existing name: ${displayName}`);
+          // Keep the old displayName
+        } else {
+          user.displayName = displayName;
+        }
+      }
       user.photoURL = photoURL || user.photoURL;
       user.email = email;
       user.lastLoginAt = new Date();
       await user.save();
-      
+
       logger.info(`Firebase user synced: ${user.email}`);
       return successResponse(res, 'User synced successfully', user);
     }
@@ -47,20 +56,44 @@ export const syncFirebaseUser = async (req: AuthenticatedRequest, res: Response)
     if (user && !user.firebaseUid) {
       // Update existing user with Firebase UID
       user.firebaseUid = firebaseUid;
-      user.displayName = displayName || user.displayName;
+      if (displayName && displayName !== user.displayName) {
+        // Check if new displayName is already taken
+        const existingUser = await User.findOne({ displayName, _id: { $ne: user._id } });
+        if (existingUser) {
+          logger.warn(`Attempted to set displayName to existing name: ${displayName}`);
+          // Keep the old displayName or generate a new one
+        } else {
+          user.displayName = displayName;
+        }
+      }
       user.photoURL = photoURL || user.photoURL;
       user.lastLoginAt = new Date();
       await user.save();
-      
+
       logger.info(`Existing user linked to Firebase: ${user.email}`);
       return successResponse(res, 'User linked successfully', user);
     }
 
-    // Create new user
+    // Create new user - ensure displayName is unique
+    let uniqueDisplayName = displayName || email.split('@')[0];
+
+    // Check if displayName is already taken
+    let existingUser = await User.findOne({ displayName: uniqueDisplayName });
+    if (existingUser) {
+      // Generate a unique displayName by appending a number
+      let counter = 1;
+      while (existingUser) {
+        uniqueDisplayName = `${displayName || email.split('@')[0]}_${counter}`;
+        existingUser = await User.findOne({ displayName: uniqueDisplayName });
+        counter++;
+      }
+      logger.info(`DisplayName was taken, generated unique name: ${uniqueDisplayName}`);
+    }
+
     user = new User({
       firebaseUid,
       email,
-      displayName: displayName || email.split('@')[0],
+      displayName: uniqueDisplayName,
       photoURL,
       role,
       isActive: true,
@@ -71,8 +104,14 @@ export const syncFirebaseUser = async (req: AuthenticatedRequest, res: Response)
     logger.info(`New Firebase user created: ${user.email}`);
 
     return successResponse(res, 'User created successfully', user);
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Firebase user sync error:', error);
+
+    // Handle duplicate key error specifically
+    if (error.code === 11000 && error.keyPattern && error.keyPattern.displayName) {
+      return errorResponse(res, 'This username is already taken. Please choose a different username.', 400);
+    }
+
     return internalServerErrorResponse(res, 'Failed to sync user');
   }
 };
@@ -290,7 +329,23 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
       if (!displayName?.trim()) {
         return errorResponse(res, 'Display name cannot be empty', 400);
       }
-      updateData.displayName = displayName.trim();
+
+      const trimmedDisplayName = displayName.trim();
+
+      // Check if displayName is being changed and if new name is already taken
+      const currentUser = await User.findById(req.user._id);
+      if (currentUser && trimmedDisplayName !== currentUser.displayName) {
+        const existingUser = await User.findOne({
+          displayName: trimmedDisplayName,
+          _id: { $ne: req.user._id }
+        });
+
+        if (existingUser) {
+          return errorResponse(res, 'This username is already taken. Please choose a different username.', 400);
+        }
+      }
+
+      updateData.displayName = trimmedDisplayName;
     }
 
     if (bio !== undefined) {
@@ -313,8 +368,14 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
 
     logger.info(`Profile updated for user: ${updatedUser.email}`);
     return successResponse(res, 'Profile updated successfully', updatedUser);
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Error updating profile:', error);
+
+    // Handle duplicate key error
+    if (error.code === 11000 && error.keyPattern && error.keyPattern.displayName) {
+      return errorResponse(res, 'This username is already taken. Please choose a different username.', 400);
+    }
+
     return internalServerErrorResponse(res, 'Failed to update profile');
   }
 };

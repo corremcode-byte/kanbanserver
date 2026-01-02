@@ -636,9 +636,11 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
               });
             }
 
-            // Also check if the list title itself is an email address
+            // Also check if the list title itself is an email address or username
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (emailRegex.test(targetColumn.title)) {
+            const isEmail = emailRegex.test(targetColumn.title);
+
+            if (isEmail) {
               logger.info(`List title "${targetColumn.title}" appears to be an email address`);
 
               // Check if this email belongs to a project member
@@ -655,27 +657,62 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
                   logger.info(`Added list title email "${userByEmail.email}" to notification recipients`);
                 }
               }
+            } else {
+              // Check if the list title is a username (displayName)
+              logger.info(`List title "${targetColumn.title}" is not an email, checking if it's a username`);
+
+              const userByDisplayName = await User.findOne({ displayName: targetColumn.title }).select('email displayName _id');
+
+              if (userByDisplayName) {
+                logger.info(`Found user with displayName "${targetColumn.title}": ${userByDisplayName.email}`);
+
+                // Check if user is a project member, manager, or owner
+                const isProjectMember = projectWithColumns.members.some((m: any) => m.toString() === userByDisplayName._id.toString()) ||
+                                       projectWithColumns.managers?.some((m: any) => m.toString() === userByDisplayName._id.toString()) ||
+                                       projectWithColumns.ownerId.toString() === userByDisplayName._id.toString();
+
+                if (isProjectMember && userByDisplayName.email !== req.user.email && !memberEmails.includes(userByDisplayName.email)) {
+                  memberEmails.push(userByDisplayName.email);
+                  logger.info(`Added username "${targetColumn.title}" (email: ${userByDisplayName.email}) to notification recipients`);
+                }
+              } else {
+                logger.info(`No user found with displayName "${targetColumn.title}"`);
+              }
             }
 
             logger.info(`Member emails to notify: ${JSON.stringify(memberEmails)}`);
 
             if (memberEmails.length > 0) {
-              // Send notification email
-              await emailService.sendTaskMovedToListNotification(memberEmails, {
-                taskTitle: task.title,
-                taskId: task._id.toString(),
-                projectName: projectWithColumns.name,
-                projectId: projectWithColumns._id.toString(),
-                listTitle: targetColumn.title,
-                movedByName: req.user.displayName || req.user.email,
-                priority: task.priority
+              // Fetch users to check notification preferences
+              const User = (await import('../models/User')).default;
+              const allUsers = await User.find({ email: { $in: memberEmails } }).select('_id email displayName settings');
+              const oldList = projectWithColumns.columns?.find((col: any) => col.id === existingTask.listId);
+
+              // Filter users who have email notifications enabled for task moved
+              const usersWithEmailEnabled = allUsers.filter(user => {
+                const emailEnabled = user.settings?.notifications?.emailNotifications !== false;
+                const taskMovedEmailEnabled = user.settings?.notifications?.taskMovedEmail !== false;
+                return emailEnabled && taskMovedEmailEnabled;
               });
-              logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${memberEmails.length} members`);
+
+              const emailRecipients = usersWithEmailEnabled.map(u => u.email);
+
+              if (emailRecipients.length > 0) {
+                // Send notification email
+                await emailService.sendTaskMovedToListNotification(emailRecipients, {
+                  taskTitle: task.title,
+                  taskId: task._id.toString(),
+                  projectName: projectWithColumns.name,
+                  projectId: projectWithColumns._id.toString(),
+                  listTitle: targetColumn.title,
+                  movedByName: req.user.displayName || req.user.email,
+                  priority: task.priority
+                });
+                logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${emailRecipients.length} members`);
+              }
 
               // Send real-time socket notifications for task moved
-              const User = (await import('../models/User')).default;
-              const usersToNotify = await User.find({ email: { $in: memberEmails } }).select('_id email displayName');
-              const oldList = projectWithColumns.columns?.find((col: any) => col.id === existingTask.listId);
+              const usersToNotify = allUsers;
 
               usersToNotify.forEach(user => {
                 broadcastToUser(io, user._id.toString(), 'notification:task:moved', {
@@ -696,6 +733,32 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
                 });
               });
               logger.info(`Sent real-time task moved notifications to ${usersToNotify.length} users`);
+
+              // Send push notifications for task moved
+              // Filter users who have push notifications enabled for task moved
+              const { pushNotificationService } = await import('../services/pushNotificationService');
+              const usersWithPushEnabled = usersToNotify.filter(user => {
+                const pushEnabled = user.settings?.notifications?.pushNotifications !== false;
+                const taskMovedPushEnabled = user.settings?.notifications?.taskMovedPush !== false;
+                return pushEnabled && taskMovedPushEnabled;
+              });
+
+              for (const user of usersWithPushEnabled) {
+                try {
+                  await pushNotificationService.sendTaskMovedNotification(
+                    user._id.toString(),
+                    task.title,
+                    oldList?.title || existingTask.listId || existingTask.status,
+                    targetColumn.title,
+                    req.user.displayName || req.user.email,
+                    task.projectId.toString(),
+                    task._id.toString()
+                  );
+                } catch (pushError) {
+                  logger.error(`Failed to send push notification to user ${user._id}:`, pushError);
+                }
+              }
+              logger.info(`Sent push notifications for task moved to ${usersWithPushEnabled.length} users`);
             } else {
               logger.info(`No member emails to notify (all filtered out or empty)`);
             }
@@ -718,13 +781,19 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
         // Fetch user details for the newly assigned users
         const User = (await import('../models/User')).default;
-        const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName');
+        const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName settings');
 
         logger.info(`Found ${users.length} users to notify: ${users.map(u => u.email).join(', ')}`);
 
         // Filter out the person who assigned themselves and collect email addresses
+        // Also check if user has email notifications enabled for task assignments
         const recipientEmails = users
           .filter(user => user._id.toString() !== req.user._id)
+          .filter(user => {
+            const emailEnabled = user.settings?.notifications?.emailNotifications !== false;
+            const taskAssignedEmailEnabled = user.settings?.notifications?.taskAssignedEmail !== false;
+            return emailEnabled && taskAssignedEmailEnabled;
+          })
           .map(user => user.email);
 
         if (recipientEmails.length > 0) {
@@ -742,7 +811,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
           );
           logger.info(`Sent assignment notification for task "${task.title}" to ${recipientEmails.length} users: ${recipientEmails.join(', ')}`);
         } else {
-          logger.info(`No users to notify (user assigned themselves)`);
+          logger.info(`No users to notify (user assigned themselves or email notifications disabled)`);
         }
 
         // Send real-time socket notifications to newly assigned users (excluding self)
@@ -763,6 +832,30 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
           });
         });
         logger.info(`Sent real-time notifications to ${usersToNotify.length} users`);
+
+        // Send push notifications to newly assigned users (excluding self)
+        // Check if user has push notifications enabled for task assignments
+        const { pushNotificationService } = await import('../services/pushNotificationService');
+        const usersWithPushEnabled = usersToNotify.filter(user => {
+          const pushEnabled = user.settings?.notifications?.pushNotifications !== false;
+          const taskAssignedPushEnabled = user.settings?.notifications?.taskAssignedPush !== false;
+          return pushEnabled && taskAssignedPushEnabled;
+        });
+
+        for (const user of usersWithPushEnabled) {
+          try {
+            await pushNotificationService.sendTaskAssignedNotification(
+              user._id.toString(),
+              task.title,
+              req.user.displayName || req.user.email,
+              task.projectId.toString(),
+              task._id.toString()
+            );
+          } catch (pushError) {
+            logger.error(`Failed to send push notification to user ${user._id}:`, pushError);
+          }
+        }
+        logger.info(`Sent push notifications to ${usersWithPushEnabled.length} users`);
       } catch (emailError) {
         logger.error('Error sending assignment notification emails:', emailError);
         // Don't fail the request if email fails

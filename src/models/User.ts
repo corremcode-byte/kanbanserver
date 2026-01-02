@@ -1,5 +1,13 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
+export interface IPushSubscription {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
 export interface IUser extends Document {
   firebaseUid: string;
   email: string;
@@ -9,6 +17,7 @@ export interface IUser extends Document {
   role: 'admin' | 'manager' | 'member';
   isActive: boolean;
   lastLoginAt: Date;
+  pushSubscriptions?: IPushSubscription[];
   settings?: {
     appearance?: {
       theme?: 'light' | 'dark' | 'system';
@@ -19,6 +28,13 @@ export interface IUser extends Document {
       emailNotifications?: boolean;
       taskDeadlineReminders?: boolean;
       dailyDigest?: boolean;
+      pushNotifications?: boolean;
+      taskAssignedEmail?: boolean;
+      taskAssignedPush?: boolean;
+      taskMovedEmail?: boolean;
+      taskMovedPush?: boolean;
+      taskCompletedEmail?: boolean;
+      taskCompletedPush?: boolean;
     };
     boardPreferences?: {
       defaultView?: 'kanban' | 'list';
@@ -58,7 +74,9 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   displayName: {
     type: String,
     required: true,
-    trim: true
+    unique: true,
+    trim: true,
+    index: true
   },
   photoURL: {
     type: String,
@@ -82,6 +100,22 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     type: Date,
     default: Date.now
   },
+  pushSubscriptions: [{
+    endpoint: {
+      type: String,
+      required: true
+    },
+    keys: {
+      p256dh: {
+        type: String,
+        required: true
+      },
+      auth: {
+        type: String,
+        required: true
+      }
+    }
+  }],
   settings: {
     appearance: {
       theme: {
@@ -109,6 +143,34 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
         default: true
       },
       dailyDigest: {
+        type: Boolean,
+        default: false
+      },
+      pushNotifications: {
+        type: Boolean,
+        default: true
+      },
+      taskAssignedEmail: {
+        type: Boolean,
+        default: true
+      },
+      taskAssignedPush: {
+        type: Boolean,
+        default: true
+      },
+      taskMovedEmail: {
+        type: Boolean,
+        default: true
+      },
+      taskMovedPush: {
+        type: Boolean,
+        default: true
+      },
+      taskCompletedEmail: {
+        type: Boolean,
+        default: false
+      },
+      taskCompletedPush: {
         type: Boolean,
         default: false
       }

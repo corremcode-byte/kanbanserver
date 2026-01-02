@@ -40,5 +40,9 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 router.get('/', usersController.getUsers);
 router.get('/search', usersController.searchUsers);
+router.get('/all', usersController.getAllUsers);
+router.put('/:userId/toggle-active', usersController.toggleUserActiveStatus);
+router.put('/:userId/role', usersController.updateUserRole);
+router.delete('/:userId', usersController.deleteUser);
 exports.default = router;
 //# sourceMappingURL=user.js.map

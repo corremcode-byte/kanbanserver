@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
         console.log('Login successful for user:', user.email);
         return (0, responses_1.successResponse)(res, 'Login successful', {
             token,
-            user: { _id: user._id, email: user.email, displayName: user.displayName }
+            user: { _id: user._id, email: user.email, displayName: user.displayName, role: user.role }
         });
     }
     catch (err) {
@@ -72,9 +72,12 @@ router.post('/login', async (req, res) => {
 });
 router.post('/signup', async (req, res) => {
     try {
-        const { idToken, displayName } = req.body;
+        const { idToken, displayName, role = 'member' } = req.body;
         if (!idToken)
             return (0, responses_1.errorResponse)(res, 'ID token required', 400);
+        if (role && !['admin', 'member'].includes(role)) {
+            return (0, responses_1.errorResponse)(res, 'Invalid role. Must be either admin or member', 400);
+        }
         const decoded = await firebase_1.default.auth().verifyIdToken(idToken);
         if (!decoded.uid || !decoded.email)
             return (0, responses_1.errorResponse)(res, 'Invalid Firebase token', 401);
@@ -85,7 +88,7 @@ router.post('/signup', async (req, res) => {
                 email: decoded.email,
                 displayName: displayName || decoded.name || decoded.email.split('@')[0],
                 photoURL: decoded.picture,
-                role: 'member',
+                role: role || 'member',
                 isActive: true,
                 lastLoginAt: new Date(),
             });
@@ -106,7 +109,7 @@ router.post('/signup', async (req, res) => {
         });
         return (0, responses_1.successResponse)(res, 'Signup successful', {
             token,
-            user: { _id: user._id, email: user.email, displayName: user.displayName }
+            user: { _id: user._id, email: user.email, displayName: user.displayName, role: user.role }
         });
     }
     catch (err) {

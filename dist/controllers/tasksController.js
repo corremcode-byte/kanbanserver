@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reorderTasks = exports.deleteTask = exports.updateTask = exports.createTask = exports.getTask = exports.getTasks = void 0;
 const models_1 = require("../models");
@@ -339,6 +372,8 @@ const updateTask = async (req, res) => {
         const projectMemberIds = project.members.map(m => m.toString());
         const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
         const allValidUserIds = [...projectMemberIds, ...projectManagerIds];
+        const oldAssignees = existingTask.assignees ? existingTask.assignees.map((a) => a.toString()) : [];
+        let newlyAssignedUsers = [];
         if (updates.assignees && Array.isArray(updates.assignees) && updates.assignees.length > 0) {
             const validatedAssignees = updates.assignees.filter((userId) => allValidUserIds.includes(userId));
             if (validatedAssignees.length !== updates.assignees.length) {
@@ -349,6 +384,7 @@ const updateTask = async (req, res) => {
             if (!existingTask.assignedAt && validatedAssignees.length > 0) {
                 updates.assignedAt = new Date();
             }
+            newlyAssignedUsers = validatedAssignees.filter((userId) => !oldAssignees.includes(userId));
         }
         if (updates.assignedTo && !updates.assignees) {
             if (!allValidUserIds.includes(updates.assignedTo)) {
@@ -357,6 +393,9 @@ const updateTask = async (req, res) => {
             updates.assignees = [updates.assignedTo];
             if (!existingTask.assignedAt) {
                 updates.assignedAt = new Date();
+            }
+            if (!oldAssignees.includes(updates.assignedTo)) {
+                newlyAssignedUsers = [updates.assignedTo];
             }
         }
         const normalizeStatus = (status) => {
@@ -390,7 +429,7 @@ const updateTask = async (req, res) => {
             logger_1.logger.info(`Task "${existingTask.title}" moved back from completed status`);
         }
         if (updates.reminderFrequency !== undefined) {
-            const validFrequencies = ['none', '1min', '1hour', '3hours', '12hours', '24hours'];
+            const validFrequencies = ['none', '1hour', '3hours', '12hours', '24hours', '48hours'];
             if (!validFrequencies.includes(updates.reminderFrequency)) {
                 return (0, responses_1.errorResponse)(res, 'Invalid reminder frequency', 400);
             }
@@ -446,6 +485,142 @@ const updateTask = async (req, res) => {
                 message: 'Task completed - performance metrics updated'
             });
             logger_1.logger.info(`Performance update triggered: Task ${task.title} completed by ${req.user.displayName}`);
+        }
+        const listChanged = updates.listId && updates.listId !== existingTask.listId;
+        logger_1.logger.info(`Task update - listChanged: ${listChanged}, updates.listId: ${updates.listId}, existingTask.listId: ${existingTask.listId}`);
+        if (listChanged) {
+            try {
+                const User = (await Promise.resolve().then(() => __importStar(require('../models/User')))).default;
+                const projectWithColumns = await models_1.Project.findById(existingTask.projectId);
+                logger_1.logger.info(`Project columns: ${JSON.stringify(projectWithColumns?.columns || [])}`);
+                if (projectWithColumns) {
+                    const targetColumn = projectWithColumns.columns.find((col) => col.id === updates.listId);
+                    logger_1.logger.info(`Target column found: ${targetColumn ? targetColumn.title : 'NOT FOUND'}`);
+                    logger_1.logger.info(`Target column assignedMembers: ${JSON.stringify(targetColumn?.assignedMembers || [])}`);
+                    if (targetColumn) {
+                        const memberEmails = [];
+                        if (targetColumn.assignedMembers && targetColumn.assignedMembers.length > 0) {
+                            const assignedMemberIds = targetColumn.assignedMembers.map((id) => id.toString());
+                            const assignedMembersData = await User.find({
+                                _id: { $in: assignedMemberIds }
+                            }).select('email displayName');
+                            logger_1.logger.info(`Found ${assignedMembersData.length} assigned members for the target column`);
+                            assignedMembersData.forEach((member) => {
+                                if (member.email && member.email !== req.user.email) {
+                                    memberEmails.push(member.email);
+                                }
+                            });
+                        }
+                        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                        if (emailRegex.test(targetColumn.title)) {
+                            logger_1.logger.info(`List title "${targetColumn.title}" appears to be an email address`);
+                            const userByEmail = await User.findOne({ email: targetColumn.title }).select('email displayName _id');
+                            if (userByEmail) {
+                                const isProjectMember = projectWithColumns.members.some((m) => m.toString() === userByEmail._id.toString()) ||
+                                    projectWithColumns.managers?.some((m) => m.toString() === userByEmail._id.toString()) ||
+                                    projectWithColumns.ownerId.toString() === userByEmail._id.toString();
+                                if (isProjectMember && userByEmail.email !== req.user.email && !memberEmails.includes(userByEmail.email)) {
+                                    memberEmails.push(userByEmail.email);
+                                    logger_1.logger.info(`Added list title email "${userByEmail.email}" to notification recipients`);
+                                }
+                            }
+                        }
+                        logger_1.logger.info(`Member emails to notify: ${JSON.stringify(memberEmails)}`);
+                        if (memberEmails.length > 0) {
+                            await emailService_1.emailService.sendTaskMovedToListNotification(memberEmails, {
+                                taskTitle: task.title,
+                                taskId: task._id.toString(),
+                                projectName: projectWithColumns.name,
+                                projectId: projectWithColumns._id.toString(),
+                                listTitle: targetColumn.title,
+                                movedByName: req.user.displayName || req.user.email,
+                                priority: task.priority
+                            });
+                            logger_1.logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${memberEmails.length} members`);
+                            const User = (await Promise.resolve().then(() => __importStar(require('../models/User')))).default;
+                            const usersToNotify = await User.find({ email: { $in: memberEmails } }).select('_id email displayName');
+                            const oldList = projectWithColumns.columns?.find((col) => col.id === existingTask.listId);
+                            usersToNotify.forEach(user => {
+                                (0, socketHandlers_1.broadcastToUser)(io, user._id.toString(), 'notification:task:moved', {
+                                    task: {
+                                        _id: task._id,
+                                        title: task.title,
+                                        projectId: task.projectId,
+                                        listId: task.listId,
+                                        status: task.status
+                                    },
+                                    fromList: oldList?.title || existingTask.listId || existingTask.status,
+                                    toList: targetColumn.title,
+                                    movedBy: {
+                                        displayName: req.user.displayName,
+                                        name: req.user.displayName,
+                                        email: req.user.email
+                                    }
+                                });
+                            });
+                            logger_1.logger.info(`Sent real-time task moved notifications to ${usersToNotify.length} users`);
+                        }
+                        else {
+                            logger_1.logger.info(`No member emails to notify (all filtered out or empty)`);
+                        }
+                    }
+                    else {
+                        logger_1.logger.info(`Target column not found`);
+                    }
+                }
+                else {
+                    logger_1.logger.warn(`Project not found when trying to send list notification`);
+                }
+            }
+            catch (emailError) {
+                logger_1.logger.error('Error sending list notification email:', emailError);
+            }
+        }
+        if (newlyAssignedUsers.length > 0) {
+            try {
+                logger_1.logger.info(`Sending assignment notifications to ${newlyAssignedUsers.length} newly assigned users`);
+                const User = (await Promise.resolve().then(() => __importStar(require('../models/User')))).default;
+                const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName');
+                logger_1.logger.info(`Found ${users.length} users to notify: ${users.map(u => u.email).join(', ')}`);
+                const recipientEmails = users
+                    .filter(user => user._id.toString() !== req.user._id)
+                    .map(user => user.email);
+                if (recipientEmails.length > 0) {
+                    await emailService_1.emailService.sendTaskAssignedNotification(recipientEmails, {
+                        taskTitle: task.title,
+                        taskId: task._id.toString(),
+                        projectName: project.name,
+                        projectId: project._id.toString(),
+                        assignedByName: req.user.displayName || req.user.email,
+                        priority: task.priority,
+                        dueDate: task.dueDate
+                    });
+                    logger_1.logger.info(`Sent assignment notification for task "${task.title}" to ${recipientEmails.length} users: ${recipientEmails.join(', ')}`);
+                }
+                else {
+                    logger_1.logger.info(`No users to notify (user assigned themselves)`);
+                }
+                const usersToNotify = users.filter(user => user._id.toString() !== req.user._id);
+                usersToNotify.forEach(user => {
+                    (0, socketHandlers_1.broadcastToUser)(io, user._id.toString(), 'notification:task:assigned', {
+                        task: {
+                            _id: task._id,
+                            title: task.title,
+                            projectId: task.projectId,
+                            assignedBy: {
+                                displayName: req.user.displayName,
+                                name: req.user.displayName,
+                                email: req.user.email
+                            }
+                        },
+                        assignedTo: user._id.toString()
+                    });
+                });
+                logger_1.logger.info(`Sent real-time notifications to ${usersToNotify.length} users`);
+            }
+            catch (emailError) {
+                logger_1.logger.error('Error sending assignment notification emails:', emailError);
+            }
         }
         logger_1.logger.info(`Task updated: ${task.title}`);
         return (0, responses_1.successResponse)(res, 'Task updated successfully', task);
@@ -504,11 +679,16 @@ const deleteTask = async (req, res) => {
 exports.deleteTask = deleteTask;
 const reorderTasks = async (req, res) => {
     try {
+        logger_1.logger.info('=== REORDER TASKS REQUEST ===');
+        logger_1.logger.info(`Request body: ${JSON.stringify(req.body, null, 2)}`);
+        logger_1.logger.info(`User: ${req.user?.email || 'unknown'}`);
         const { projectId, tasks } = req.body;
         if (!projectId) {
+            logger_1.logger.error('Missing projectId in request');
             return (0, responses_1.errorResponse)(res, 'Project ID is required', 400);
         }
         if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+            logger_1.logger.error(`Invalid tasks array - tasks: ${JSON.stringify(tasks)}, isArray: ${Array.isArray(tasks)}, length: ${tasks?.length}`);
             return (0, responses_1.errorResponse)(res, 'Tasks array is required', 400);
         }
         const project = await models_1.Project.findById(projectId);

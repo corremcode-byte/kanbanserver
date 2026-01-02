@@ -225,6 +225,10 @@ const getProject = async (req, res) => {
 exports.getProject = getProject;
 const createProject = async (req, res) => {
     try {
+        const user = await models_1.User.findById(req.user._id);
+        if (!user || user.role !== 'admin') {
+            return (0, responses_1.errorResponse)(res, 'Only admin users can create projects', 403);
+        }
         const { name, description, members = [], lists } = req.body;
         if (!name?.trim()) {
             return (0, responses_1.errorResponse)(res, 'Project name is required', 400);
@@ -250,7 +254,8 @@ const createProject = async (req, res) => {
                 id: list.title.toLowerCase().replace(/\s+/g, '-'),
                 title: list.title.trim(),
                 color: list.color || '#6B7280',
-                order: index
+                order: index,
+                assignedMembers: list.assignedMembers || []
             }));
         }
         const creatorId = req.user._id;
@@ -891,7 +896,7 @@ exports.addList = addList;
 const updateList = async (req, res) => {
     try {
         const { id, listId } = req.params;
-        const { title, color } = req.body;
+        const { title, color, assignedMembers } = req.body;
         const project = await models_1.Project.findById(id);
         if (!project) {
             return (0, responses_1.notFoundResponse)(res, 'Project not found');
@@ -912,6 +917,9 @@ const updateList = async (req, res) => {
         }
         if (color !== undefined) {
             project.columns[listIndex].color = color;
+        }
+        if (assignedMembers !== undefined) {
+            project.columns[listIndex].assignedMembers = assignedMembers;
         }
         await project.save();
         const io = (0, socket_1.getIO)();

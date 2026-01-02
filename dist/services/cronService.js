@@ -24,7 +24,7 @@ class CronService {
         this.tasks.clear();
     }
     startTaskDeadlineReminders() {
-        const task = node_cron_1.default.schedule('* * * * *', async () => {
+        const task = node_cron_1.default.schedule('0 * * * *', async () => {
             try {
                 logger_1.logger.info('Running task deadline reminder check...');
                 await this.checkTaskDeadlines();
@@ -34,7 +34,7 @@ class CronService {
             }
         });
         this.tasks.set('taskDeadlineReminders', task);
-        logger_1.logger.info('Task deadline reminder cron job scheduled (runs every minute for testing)');
+        logger_1.logger.info('Task deadline reminder cron job scheduled (runs every hour)');
     }
     async checkTaskDeadlines() {
         const now = new Date();
@@ -57,9 +57,6 @@ class CronService {
                 let shouldSend = false;
                 let frequencyMinutes = 1440;
                 switch (reminderFreq) {
-                    case '1min':
-                        frequencyMinutes = 1;
-                        break;
                     case '1hour':
                         frequencyMinutes = 60;
                         break;
@@ -71,6 +68,9 @@ class CronService {
                         break;
                     case '24hours':
                         frequencyMinutes = 1440;
+                        break;
+                    case '48hours':
+                        frequencyMinutes = 2880;
                         break;
                 }
                 if (lastReminder) {
