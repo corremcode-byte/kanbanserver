@@ -671,6 +671,31 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
                 priority: task.priority
               });
               logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${memberEmails.length} members`);
+
+              // Send real-time socket notifications for task moved
+              const User = (await import('../models/User')).default;
+              const usersToNotify = await User.find({ email: { $in: memberEmails } }).select('_id email displayName');
+              const oldList = projectWithColumns.columns?.find((col: any) => col.id === existingTask.listId);
+
+              usersToNotify.forEach(user => {
+                broadcastToUser(io, user._id.toString(), 'notification:task:moved', {
+                  task: {
+                    _id: task._id,
+                    title: task.title,
+                    projectId: task.projectId,
+                    listId: task.listId,
+                    status: task.status
+                  },
+                  fromList: oldList?.title || existingTask.listId || existingTask.status,
+                  toList: targetColumn.title,
+                  movedBy: {
+                    displayName: req.user.displayName,
+                    name: req.user.displayName,
+                    email: req.user.email
+                  }
+                });
+              });
+              logger.info(`Sent real-time task moved notifications to ${usersToNotify.length} users`);
             } else {
               logger.info(`No member emails to notify (all filtered out or empty)`);
             }
@@ -719,6 +744,25 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         } else {
           logger.info(`No users to notify (user assigned themselves)`);
         }
+
+        // Send real-time socket notifications to newly assigned users (excluding self)
+        const usersToNotify = users.filter(user => user._id.toString() !== req.user._id);
+        usersToNotify.forEach(user => {
+          broadcastToUser(io, user._id.toString(), 'notification:task:assigned', {
+            task: {
+              _id: task._id,
+              title: task.title,
+              projectId: task.projectId,
+              assignedBy: {
+                displayName: req.user.displayName,
+                name: req.user.displayName,
+                email: req.user.email
+              }
+            },
+            assignedTo: user._id.toString()
+          });
+        });
+        logger.info(`Sent real-time notifications to ${usersToNotify.length} users`);
       } catch (emailError) {
         logger.error('Error sending assignment notification emails:', emailError);
         // Don't fail the request if email fails
