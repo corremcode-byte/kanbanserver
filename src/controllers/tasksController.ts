@@ -335,6 +335,8 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
           status: task.status,
           listId: task.listId,
           priority: task.priority,
+          // Extract IDs from populated assignees (task.assignees is populated)
+          initialAssignees: task.assignees ? task.assignees.map((a: any) => a._id ? a._id.toString() : a.toString()) : [],
         },
       });
     } catch (auditError) {
@@ -557,6 +559,19 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       if (updates.status || updates.listId) {
         metadata.oldStatus = existingTask.status;
         metadata.newStatus = task.status;
+      }
+
+      // Track assignee changes
+      // Extract IDs from populated assignees (task.assignees is populated, so we need to get ._id)
+      const currentAssignees = task.assignees ? task.assignees.map((a: any) => {
+        // Handle both populated documents and plain ObjectIds
+        return a._id ? a._id.toString() : a.toString();
+      }) : [];
+      const assigneesChanged = JSON.stringify(oldAssignees.sort()) !== JSON.stringify(currentAssignees.sort());
+      if (assigneesChanged) {
+        metadata.assigneesChanged = true;
+        metadata.oldAssignees = oldAssignees;
+        metadata.newAssignees = currentAssignees;
       }
 
       await AuditLog.logAction({

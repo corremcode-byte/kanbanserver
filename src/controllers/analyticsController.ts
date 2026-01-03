@@ -762,8 +762,20 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           limit: 10
         });
 
-        // Get task details for this member - don't filter by date to show all current assignments
-        const memberTasks = await Task.find({
+        // Get ALL tasks where this member was EVER assigned (including tasks they were reassigned away from)
+        // First, find all task IDs from audit logs where this member was involved
+        const memberAuditLogs = await AuditLog.find({
+          projectId,
+          entityType: 'task',
+          $or: [
+            { 'metadata.oldAssignees': memberId },
+            { 'metadata.newAssignees': memberId },
+            { userId: memberId }
+          ]
+        }).distinct('entityId');
+
+        // Also get currently assigned tasks
+        const currentlyAssignedTasks = await Task.find({
           projectId,
           $or: [
             { assigneeId: memberId },
@@ -771,6 +783,14 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
             { assignees: memberId },
             { createdBy: memberId }
           ]
+        }).distinct('_id');
+
+        // Combine both lists and get unique task IDs
+        const allTaskIds = [...new Set([...memberAuditLogs, ...currentlyAssignedTasks.map(id => id.toString())])];
+
+        // Fetch all tasks
+        const memberTasks = await Task.find({
+          _id: { $in: allTaskIds }
         }).select('title assignees assignedAt completedAt status priority createdAt');
 
         const tasks = await Promise.all(memberTasks.map(async (task: any) => {
@@ -804,9 +824,47 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
             const auditUser = audit.userId as any;
 
             if (audit.action === 'task_created') {
-              // Task was created - record initial assignment
-              if (task.assignees && task.assignees.length > 0) {
-                for (const assigneeId of task.assignees) {
+              // Task was created - record initial assignment from metadata
+              const metadata = audit.metadata as any;
+
+              // Helper to extract ID from various formats
+              const extractId = (a: any): string => {
+                // If it's already a simple string ID (24 hex chars), return it
+                if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a)) return a;
+
+                // If it's a stringified object, try to parse it
+                if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
+                  try {
+                    // Try to extract ObjectId from stringified format
+                    const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
+                    if (match) return match[1];
+
+                    // Try to extract _id from stringified object
+                    const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
+                    if (idMatch) return idMatch[1];
+
+                    // Try parsing as JSON
+                    const parsed = JSON.parse(a);
+                    if (parsed._id) return parsed._id.toString();
+                    return parsed.toString();
+                  } catch (e) {
+                    // If parsing fails, continue to other methods
+                  }
+                }
+
+                // If it's an object with _id
+                if (a && typeof a === 'object' && a._id) {
+                  return a._id.toString();
+                }
+
+                // Last resort
+                return a.toString();
+              };
+
+              const initialAssignees = (metadata?.initialAssignees || []).map(extractId);
+
+              if (initialAssignees.length > 0) {
+                for (const assigneeId of initialAssignees) {
                   const assignee = await User.findById(assigneeId).select('displayName email');
                   if (assignee) {
                     const assigneeIdStr = assigneeId.toString();
@@ -827,9 +885,44 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
               // Check if assignees changed in this update
               const metadata = audit.metadata as any;
               if (metadata && metadata.assigneesChanged) {
-                // Get current assignees from task
-                const newAssignees = task.assignees || [];
-                const newAssigneeSet = new Set<string>(newAssignees.map((a: any) => a.toString()));
+                // Get assignees from audit log metadata (historical data)
+                // Ensure we extract just the IDs in case they're objects or stringified objects
+                const extractId = (a: any): string => {
+                  // If it's already a simple string ID (24 hex chars), return it
+                  if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a)) return a;
+
+                  // If it's a stringified object, try to parse it
+                  if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
+                    try {
+                      // Try to extract ObjectId from stringified format
+                      const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
+                      if (match) return match[1];
+
+                      // Try to extract _id from stringified object
+                      const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
+                      if (idMatch) return idMatch[1];
+
+                      // Try parsing as JSON
+                      const parsed = JSON.parse(a);
+                      if (parsed._id) return parsed._id.toString();
+                      return parsed.toString();
+                    } catch (e) {
+                      // If parsing fails, continue to other methods
+                    }
+                  }
+
+                  // If it's an object with _id
+                  if (a && typeof a === 'object' && a._id) {
+                    return a._id.toString();
+                  }
+
+                  // Last resort
+                  return a.toString();
+                };
+
+                const newAssignees = (metadata.newAssignees || []).map(extractId);
+                const oldAssigneesFromMetadata = (metadata.oldAssignees || []).map(extractId);
+                const newAssigneeSet = new Set<string>(newAssignees);
 
                 // Find removed assignees (reassigned away)
                 for (const oldAssignee of currentAssignees) {
