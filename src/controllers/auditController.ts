@@ -342,7 +342,7 @@ const generateMockAuditLogs = (limit: number = 20): any[] => {
  * Retrieves audit logs with optional filtering
  *
  * Query Parameters:
- * - limit: Number of records to return (default: 50, max: 100)
+ * - limit: Number of records to return (default: 50, max: 10000)
  * - startDate: Filter events after this date (ISO 8601)
  * - endDate: Filter events before this date (ISO 8601)
  * - eventType: Filter by specific event type
@@ -368,8 +368,8 @@ export const getAuditLogs = async (req: any, res: Response) => {
       projectId,
     } = req.query;
 
-    // Validate and parse limit
-    const parsedLimit = Math.min(parseInt(limit as string, 10) || 50, 100);
+    // Validate and parse limit - allow up to 10000 records to show all logs
+    const parsedLimit = Math.min(parseInt(limit as string, 10) || 50, 10000);
     console.log('Fetching audit logs with limit:', parsedLimit);
 
     // Build query
