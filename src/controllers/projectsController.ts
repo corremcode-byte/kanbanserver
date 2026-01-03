@@ -449,11 +449,7 @@ export const updateProject = async (req: AuthenticatedRequest, res: Response) =>
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner or manager can update project
-    const isManager = isProjectManager(project, req.user._id);
-    if (!isManager) {
-      return errorResponse(res, 'Only project owner or manager can update project', 403);
-    }
+    // Permission check is handled by middleware (checkPermission('canEditProject'))
 
     // Validate inputs
     if (name !== undefined) {
@@ -611,11 +607,7 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner or manager can add members
-    const isManager = isProjectManager(project, req.user._id);
-    if (!isManager) {
-      return errorResponse(res, 'Only project owner or manager can add members', 403);
-    }
+    // Permission check is handled by middleware (checkPermission('canManageMembers'))
 
     // Check if user exists and is active
     const user = await User.findOne({ _id: userId, isActive: true });
@@ -657,6 +649,30 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       // Don't fail the member addition if permission creation fails
     }
 
+    // Send email notification to the added member
+    try {
+      const { emailService } = await import('../services/emailService');
+      const emailSent = await emailService.sendMemberAddedNotification(
+        user.email,
+        {
+          projectName: project.name,
+          projectDescription: project.description,
+          addedByName: req.user.displayName || req.user.email,
+          role: 'Team Member (Assignee)',
+          projectUrl: `${process.env.CLIENT_URL || 'http://localhost:3000'}/projects/${id}`
+        }
+      );
+
+      if (emailSent) {
+        logger.info(`Member added notification email sent to ${user.email} for project ${project.name}`);
+      } else {
+        logger.warn(`Failed to send member added notification to ${user.email}`);
+      }
+    } catch (emailError) {
+      logger.error('Error sending member added notification:', emailError);
+      // Don't fail the member addition if email fails
+    }
+
     const updatedProject = await Project.findById(id)
       .populate('ownerId', 'name email avatar')
       .populate('owners', 'name email avatar')
@@ -684,11 +700,7 @@ export const removeMember = async (req: AuthenticatedRequest, res: Response) => 
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner or manager can remove members
-    const isManagerRemove = isProjectManager(project, req.user._id);
-    if (!isManagerRemove) {
-      return errorResponse(res, 'Only project owner or manager can remove members', 403);
-    }
+    // Permission check is handled by middleware (checkPermission('canManageMembers'))
 
     // Check if target user is the owner
     const isOwner = project.ownerId.toString() === req.user._id;
@@ -796,11 +808,7 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
       return errorResponse(res, 'User is not a member or manager of this project', 400);
     }
 
-    // Only owner or manager can update roles
-    const isManager = isProjectManager(project, req.user._id);
-    if (!isManager) {
-      return errorResponse(res, 'Only project owner or manager can update roles', 403);
-    }
+    // Permission check is handled by middleware (checkPermission('canManageMembers'))
 
     // Prevent changing the original owner's role
     if (project.ownerId.toString() === userId) {

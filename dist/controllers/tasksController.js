@@ -287,6 +287,7 @@ const createTask = async (req, res) => {
                     status: task.status,
                     listId: task.listId,
                     priority: task.priority,
+                    initialAssignees: task.assignees ? task.assignees.map((a) => a._id ? a._id.toString() : a.toString()) : [],
                 },
             });
         }
@@ -451,6 +452,15 @@ const updateTask = async (req, res) => {
                 metadata.oldStatus = existingTask.status;
                 metadata.newStatus = task.status;
             }
+            const currentAssignees = task.assignees ? task.assignees.map((a) => {
+                return a._id ? a._id.toString() : a.toString();
+            }) : [];
+            const assigneesChanged = JSON.stringify(oldAssignees.sort()) !== JSON.stringify(currentAssignees.sort());
+            if (assigneesChanged) {
+                metadata.assigneesChanged = true;
+                metadata.oldAssignees = oldAssignees;
+                metadata.newAssignees = currentAssignees;
+            }
             await AuditLog_1.AuditLog.logAction({
                 projectId: existingTask.projectId.toString(),
                 userId: req.user._id,
@@ -512,7 +522,8 @@ const updateTask = async (req, res) => {
                             });
                         }
                         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                        if (emailRegex.test(targetColumn.title)) {
+                        const isEmail = emailRegex.test(targetColumn.title);
+                        if (isEmail) {
                             logger_1.logger.info(`List title "${targetColumn.title}" appears to be an email address`);
                             const userByEmail = await User.findOne({ email: targetColumn.title }).select('email displayName _id');
                             if (userByEmail) {
@@ -525,21 +536,47 @@ const updateTask = async (req, res) => {
                                 }
                             }
                         }
+                        else {
+                            logger_1.logger.info(`List title "${targetColumn.title}" is not an email, checking if it's a username`);
+                            const userByDisplayName = await User.findOne({ displayName: targetColumn.title }).select('email displayName _id');
+                            if (userByDisplayName) {
+                                logger_1.logger.info(`Found user with displayName "${targetColumn.title}": ${userByDisplayName.email}`);
+                                const isProjectMember = projectWithColumns.members.some((m) => m.toString() === userByDisplayName._id.toString()) ||
+                                    projectWithColumns.managers?.some((m) => m.toString() === userByDisplayName._id.toString()) ||
+                                    projectWithColumns.ownerId.toString() === userByDisplayName._id.toString();
+                                if (isProjectMember && userByDisplayName.email !== req.user.email && !memberEmails.includes(userByDisplayName.email)) {
+                                    memberEmails.push(userByDisplayName.email);
+                                    logger_1.logger.info(`Added username "${targetColumn.title}" (email: ${userByDisplayName.email}) to notification recipients`);
+                                }
+                            }
+                            else {
+                                logger_1.logger.info(`No user found with displayName "${targetColumn.title}"`);
+                            }
+                        }
                         logger_1.logger.info(`Member emails to notify: ${JSON.stringify(memberEmails)}`);
                         if (memberEmails.length > 0) {
-                            await emailService_1.emailService.sendTaskMovedToListNotification(memberEmails, {
-                                taskTitle: task.title,
-                                taskId: task._id.toString(),
-                                projectName: projectWithColumns.name,
-                                projectId: projectWithColumns._id.toString(),
-                                listTitle: targetColumn.title,
-                                movedByName: req.user.displayName || req.user.email,
-                                priority: task.priority
-                            });
-                            logger_1.logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${memberEmails.length} members`);
                             const User = (await Promise.resolve().then(() => __importStar(require('../models/User')))).default;
-                            const usersToNotify = await User.find({ email: { $in: memberEmails } }).select('_id email displayName');
+                            const allUsers = await User.find({ email: { $in: memberEmails } }).select('_id email displayName settings');
                             const oldList = projectWithColumns.columns?.find((col) => col.id === existingTask.listId);
+                            const usersWithEmailEnabled = allUsers.filter(user => {
+                                const emailEnabled = user.settings?.notifications?.emailNotifications !== false;
+                                const taskMovedEmailEnabled = user.settings?.notifications?.taskMovedEmail !== false;
+                                return emailEnabled && taskMovedEmailEnabled;
+                            });
+                            const emailRecipients = usersWithEmailEnabled.map(u => u.email);
+                            if (emailRecipients.length > 0) {
+                                await emailService_1.emailService.sendTaskMovedToListNotification(emailRecipients, {
+                                    taskTitle: task.title,
+                                    taskId: task._id.toString(),
+                                    projectName: projectWithColumns.name,
+                                    projectId: projectWithColumns._id.toString(),
+                                    listTitle: targetColumn.title,
+                                    movedByName: req.user.displayName || req.user.email,
+                                    priority: task.priority
+                                });
+                                logger_1.logger.info(`Sent list notification for task "${task.title}" moved to "${targetColumn.title}" to ${emailRecipients.length} members`);
+                            }
+                            const usersToNotify = allUsers;
                             usersToNotify.forEach(user => {
                                 (0, socketHandlers_1.broadcastToUser)(io, user._id.toString(), 'notification:task:moved', {
                                     task: {
@@ -559,6 +596,21 @@ const updateTask = async (req, res) => {
                                 });
                             });
                             logger_1.logger.info(`Sent real-time task moved notifications to ${usersToNotify.length} users`);
+                            const { pushNotificationService } = await Promise.resolve().then(() => __importStar(require('../services/pushNotificationService')));
+                            const usersWithPushEnabled = usersToNotify.filter(user => {
+                                const pushEnabled = user.settings?.notifications?.pushNotifications !== false;
+                                const taskMovedPushEnabled = user.settings?.notifications?.taskMovedPush !== false;
+                                return pushEnabled && taskMovedPushEnabled;
+                            });
+                            for (const user of usersWithPushEnabled) {
+                                try {
+                                    await pushNotificationService.sendTaskMovedNotification(user._id.toString(), task.title, oldList?.title || existingTask.listId || existingTask.status, targetColumn.title, req.user.displayName || req.user.email, task.projectId.toString(), task._id.toString());
+                                }
+                                catch (pushError) {
+                                    logger_1.logger.error(`Failed to send push notification to user ${user._id}:`, pushError);
+                                }
+                            }
+                            logger_1.logger.info(`Sent push notifications for task moved to ${usersWithPushEnabled.length} users`);
                         }
                         else {
                             logger_1.logger.info(`No member emails to notify (all filtered out or empty)`);
@@ -580,10 +632,15 @@ const updateTask = async (req, res) => {
             try {
                 logger_1.logger.info(`Sending assignment notifications to ${newlyAssignedUsers.length} newly assigned users`);
                 const User = (await Promise.resolve().then(() => __importStar(require('../models/User')))).default;
-                const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName');
+                const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName settings');
                 logger_1.logger.info(`Found ${users.length} users to notify: ${users.map(u => u.email).join(', ')}`);
                 const recipientEmails = users
                     .filter(user => user._id.toString() !== req.user._id)
+                    .filter(user => {
+                    const emailEnabled = user.settings?.notifications?.emailNotifications !== false;
+                    const taskAssignedEmailEnabled = user.settings?.notifications?.taskAssignedEmail !== false;
+                    return emailEnabled && taskAssignedEmailEnabled;
+                })
                     .map(user => user.email);
                 if (recipientEmails.length > 0) {
                     await emailService_1.emailService.sendTaskAssignedNotification(recipientEmails, {
@@ -598,7 +655,7 @@ const updateTask = async (req, res) => {
                     logger_1.logger.info(`Sent assignment notification for task "${task.title}" to ${recipientEmails.length} users: ${recipientEmails.join(', ')}`);
                 }
                 else {
-                    logger_1.logger.info(`No users to notify (user assigned themselves)`);
+                    logger_1.logger.info(`No users to notify (user assigned themselves or email notifications disabled)`);
                 }
                 const usersToNotify = users.filter(user => user._id.toString() !== req.user._id);
                 usersToNotify.forEach(user => {
@@ -617,6 +674,21 @@ const updateTask = async (req, res) => {
                     });
                 });
                 logger_1.logger.info(`Sent real-time notifications to ${usersToNotify.length} users`);
+                const { pushNotificationService } = await Promise.resolve().then(() => __importStar(require('../services/pushNotificationService')));
+                const usersWithPushEnabled = usersToNotify.filter(user => {
+                    const pushEnabled = user.settings?.notifications?.pushNotifications !== false;
+                    const taskAssignedPushEnabled = user.settings?.notifications?.taskAssignedPush !== false;
+                    return pushEnabled && taskAssignedPushEnabled;
+                });
+                for (const user of usersWithPushEnabled) {
+                    try {
+                        await pushNotificationService.sendTaskAssignedNotification(user._id.toString(), task.title, req.user.displayName || req.user.email, task.projectId.toString(), task._id.toString());
+                    }
+                    catch (pushError) {
+                        logger_1.logger.error(`Failed to send push notification to user ${user._id}:`, pushError);
+                    }
+                }
+                logger_1.logger.info(`Sent push notifications to ${usersWithPushEnabled.length} users`);
             }
             catch (emailError) {
                 logger_1.logger.error('Error sending assignment notification emails:', emailError);

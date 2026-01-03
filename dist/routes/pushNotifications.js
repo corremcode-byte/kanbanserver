@@ -35,25 +35,13 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
-const permissions_1 = require("../middleware/permissions");
-const projectsController = __importStar(require("../controllers/projectsController"));
+const pushNotificationController = __importStar(require("../controllers/pushNotificationController"));
 const router = (0, express_1.Router)();
+router.get('/vapid-public-key', pushNotificationController.getVapidPublicKey);
 router.use(auth_1.authenticate);
-router.get('/', projectsController.getProjects);
-router.post('/', projectsController.createProject);
-router.get('/:id', projectsController.getProject);
-router.put('/:id', (0, permissions_1.checkPermission)('canEditProject'), projectsController.updateProject);
-router.delete('/:id', projectsController.deleteProject);
-router.post('/:id/members', (0, permissions_1.checkPermission)('canManageMembers'), projectsController.addMember);
-router.delete('/:id/members/:userId', (0, permissions_1.checkPermission)('canManageMembers'), projectsController.removeMember);
-router.put('/:id/members/:userId/role', (0, permissions_1.checkPermission)('canManageMembers'), projectsController.updateMemberRole);
-router.put('/:id/owners/:userId', projectsController.addOwner);
-router.delete('/:id/owners/:userId', projectsController.removeOwner);
-router.post('/:id/transfer-ownership', projectsController.transferOwnership);
-router.delete('/:id/leave', projectsController.leaveProject);
-router.post('/:id/lists', projectsController.addList);
-router.put('/:id/lists/:listId', projectsController.updateList);
-router.delete('/:id/lists/:listId', projectsController.deleteList);
-router.put('/:id/lists/reorder', projectsController.reorderLists);
+router.post('/subscribe', pushNotificationController.subscribe);
+router.post('/unsubscribe', pushNotificationController.unsubscribe);
+router.get('/subscriptions', pushNotificationController.getSubscriptions);
+router.post('/test', pushNotificationController.sendTestNotification);
 exports.default = router;
-//# sourceMappingURL=projects.js.map
+//# sourceMappingURL=pushNotifications.js.map

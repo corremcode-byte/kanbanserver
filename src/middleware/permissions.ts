@@ -38,20 +38,23 @@ export const checkPermission = (permission: Permission) => {
       // Get projectId from various sources
       let projectId: string | undefined;
 
-      // 1. From route params
-      projectId = req.params.projectId;
+      // 1. From route params (check both projectId and id)
+      projectId = req.params.projectId || req.params.id;
 
       // 2. From request body
       if (!projectId && req.body.projectId) {
         projectId = req.body.projectId;
       }
 
-      // 3. From task (if updating/deleting a task)
-      if (!projectId && req.params.id) {
-        const task = await Task.findById(req.params.id);
-        if (task) {
-          projectId = task.projectId.toString();
-        }
+      // 3. From task (if updating/deleting a task and not a project route)
+      if (!projectId) {
+        return errorResponse(res, 'Project ID not found', 400);
+      }
+
+      // Verify if projectId is a task ID, and if so, get the project from the task
+      const task = await Task.findById(projectId);
+      if (task) {
+        projectId = task.projectId.toString();
       }
 
       if (!projectId) {

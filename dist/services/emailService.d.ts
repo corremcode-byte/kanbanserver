@@ -61,6 +61,13 @@ declare class EmailService {
         priority: string;
     }): Promise<boolean>;
     sendTestEmail(to: string): Promise<boolean>;
+    sendMemberAddedNotification(recipient: string, data: {
+        projectName: string;
+        projectDescription?: string;
+        addedByName: string;
+        role: string;
+        projectUrl: string;
+    }): Promise<boolean>;
 }
 export declare const emailService: EmailService;
 export {};

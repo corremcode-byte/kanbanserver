@@ -31,7 +31,8 @@ const getProjectPermissions = async (req, res) => {
         const permissions = await models_1.ProjectPermission.find({ projectId })
             .populate('userId', 'displayName email photoURL role')
             .sort({ createdAt: -1 });
-        return (0, responses_1.successResponse)(res, 'Permissions retrieved successfully', permissions);
+        const validPermissions = permissions.filter(p => p.userId != null);
+        return (0, responses_1.successResponse)(res, 'Permissions retrieved successfully', validPermissions);
     }
     catch (error) {
         logger_1.logger.error('Error getting project permissions:', error);

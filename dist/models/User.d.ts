@@ -1,4 +1,11 @@
 import { Document, Model } from 'mongoose';
+export interface IPushSubscription {
+    endpoint: string;
+    keys: {
+        p256dh: string;
+        auth: string;
+    };
+}
 export interface IUser extends Document {
     firebaseUid: string;
     email: string;
@@ -8,6 +15,7 @@ export interface IUser extends Document {
     role: 'admin' | 'manager' | 'member';
     isActive: boolean;
     lastLoginAt: Date;
+    pushSubscriptions?: IPushSubscription[];
     settings?: {
         appearance?: {
             theme?: 'light' | 'dark' | 'system';
@@ -18,6 +26,13 @@ export interface IUser extends Document {
             emailNotifications?: boolean;
             taskDeadlineReminders?: boolean;
             dailyDigest?: boolean;
+            pushNotifications?: boolean;
+            taskAssignedEmail?: boolean;
+            taskAssignedPush?: boolean;
+            taskMovedEmail?: boolean;
+            taskMovedPush?: boolean;
+            taskCompletedEmail?: boolean;
+            taskCompletedPush?: boolean;
         };
         boardPreferences?: {
             defaultView?: 'kanban' | 'list';

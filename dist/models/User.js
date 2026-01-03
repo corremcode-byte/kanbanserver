@@ -79,6 +79,22 @@ const userSchema = new mongoose_1.Schema({
         type: Date,
         default: Date.now
     },
+    pushSubscriptions: [{
+            endpoint: {
+                type: String,
+                required: true
+            },
+            keys: {
+                p256dh: {
+                    type: String,
+                    required: true
+                },
+                auth: {
+                    type: String,
+                    required: true
+                }
+            }
+        }],
     settings: {
         appearance: {
             theme: {
@@ -106,6 +122,34 @@ const userSchema = new mongoose_1.Schema({
                 default: true
             },
             dailyDigest: {
+                type: Boolean,
+                default: false
+            },
+            pushNotifications: {
+                type: Boolean,
+                default: true
+            },
+            taskAssignedEmail: {
+                type: Boolean,
+                default: true
+            },
+            taskAssignedPush: {
+                type: Boolean,
+                default: true
+            },
+            taskMovedEmail: {
+                type: Boolean,
+                default: true
+            },
+            taskMovedPush: {
+                type: Boolean,
+                default: true
+            },
+            taskCompletedEmail: {
+                type: Boolean,
+                default: false
+            },
+            taskCompletedPush: {
                 type: Boolean,
                 default: false
             }

@@ -695,6 +695,83 @@ class EmailService {
       text: 'Email Service Working! Your email configuration is working correctly.'
     });
   }
+
+  /**
+   * Send notification when a user is directly added to a project
+   */
+  async sendMemberAddedNotification(
+    recipient: string,
+    data: {
+      projectName: string;
+      projectDescription?: string;
+      addedByName: string;
+      role: string;
+      projectUrl: string;
+    }
+  ): Promise<boolean> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #8b5cf6; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #8b5cf6; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px; }
+            .info-box { background-color: #ede9fe; padding: 15px; border-radius: 6px; margin: 15px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎯 Added to Project</h1>
+            </div>
+            <div class="content">
+              <p>Hello!</p>
+              <p><strong>${data.addedByName}</strong> has added you to the project:</p>
+              <h2>${data.projectName}</h2>
+              ${data.projectDescription ? `<p>${data.projectDescription}</p>` : ''}
+              <div class="info-box">
+                <p><strong>Your Role:</strong> ${data.role}</p>
+              </div>
+              <p>You can now access this project and start collaborating with your team.</p>
+              <a href="${data.projectUrl}" class="button">View Project</a>
+              <p style="margin-top: 20px; font-size: 14px; color: #6b7280;">
+                Or copy and paste this link into your browser:<br>
+                <a href="${data.projectUrl}">${data.projectUrl}</a>
+              </p>
+            </div>
+            <div class="footer">
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const text = `
+      Added to Project
+
+      ${data.addedByName} has added you to the project: ${data.projectName}
+
+      ${data.projectDescription || ''}
+
+      Your Role: ${data.role}
+
+      You can now access this project and start collaborating with your team.
+
+      View project: ${data.projectUrl}
+    `;
+
+    return this.sendEmail({
+      to: recipient,
+      subject: `You've been added to ${data.projectName}`,
+      html,
+      text
+    });
+  }
 }
 
 // Export singleton instance

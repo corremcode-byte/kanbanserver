@@ -11,15 +11,16 @@ const checkPermission = (permission) => {
                 return (0, responses_1.errorResponse)(res, 'Unauthorized', 401);
             }
             let projectId;
-            projectId = req.params.projectId;
+            projectId = req.params.projectId || req.params.id;
             if (!projectId && req.body.projectId) {
                 projectId = req.body.projectId;
             }
-            if (!projectId && req.params.id) {
-                const task = await models_1.Task.findById(req.params.id);
-                if (task) {
-                    projectId = task.projectId.toString();
-                }
+            if (!projectId) {
+                return (0, responses_1.errorResponse)(res, 'Project ID not found', 400);
+            }
+            const task = await models_1.Task.findById(projectId);
+            if (task) {
+                projectId = task.projectId.toString();
             }
             if (!projectId) {
                 return (0, responses_1.errorResponse)(res, 'Project ID not found', 400);

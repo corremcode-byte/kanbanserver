@@ -299,7 +299,7 @@ const getAuditLogs = async (req, res) => {
         console.log('Query params:', req.query);
         console.log('User:', req.user);
         const { limit = '50', startDate, endDate, eventType, userId, search, projectId, } = req.query;
-        const parsedLimit = Math.min(parseInt(limit, 10) || 50, 100);
+        const parsedLimit = Math.min(parseInt(limit, 10) || 50, 10000);
         console.log('Fetching audit logs with limit:', parsedLimit);
         const query = {};
         if (projectId) {

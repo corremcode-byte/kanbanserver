@@ -288,29 +288,53 @@ const getPerformanceMatrix = async (req, res) => {
                     const stats = await models_1.AuditLog.getUserStats(project._id.toString(), memberId, start, end);
                     const tasksAssigned = await models_1.Task.countDocuments({
                         projectId: project._id,
-                        assignees: memberId
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ]
                     });
                     const tasksInProgress = await models_1.Task.countDocuments({
                         projectId: project._id,
-                        assignees: memberId,
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ],
                         status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
                     });
                     const tasksCompleted = await models_1.Task.countDocuments({
                         projectId: project._id,
-                        assignees: memberId,
-                        status: { $in: ['completed', 'done'] },
-                        completedAt: { $exists: true, $gte: start, $lte: end }
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ],
+                        status: 'completed'
                     });
                     const overdueTasks = await models_1.Task.countDocuments({
                         projectId: project._id,
-                        assignees: memberId,
-                        status: { $nin: ['completed', 'done'] },
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ],
+                        status: { $ne: 'completed' },
                         dueDate: { $exists: true, $lt: new Date() }
                     });
                     const completedTasksForTime = await models_1.Task.find({
                         projectId: project._id,
-                        assignees: memberId,
-                        status: { $in: ['completed', 'done'] },
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ],
+                        status: 'completed',
                         assignedAt: { $exists: true },
                         completedAt: { $exists: true, $gte: start, $lte: end }
                     }).select('assignedAt completedAt');
@@ -376,6 +400,41 @@ const getPerformanceMatrix = async (req, res) => {
                     recentActivities.push(...activity);
                 }
                 recentActivities.sort((a, b) => b.createdAt - a.createdAt);
+                const tasks = [];
+                for (const project of allProjects) {
+                    const memberTasks = await models_1.Task.find({
+                        projectId: project._id,
+                        $or: [
+                            { assigneeId: memberId },
+                            { assignedTo: memberId },
+                            { assignees: memberId },
+                            { createdBy: memberId }
+                        ]
+                    }).select('title assignees assignedAt completedAt status priority createdAt');
+                    for (const task of memberTasks) {
+                        const assignedAt = task.assignedAt || task.createdAt;
+                        const completedAt = task.completedAt;
+                        let timeSpent = 0;
+                        if (completedAt && assignedAt) {
+                            timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
+                        }
+                        else if (assignedAt) {
+                            timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
+                        }
+                        tasks.push({
+                            taskId: task._id.toString(),
+                            taskTitle: task.title,
+                            assignedTo: memberId,
+                            assignedToName: memberData?.displayName || 'Unknown',
+                            assignedAt: assignedAt,
+                            completedAt: completedAt,
+                            timeSpent: Math.round(timeSpent * 10) / 10,
+                            status: task.status,
+                            priority: task.priority,
+                            assignmentHistory: []
+                        });
+                    }
+                }
                 return {
                     userId: memberId,
                     userName: memberData?.displayName || 'Unknown',
@@ -392,7 +451,8 @@ const getPerformanceMatrix = async (req, res) => {
                     avgCompletionTime: Math.round(avgCompletionTime * 10) / 10,
                     productivityScore,
                     completionRate: totalTasksAssigned > 0 ? Math.round((totalTasksCompleted / totalTasksAssigned) * 100) : 0,
-                    recentActivity: recentActivities.slice(0, 5)
+                    recentActivity: recentActivities.slice(0, 5),
+                    tasks: tasks
                 };
             }));
             performanceData.sort((a, b) => b.productivityScore - a.productivityScore);
@@ -452,29 +512,53 @@ const getPerformanceMatrix = async (req, res) => {
             const stats = await models_1.AuditLog.getUserStats(projectId, memberId, start, end);
             const tasksAssigned = await models_1.Task.countDocuments({
                 projectId,
-                assignees: memberId
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ]
             });
             const tasksInProgress = await models_1.Task.countDocuments({
                 projectId,
-                assignees: memberId,
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ],
                 status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
             });
             const tasksCompleted = await models_1.Task.countDocuments({
                 projectId,
-                assignees: memberId,
-                status: { $in: ['completed', 'done'] },
-                completedAt: { $exists: true, $gte: start, $lte: end }
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ],
+                status: 'completed'
             });
             const overdueTasks = await models_1.Task.countDocuments({
                 projectId,
-                assignees: memberId,
-                status: { $nin: ['completed', 'done'] },
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ],
+                status: { $ne: 'completed' },
                 dueDate: { $exists: true, $lt: new Date() }
             });
             const completedTasksForTime = await models_1.Task.find({
                 projectId,
-                assignees: memberId,
-                status: { $in: ['completed', 'done'] },
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ],
+                status: 'completed',
                 assignedAt: { $exists: true },
                 completedAt: { $exists: true, $gte: start, $lte: end }
             }).select('assignedAt completedAt title');
@@ -522,6 +606,198 @@ const getPerformanceMatrix = async (req, res) => {
                 endDate: end,
                 limit: 10
             });
+            const memberAuditLogs = await models_1.AuditLog.find({
+                projectId,
+                entityType: 'task',
+                $or: [
+                    { 'metadata.oldAssignees': memberId },
+                    { 'metadata.newAssignees': memberId },
+                    { userId: memberId }
+                ]
+            }).distinct('entityId');
+            const currentlyAssignedTasks = await models_1.Task.find({
+                projectId,
+                $or: [
+                    { assigneeId: memberId },
+                    { assignedTo: memberId },
+                    { assignees: memberId },
+                    { createdBy: memberId }
+                ]
+            }).distinct('_id');
+            const allTaskIds = [...new Set([...memberAuditLogs, ...currentlyAssignedTasks.map(id => id.toString())])];
+            const memberTasks = await models_1.Task.find({
+                _id: { $in: allTaskIds }
+            }).select('title assignees assignedAt completedAt status priority createdAt');
+            const tasks = await Promise.all(memberTasks.map(async (task) => {
+                const assignedAt = task.assignedAt || task.createdAt;
+                const completedAt = task.completedAt;
+                let timeSpent = 0;
+                if (completedAt && assignedAt) {
+                    timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
+                }
+                else if (assignedAt) {
+                    timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
+                }
+                const assignmentHistory = [];
+                const taskAudits = await models_1.AuditLog.find({
+                    projectId,
+                    entityType: 'task',
+                    entityId: task._id.toString(),
+                    action: { $in: ['task_created', 'task_updated', 'task_completed'] }
+                }).populate('userId', 'displayName email').sort({ createdAt: 1 });
+                const assignmentTimes = new Map();
+                let currentAssignees = new Set();
+                for (const audit of taskAudits) {
+                    const auditUser = audit.userId;
+                    if (audit.action === 'task_created') {
+                        const metadata = audit.metadata;
+                        const extractId = (a) => {
+                            if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a))
+                                return a;
+                            if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
+                                try {
+                                    const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
+                                    if (match)
+                                        return match[1];
+                                    const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
+                                    if (idMatch)
+                                        return idMatch[1];
+                                    const parsed = JSON.parse(a);
+                                    if (parsed._id)
+                                        return parsed._id.toString();
+                                    return parsed.toString();
+                                }
+                                catch (e) {
+                                }
+                            }
+                            if (a && typeof a === 'object' && a._id) {
+                                return a._id.toString();
+                            }
+                            return a.toString();
+                        };
+                        const initialAssignees = (metadata?.initialAssignees || []).map(extractId);
+                        if (initialAssignees.length > 0) {
+                            for (const assigneeId of initialAssignees) {
+                                const assignee = await models_1.User.findById(assigneeId).select('displayName email');
+                                if (assignee) {
+                                    const assigneeIdStr = assigneeId.toString();
+                                    currentAssignees.add(assigneeIdStr);
+                                    assignmentTimes.set(assigneeIdStr, new Date(audit.createdAt));
+                                    assignmentHistory.push({
+                                        assignedTo: assigneeIdStr,
+                                        assignedToName: assignee.displayName,
+                                        assignedToEmail: assignee.email,
+                                        assignedAt: audit.createdAt,
+                                        timeSpent: 0,
+                                        action: 'assigned'
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    else if (audit.action === 'task_updated') {
+                        const metadata = audit.metadata;
+                        if (metadata && metadata.assigneesChanged) {
+                            const extractId = (a) => {
+                                if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a))
+                                    return a;
+                                if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
+                                    try {
+                                        const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
+                                        if (match)
+                                            return match[1];
+                                        const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
+                                        if (idMatch)
+                                            return idMatch[1];
+                                        const parsed = JSON.parse(a);
+                                        if (parsed._id)
+                                            return parsed._id.toString();
+                                        return parsed.toString();
+                                    }
+                                    catch (e) {
+                                    }
+                                }
+                                if (a && typeof a === 'object' && a._id) {
+                                    return a._id.toString();
+                                }
+                                return a.toString();
+                            };
+                            const newAssignees = (metadata.newAssignees || []).map(extractId);
+                            const oldAssigneesFromMetadata = (metadata.oldAssignees || []).map(extractId);
+                            const newAssigneeSet = new Set(newAssignees);
+                            for (const oldAssignee of currentAssignees) {
+                                if (!newAssigneeSet.has(oldAssignee)) {
+                                    const assignee = await models_1.User.findById(oldAssignee).select('displayName email');
+                                    if (assignee) {
+                                        const assignStartTime = assignmentTimes.get(oldAssignee);
+                                        const timeOnTask = assignStartTime ?
+                                            (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
+                                        assignmentHistory.push({
+                                            assignedTo: oldAssignee,
+                                            assignedToName: assignee.displayName,
+                                            assignedToEmail: assignee.email,
+                                            assignedAt: assignStartTime || audit.createdAt,
+                                            reassignedAt: audit.createdAt,
+                                            timeSpent: Math.round(timeOnTask * 10) / 10,
+                                            action: 'reassigned'
+                                        });
+                                        assignmentTimes.delete(oldAssignee);
+                                    }
+                                }
+                            }
+                            for (const newAssigneeId of newAssigneeSet) {
+                                if (!currentAssignees.has(newAssigneeId)) {
+                                    const assignee = await models_1.User.findById(newAssigneeId).select('displayName email');
+                                    if (assignee) {
+                                        assignmentTimes.set(newAssigneeId, new Date(audit.createdAt));
+                                        assignmentHistory.push({
+                                            assignedTo: newAssigneeId,
+                                            assignedToName: assignee.displayName,
+                                            assignedToEmail: assignee.email,
+                                            assignedAt: audit.createdAt,
+                                            timeSpent: 0,
+                                            action: 'assigned'
+                                        });
+                                    }
+                                }
+                            }
+                            currentAssignees = newAssigneeSet;
+                        }
+                    }
+                    else if (audit.action === 'task_completed') {
+                        for (const assigneeId of currentAssignees) {
+                            const assignee = await models_1.User.findById(assigneeId).select('displayName email');
+                            if (assignee) {
+                                const assignStartTime = assignmentTimes.get(assigneeId);
+                                const timeOnTask = assignStartTime ?
+                                    (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
+                                assignmentHistory.push({
+                                    assignedTo: assigneeId,
+                                    assignedToName: assignee.displayName,
+                                    assignedToEmail: assignee.email,
+                                    assignedAt: assignStartTime || audit.createdAt,
+                                    completedAt: audit.createdAt,
+                                    timeSpent: Math.round(timeOnTask * 10) / 10,
+                                    action: 'completed'
+                                });
+                                assignmentTimes.delete(assigneeId);
+                            }
+                        }
+                    }
+                }
+                return {
+                    taskId: task._id.toString(),
+                    taskTitle: task.title,
+                    assignedTo: memberId,
+                    assignedToName: memberData?.displayName || 'Unknown',
+                    assignedAt: assignedAt,
+                    completedAt: completedAt,
+                    timeSpent: Math.round(timeSpent * 10) / 10,
+                    status: task.status,
+                    priority: task.priority,
+                    assignmentHistory: assignmentHistory
+                };
+            }));
             return {
                 userId: memberId,
                 userName: memberData?.displayName || 'Unknown',
@@ -538,7 +814,8 @@ const getPerformanceMatrix = async (req, res) => {
                 avgCompletionTime: Math.round(avgCompletionTime * 10) / 10,
                 productivityScore,
                 completionRate: tasksAssigned > 0 ? Math.round((tasksCompleted / tasksAssigned) * 100) : 0,
-                recentActivity: recentActivity.slice(0, 5)
+                recentActivity: recentActivity.slice(0, 5),
+                tasks: tasks
             };
         }));
         performanceData.sort((a, b) => b.productivityScore - a.productivityScore);

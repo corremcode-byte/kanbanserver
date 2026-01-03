@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reorderLists = exports.deleteList = exports.updateList = exports.addList = exports.leaveProject = exports.transferOwnership = exports.removeOwner = exports.addOwner = exports.updateMemberRole = exports.removeMember = exports.addMember = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProject = exports.getProjects = void 0;
 const models_1 = require("../models");
@@ -363,10 +396,6 @@ const updateProject = async (req, res) => {
         if (!project) {
             return (0, responses_1.notFoundResponse)(res, 'Project not found');
         }
-        const isManager = isProjectManager(project, req.user._id);
-        if (!isManager) {
-            return (0, responses_1.errorResponse)(res, 'Only project owner or manager can update project', 403);
-        }
         if (name !== undefined) {
             if (!name?.trim()) {
                 return (0, responses_1.errorResponse)(res, 'Project name cannot be empty', 400);
@@ -492,10 +521,6 @@ const addMember = async (req, res) => {
         if (!project) {
             return (0, responses_1.notFoundResponse)(res, 'Project not found');
         }
-        const isManager = isProjectManager(project, req.user._id);
-        if (!isManager) {
-            return (0, responses_1.errorResponse)(res, 'Only project owner or manager can add members', 403);
-        }
         const user = await models_1.User.findOne({ _id: userId, isActive: true });
         if (!user) {
             return (0, responses_1.errorResponse)(res, 'User not found or inactive', 404);
@@ -524,6 +549,25 @@ const addMember = async (req, res) => {
         catch (permError) {
             logger_1.logger.error('Error creating member permission:', permError);
         }
+        try {
+            const { emailService } = await Promise.resolve().then(() => __importStar(require('../services/emailService')));
+            const emailSent = await emailService.sendMemberAddedNotification(user.email, {
+                projectName: project.name,
+                projectDescription: project.description,
+                addedByName: req.user.displayName || req.user.email,
+                role: 'Team Member (Assignee)',
+                projectUrl: `${process.env.CLIENT_URL || 'http://localhost:3000'}/projects/${id}`
+            });
+            if (emailSent) {
+                logger_1.logger.info(`Member added notification email sent to ${user.email} for project ${project.name}`);
+            }
+            else {
+                logger_1.logger.warn(`Failed to send member added notification to ${user.email}`);
+            }
+        }
+        catch (emailError) {
+            logger_1.logger.error('Error sending member added notification:', emailError);
+        }
         const updatedProject = await models_1.Project.findById(id)
             .populate('ownerId', 'name email avatar')
             .populate('owners', 'name email avatar')
@@ -547,10 +591,6 @@ const removeMember = async (req, res) => {
         const project = await models_1.Project.findById(id);
         if (!project) {
             return (0, responses_1.notFoundResponse)(res, 'Project not found');
-        }
-        const isManagerRemove = isProjectManager(project, req.user._id);
-        if (!isManagerRemove) {
-            return (0, responses_1.errorResponse)(res, 'Only project owner or manager can remove members', 403);
         }
         const isOwner = project.ownerId.toString() === req.user._id;
         const targetIsManager = project.managers && project.managers.some((m) => {
@@ -626,10 +666,6 @@ const updateMemberRole = async (req, res) => {
         });
         if (!isInMembers && !isInManagers) {
             return (0, responses_1.errorResponse)(res, 'User is not a member or manager of this project', 400);
-        }
-        const isManager = isProjectManager(project, req.user._id);
-        if (!isManager) {
-            return (0, responses_1.errorResponse)(res, 'Only project owner or manager can update roles', 403);
         }
         if (project.ownerId.toString() === userId) {
             return (0, responses_1.errorResponse)(res, 'Cannot change the role of the project owner', 403);
