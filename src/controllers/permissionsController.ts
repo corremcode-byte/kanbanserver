@@ -53,7 +53,10 @@ export const getProjectPermissions = async (req: AuthenticatedRequest, res: Resp
       .populate('userId', 'displayName email photoURL role')
       .sort({ createdAt: -1 });
 
-    return successResponse(res, 'Permissions retrieved successfully', permissions);
+    // Filter out permissions with null userId (deleted users)
+    const validPermissions = permissions.filter(p => p.userId != null);
+
+    return successResponse(res, 'Permissions retrieved successfully', validPermissions);
   } catch (error) {
     logger.error('Error getting project permissions:', error);
     return internalServerErrorResponse(res, 'Failed to retrieve permissions');

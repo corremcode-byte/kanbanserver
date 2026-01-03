@@ -189,8 +189,35 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
+    // Delete from Firebase Authentication first
+    try {
+      const admin = require('../config/firebase').default;
+      await admin.auth().deleteUser(user.firebaseUid);
+      logger.info(`Deleted Firebase user: ${user.firebaseUid}`);
+    } catch (firebaseError: any) {
+      // Log but continue if Firebase user doesn't exist
+      if (firebaseError.code === 'auth/user-not-found') {
+        logger.warn(`Firebase user not found for UID: ${user.firebaseUid}`);
+      } else {
+        logger.error('Error deleting Firebase user:', firebaseError);
+        throw firebaseError; // Re-throw if it's a different error
+      }
+    }
+
+    // Delete associated project permissions
+    const ProjectPermission = require('../models').ProjectPermission;
+    try {
+      const deletedPerms = await ProjectPermission.deleteMany({ userId });
+      logger.info(`Deleted ${deletedPerms.deletedCount} project permissions for user ${userId}`);
+    } catch (permError) {
+      logger.error('Error deleting user permissions:', permError);
+      // Continue with user deletion even if permission deletion fails
+    }
+
+    // Delete from MongoDB database
     await User.findByIdAndDelete(userId);
 
+    logger.info(`User deleted successfully: ${user.email} (${userId})`);
     return successResponse(res, 'User deleted successfully', { userId });
   } catch (error) {
     logger.error('Error deleting user:', error);
