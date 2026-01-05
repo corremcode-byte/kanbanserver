@@ -10,6 +10,14 @@ export interface ITaskAttachment {
   uploadedAt: Date;
 }
 
+export interface ITaskComment {
+  id: string;
+  text: string;
+  createdBy: mongoose.Types.ObjectId;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
 export interface ITask extends Document {
   title: string;
   description?: string;
@@ -28,6 +36,7 @@ export interface ITask extends Document {
   reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours';
   lastReminderSent?: Date;
   attachments: ITaskAttachment[];
+  comments: ITaskComment[];
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -114,6 +123,13 @@ const TaskSchema = new Schema<ITask>({
     size: { type: Number, required: true },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     uploadedAt: { type: Date, default: Date.now }
+  }],
+  comments: [{
+    id: { type: String, required: true },
+    text: { type: String, required: true, trim: true },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date }
   }],
   order: { type: Number, default: 0 }
 }, {

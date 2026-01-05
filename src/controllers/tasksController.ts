@@ -80,9 +80,9 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         tasks = await Task.find({
           projectId,
         }).populate('projectId', 'name')
-          .populate('assignees', 'name email avatar')
-          .populate('assignedTo', 'name email avatar')
-          .populate('assignedBy', 'name email avatar')
+          .populate('assignees', 'displayName email avatar photoURL')
+          .populate('assignedTo', 'displayName email avatar photoURL')
+          .populate('assignedBy', 'displayName email avatar photoURL')
           .sort({ createdAt: -1 }); // Newest first
       } else {
         // Can only view tasks assigned to them or created by them
@@ -94,9 +94,9 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
             { assignedBy: req.user._id }
           ]
         }).populate('projectId', 'name')
-          .populate('assignees', 'name email avatar')
-          .populate('assignedTo', 'name email avatar')
-          .populate('assignedBy', 'name email avatar')
+          .populate('assignees', 'displayName email avatar photoURL')
+          .populate('assignedTo', 'displayName email avatar photoURL')
+          .populate('assignedBy', 'displayName email avatar photoURL')
           .sort({ createdAt: -1 }); // Newest first
       }
     } else {
@@ -150,9 +150,9 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
           { projectId: { $in: allAccessProjectIds } }
         ]
       }).populate('projectId', 'name')
-        .populate('assignees', 'name email avatar')
-        .populate('assignedTo', 'name email avatar')
-        .populate('assignedBy', 'name email avatar')
+        .populate('assignees', 'displayName email avatar photoURL')
+        .populate('assignedTo', 'displayName email avatar photoURL')
+        .populate('assignedBy', 'displayName email avatar photoURL')
         .sort({ createdAt: -1 }); // Newest first
     }
 
@@ -168,9 +168,9 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const task = await Task.findById(id)
       .populate('projectId', 'name')
-      .populate('assignees', 'name email avatar')
-      .populate('assignedTo', 'name email avatar')
-      .populate('assignedBy', 'name email avatar');
+      .populate('assignees', 'displayName email avatar photoURL')
+      .populate('assignedTo', 'displayName email avatar photoURL')
+      .populate('assignedBy', 'displayName email avatar photoURL');
 
     if (!task) {
       return notFoundResponse(res, 'Task not found');
@@ -314,9 +314,9 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     await task.save();
-    await task.populate('assignedTo', 'name email avatar');
-    await task.populate('assignees', 'name email avatar');
-    await task.populate('assignedBy', 'name email avatar');
+    await task.populate('assignedTo', 'displayName email avatar photoURL');
+    await task.populate('assignees', 'displayName email avatar photoURL');
+    await task.populate('assignedBy', 'displayName email avatar photoURL');
     await task.populate('projectId', 'name');
 
     logger.info(`Task created: ${task.title} in project ${projectId}`);
@@ -538,9 +538,9 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       id,
       { ...updates },
       { new: true, runValidators: true }
-    ).populate('assignedTo', 'name email avatar')
-     .populate('assignees', 'name email avatar')
-     .populate('assignedBy', 'name email avatar')
+    ).populate('assignedTo', 'displayName email avatar photoURL')
+     .populate('assignees', 'displayName email avatar photoURL')
+     .populate('assignedBy', 'displayName email avatar photoURL')
      .populate('projectId', 'name color');
 
     if (!task) {

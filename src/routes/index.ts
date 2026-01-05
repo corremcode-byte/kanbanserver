@@ -9,6 +9,8 @@ import permissionsRoutes from './permissions';
 import analyticsRoutes from './analytics';
 import auditRoutes from './audit';
 import pushNotificationRoutes from './pushNotifications';
+import commentsRoutes from './comments';
+import searchRoutes from './search';
 import devRoutes from './dev';
 
 const router = Router();
@@ -24,6 +26,8 @@ router.use('/permissions', permissionsRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/audit', auditRoutes);
 router.use('/push-notifications', pushNotificationRoutes);
+router.use('/comments', commentsRoutes);
+router.use('/search', searchRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {

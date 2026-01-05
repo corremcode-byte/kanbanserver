@@ -10,6 +10,7 @@ router.use(authenticate);
 
 // Task CRUD operations
 router.get('/', tasksController.getTasks); // No permission check - users see their assigned tasks
+router.get('/:id', tasksController.getTask); // Get single task by ID
 router.post('/', checkPermission('canCreateTasks'), tasksController.createTask);
 router.put('/:id', checkCanEditTask, tasksController.updateTask);
 router.delete('/:id', checkCanDeleteTask, tasksController.deleteTask);

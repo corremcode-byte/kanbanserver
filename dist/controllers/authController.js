@@ -366,8 +366,8 @@ const getDashboardData = async (req, res) => {
                 .sort({ updatedAt: -1 })
                 .limit(10)
                 .populate('projectId', 'name color')
-                .populate('assignees', 'name email avatar')
-                .populate('assignedTo', 'name email avatar'),
+                .populate('assignees', 'displayName email avatar photoURL')
+                .populate('assignedTo', 'displayName email avatar photoURL'),
             models_1.Project.find({
                 $or: [{ ownerId: userId }, { members: userId }, { managers: userId }],
                 status: { $ne: 'archived' }

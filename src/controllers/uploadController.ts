@@ -13,31 +13,48 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
   try {
     const { taskId } = req.params;
 
+    logger.info(`📤 Upload request received for task: ${taskId}`);
+    logger.info(`📎 File: ${req.file ? req.file.originalname : 'No file'}`);
+    logger.info(`👤 User: ${req.user ? req.user._id : 'No user'}`);
+
     if (!req.file) {
+      logger.error('❌ Upload failed: No file uploaded');
       res.status(400).json({ success: false, message: 'No file uploaded' });
       return;
     }
 
     // Validate taskId
     if (!taskId || taskId === 'undefined' || taskId === 'null') {
+      logger.error(`❌ Upload failed: Invalid task ID - ${taskId}`);
       res.status(400).json({ success: false, message: 'Invalid task ID' });
       return;
     }
 
     // Find task and verify user has permission
+    logger.info(`🔍 Looking up task: ${taskId}`);
     const task = await Task.findById(taskId).populate('projectId');
     if (!task) {
-      res.status(404).json({ success: false, message: 'Task not found' });
+      logger.error(`❌ Upload failed: Task not found - ${taskId}`);
+      res.status(404).json({ success: false, message: `Task not found with ID: ${taskId}` });
       return;
     }
+    logger.info(`✅ Task found: ${task.title}`);
 
     const project = await Project.findById(task.projectId);
     if (!project) {
+      logger.error(`❌ Upload failed: Project not found`);
       res.status(404).json({ success: false, message: 'Project not found' });
       return;
     }
+    logger.info(`✅ Project found: ${project.name}`);
 
     // Check if user is owner, manager, or member of the project
+    if (!req.user || !req.user._id) {
+      logger.error('❌ Upload failed: User not authenticated');
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
     const userId = req.user._id.toString();
     const isOwner = project.ownerId.toString() === userId;
     const isMember = project.members.some((m: any) => m.toString() === userId);
@@ -101,8 +118,13 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
 
     stream.end(file.buffer);
   } catch (error) {
-    logger.error('Error in uploadTaskAttachment:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    logger.error('❌ Error in uploadTaskAttachment:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Server error';
+    logger.error(`Error details: ${errorMessage}`);
+    res.status(500).json({
+      success: false,
+      message: `Upload failed: ${errorMessage}`
+    });
   }
 };
 

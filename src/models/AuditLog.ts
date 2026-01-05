@@ -5,7 +5,8 @@ export interface IAuditLog extends Document {
   userId: mongoose.Types.ObjectId;
   action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' |
           'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' |
-          'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added';
+          'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' |
+          'comment_updated' | 'comment_deleted';
   entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log';
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
@@ -80,7 +81,9 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'permission_changed',
       'project_updated',
       'time_logged',
-      'comment_added'
+      'comment_added',
+      'comment_updated',
+      'comment_deleted'
     ],
     required: true,
     index: true

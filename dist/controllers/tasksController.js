@@ -83,9 +83,9 @@ const getTasks = async (req, res) => {
                 tasks = await models_1.Task.find({
                     projectId,
                 }).populate('projectId', 'name')
-                    .populate('assignees', 'name email avatar')
-                    .populate('assignedTo', 'name email avatar')
-                    .populate('assignedBy', 'name email avatar')
+                    .populate('assignees', 'displayName email avatar photoURL')
+                    .populate('assignedTo', 'displayName email avatar photoURL')
+                    .populate('assignedBy', 'displayName email avatar photoURL')
                     .sort({ createdAt: -1 });
             }
             else {
@@ -97,9 +97,9 @@ const getTasks = async (req, res) => {
                         { assignedBy: req.user._id }
                     ]
                 }).populate('projectId', 'name')
-                    .populate('assignees', 'name email avatar')
-                    .populate('assignedTo', 'name email avatar')
-                    .populate('assignedBy', 'name email avatar')
+                    .populate('assignees', 'displayName email avatar photoURL')
+                    .populate('assignedTo', 'displayName email avatar photoURL')
+                    .populate('assignedBy', 'displayName email avatar photoURL')
                     .sort({ createdAt: -1 });
             }
         }
@@ -137,9 +137,9 @@ const getTasks = async (req, res) => {
                     { projectId: { $in: allAccessProjectIds } }
                 ]
             }).populate('projectId', 'name')
-                .populate('assignees', 'name email avatar')
-                .populate('assignedTo', 'name email avatar')
-                .populate('assignedBy', 'name email avatar')
+                .populate('assignees', 'displayName email avatar photoURL')
+                .populate('assignedTo', 'displayName email avatar photoURL')
+                .populate('assignedBy', 'displayName email avatar photoURL')
                 .sort({ createdAt: -1 });
         }
         return (0, responses_1.successResponse)(res, 'Tasks retrieved successfully', tasks);
@@ -155,9 +155,9 @@ const getTask = async (req, res) => {
         const { id } = req.params;
         const task = await models_1.Task.findById(id)
             .populate('projectId', 'name')
-            .populate('assignees', 'name email avatar')
-            .populate('assignedTo', 'name email avatar')
-            .populate('assignedBy', 'name email avatar');
+            .populate('assignees', 'displayName email avatar photoURL')
+            .populate('assignedTo', 'displayName email avatar photoURL')
+            .populate('assignedBy', 'displayName email avatar photoURL');
         if (!task) {
             return (0, responses_1.notFoundResponse)(res, 'Task not found');
         }
@@ -269,9 +269,9 @@ const createTask = async (req, res) => {
             order
         });
         await task.save();
-        await task.populate('assignedTo', 'name email avatar');
-        await task.populate('assignees', 'name email avatar');
-        await task.populate('assignedBy', 'name email avatar');
+        await task.populate('assignedTo', 'displayName email avatar photoURL');
+        await task.populate('assignees', 'displayName email avatar photoURL');
+        await task.populate('assignedBy', 'displayName email avatar photoURL');
         await task.populate('projectId', 'name');
         logger_1.logger.info(`Task created: ${task.title} in project ${projectId}`);
         try {
@@ -435,9 +435,9 @@ const updateTask = async (req, res) => {
                 return (0, responses_1.errorResponse)(res, 'Invalid reminder frequency', 400);
             }
         }
-        const task = await models_1.Task.findByIdAndUpdate(id, { ...updates }, { new: true, runValidators: true }).populate('assignedTo', 'name email avatar')
-            .populate('assignees', 'name email avatar')
-            .populate('assignedBy', 'name email avatar')
+        const task = await models_1.Task.findByIdAndUpdate(id, { ...updates }, { new: true, runValidators: true }).populate('assignedTo', 'displayName email avatar photoURL')
+            .populate('assignees', 'displayName email avatar photoURL')
+            .populate('assignedBy', 'displayName email avatar photoURL')
             .populate('projectId', 'name color');
         if (!task) {
             return (0, responses_1.notFoundResponse)(res, 'Task not found');
