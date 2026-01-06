@@ -228,7 +228,7 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     socket.on('typing:stop', (data: { projectId: string; taskId?: string }) => {
       try {
         const { projectId, taskId } = data;
-        
+
         if (!projectId) {
           return;
         }
@@ -242,6 +242,88 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
         });
       } catch (error) {
         logger.error('Error handling typing stop:', error);
+      }
+    });
+
+    // Handle chat room management
+    socket.on('join:chat', async (groupId: string) => {
+      try {
+        if (!groupId || typeof groupId !== 'string') {
+          socket.emit('error', { message: 'Invalid group ID' });
+          return;
+        }
+
+        const room = `chat:${groupId}`;
+        socket.join(room);
+        addSocketRoom(socket.id, room);
+
+        socket.emit('joined:chat', { groupId });
+        logger.info(`✅ User ${socket.user?.name || userId} (${socket.id}) joined chat room: ${room}`);
+      } catch (error) {
+        logger.error('Error joining chat room:', error);
+        socket.emit('error', { message: 'Failed to join chat' });
+      }
+    });
+
+    socket.on('leave:chat', (groupId: string) => {
+      try {
+        if (!groupId || typeof groupId !== 'string') {
+          socket.emit('error', { message: 'Invalid group ID' });
+          return;
+        }
+
+        const room = `chat:${groupId}`;
+        socket.leave(room);
+        removeSocketRoom(socket.id, room);
+
+        socket.emit('left:chat', { groupId });
+        logger.info(`User ${socket.user?.name || userId} (${socket.id}) left chat room: ${room}`);
+      } catch (error) {
+        logger.error('Error leaving chat room:', error);
+      }
+    });
+
+    // Handle chat typing indicators
+    socket.on('chat:typing:start', (data: { groupId: string }) => {
+      try {
+        const { groupId } = data;
+
+        if (!groupId) {
+          return;
+        }
+
+        const room = `chat:${groupId}`;
+        socket.to(room).emit('chat:typing:start', {
+          userId,
+          user: {
+            id: socket.user._id,
+            name: socket.user.name,
+            avatar: socket.user.avatar
+          },
+          groupId,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        logger.error('Error handling chat typing start:', error);
+      }
+    });
+
+    socket.on('chat:typing:stop', (data: { groupId: string }) => {
+      try {
+        const { groupId } = data;
+
+        if (!groupId) {
+          return;
+        }
+
+        const room = `chat:${groupId}`;
+        socket.to(room).emit('chat:typing:stop', {
+          userId,
+          groupId,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        logger.error('Error handling chat typing stop:', error);
       }
     });
 

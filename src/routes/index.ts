@@ -12,6 +12,7 @@ import pushNotificationRoutes from './pushNotifications';
 import commentsRoutes from './comments';
 import searchRoutes from './search';
 import devRoutes from './dev';
+import chatRoutes from './chatRoutes';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use('/audit', auditRoutes);
 router.use('/push-notifications', pushNotificationRoutes);
 router.use('/comments', commentsRoutes);
 router.use('/search', searchRoutes);
+router.use('/chat', chatRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {

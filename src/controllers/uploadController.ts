@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import Task from '../models/Task';
 import Project from '../models/Project';
+import { ChatGroup } from '../models/ChatGroup';
+import { AuthenticatedRequest } from '../middleware/auth';
 import mongoose from 'mongoose';
 
 /**
@@ -224,5 +226,140 @@ export const getTaskAttachments = async (req: Request, res: Response): Promise<v
   } catch (error) {
     logger.error('Error in getTaskAttachments:', error);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * Upload file to Firebase Storage for chat attachment
+ */
+export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { groupId } = req.params;
+
+    logger.info(`📤 Chat upload request received for group: ${groupId}`);
+    logger.info(`📎 File: ${req.file ? req.file.originalname : 'No file'}`);
+    logger.info(`👤 User: ${req.user ? req.user._id : 'No user'}`);
+    logger.info(`📦 File details: ${req.file ? JSON.stringify({
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+      bufferLength: req.file.buffer?.length
+    }) : 'N/A'}`);
+
+    if (!req.file) {
+      logger.error('❌ Upload failed: No file uploaded');
+      res.status(400).json({ success: false, message: 'No file uploaded' });
+      return;
+    }
+
+    if (!req.file.buffer) {
+      logger.error('❌ Upload failed: No file buffer');
+      res.status(400).json({ success: false, message: 'No file buffer received' });
+      return;
+    }
+
+    // Validate groupId
+    if (!groupId || groupId === 'undefined' || groupId === 'null') {
+      logger.error(`❌ Upload failed: Invalid group ID - ${groupId}`);
+      res.status(400).json({ success: false, message: 'Invalid group ID' });
+      return;
+    }
+
+    // Find group and verify user is a member
+    logger.info(`🔍 Looking up chat group: ${groupId}`);
+    const chatGroup = await ChatGroup.findOne({
+      _id: groupId,
+      members: req.user?._id,
+      isActive: true
+    });
+
+    if (!chatGroup) {
+      logger.error(`❌ Upload failed: Group not found or access denied - ${groupId}`);
+      res.status(403).json({ success: false, message: 'Not authorized to upload to this group' });
+      return;
+    }
+    logger.info(`✅ Chat group found: ${chatGroup.name}`);
+
+    const file = req.file;
+    const fileId = uuidv4();
+    const fileName = `chat-attachments/${groupId}/${fileId}-${file.originalname}`;
+
+    // Check if Firebase bucket is initialized
+    if (!bucket || !bucket.name) {
+      logger.error('❌ Firebase Storage bucket not initialized');
+      res.status(500).json({ success: false, message: 'Storage not configured' });
+      return;
+    }
+
+    logger.info(`🪣 Uploading to bucket: ${bucket.name}, path: ${fileName}`);
+
+    // Upload to Firebase Storage
+    const fileUpload = bucket.file(fileName);
+    const stream = fileUpload.createWriteStream({
+      metadata: {
+        contentType: file.mimetype,
+        metadata: {
+          uploadedBy: req.user._id.toString(),
+          groupId: groupId,
+          originalName: file.originalname
+        }
+      }
+    });
+
+    stream.on('error', (error) => {
+      logger.error('❌ Firebase Stream Error:', {
+        message: error.message,
+        code: (error as any).code,
+        statusCode: (error as any).statusCode,
+        errors: (error as any).errors
+      });
+      logger.error('Full error:', error);
+      res.status(500).json({
+        success: false,
+        message: `Failed to upload file: ${error.message}`
+      });
+    });
+
+    stream.on('finish', async () => {
+      try {
+        // Make file publicly accessible
+        await fileUpload.makePublic();
+
+        // Get public URL
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+        // Return attachment info
+        const attachment = {
+          fileName: file.originalname,
+          fileUrl: publicUrl,
+          fileType: file.mimetype,
+          fileSize: file.size
+        };
+
+        logger.info(`Chat file uploaded successfully: ${fileName}`);
+        logger.info(`Public URL: ${publicUrl}`);
+
+        res.json({
+          success: true,
+          message: 'File uploaded successfully',
+          attachment
+        });
+      } catch (finishError) {
+        logger.error('Error in stream finish handler:', finishError);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to finalize file upload'
+        });
+      }
+    });
+
+    stream.end(file.buffer);
+  } catch (error) {
+    logger.error('❌ Error in uploadChatAttachment:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Server error';
+    logger.error(`Error details: ${errorMessage}`);
+    res.status(500).json({
+      success: false,
+      message: `Upload failed: ${errorMessage}`
+    });
   }
 };

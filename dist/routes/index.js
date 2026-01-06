@@ -17,6 +17,7 @@ const pushNotifications_1 = __importDefault(require("./pushNotifications"));
 const comments_1 = __importDefault(require("./comments"));
 const search_1 = __importDefault(require("./search"));
 const dev_1 = __importDefault(require("./dev"));
+const chatRoutes_1 = __importDefault(require("./chatRoutes"));
 const router = (0, express_1.Router)();
 router.use('/auth', auth_1.default);
 router.use('/projects', projects_1.default);
@@ -30,6 +31,7 @@ router.use('/audit', audit_1.default);
 router.use('/push-notifications', pushNotifications_1.default);
 router.use('/comments', comments_1.default);
 router.use('/search', search_1.default);
+router.use('/chat', chatRoutes_1.default);
 if (process.env.NODE_ENV !== 'production') {
     router.use('/dev', dev_1.default);
 }

@@ -52,8 +52,8 @@ router.delete('/:id/owners/:userId', projectsController.removeOwner);
 router.post('/:id/transfer-ownership', projectsController.transferOwnership);
 router.delete('/:id/leave', projectsController.leaveProject);
 router.post('/:id/lists', projectsController.addList);
+router.put('/:id/lists/reorder', projectsController.reorderLists);
 router.put('/:id/lists/:listId', projectsController.updateList);
 router.delete('/:id/lists/:listId', projectsController.deleteList);
-router.put('/:id/lists/reorder', projectsController.reorderLists);
 exports.default = router;
 //# sourceMappingURL=projects.js.map
