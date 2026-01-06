@@ -35,16 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
-const permissions_1 = require("../middleware/permissions");
-const tasksController = __importStar(require("../controllers/tasksController"));
+const commentsController = __importStar(require("../controllers/commentsController"));
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
-router.get('/', tasksController.getTasks);
-router.get('/:id/history', tasksController.getTaskHistory);
-router.get('/:id', tasksController.getTask);
-router.post('/', (0, permissions_1.checkPermission)('canCreateTasks'), tasksController.createTask);
-router.put('/:id', permissions_1.checkCanEditTask, tasksController.updateTask);
-router.delete('/:id', permissions_1.checkCanDeleteTask, tasksController.deleteTask);
-router.post('/reorder', tasksController.reorderTasks);
+router.get('/task/:taskId', commentsController.getComments);
+router.post('/task/:taskId', commentsController.addComment);
+router.put('/task/:taskId/:commentId', commentsController.updateComment);
+router.delete('/task/:taskId/:commentId', commentsController.deleteComment);
 exports.default = router;
-//# sourceMappingURL=tasks.js.map
+//# sourceMappingURL=comments.js.map

@@ -69,6 +69,9 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
     const fileId = uuidv4();
     const fileName = `task-attachments/${taskId}/${fileId}-${file.originalname}`;
 
+    logger.info(`📦 Preparing to upload file: ${fileName}`);
+    logger.info(`📦 Bucket name: ${bucket.name}`);
+
     // Upload to Firebase Storage
     const fileUpload = bucket.file(fileName);
     const stream = fileUpload.createWriteStream({
@@ -83,8 +86,18 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
     });
 
     stream.on('error', (error) => {
-      logger.error('Error uploading file to Firebase:', error);
-      res.status(500).json({ success: false, message: 'Failed to upload file' });
+      logger.error('❌ Error uploading file to Firebase:', error);
+      logger.error('Error details:', {
+        message: error.message,
+        code: (error as any).code,
+        stack: error.stack
+      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: `Failed to upload file: ${error.message}`
+        });
+      }
     });
 
     stream.on('finish', async () => {

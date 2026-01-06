@@ -109,6 +109,13 @@ const TaskSchema = new mongoose_1.Schema({
             uploadedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
             uploadedAt: { type: Date, default: Date.now }
         }],
+    comments: [{
+            id: { type: String, required: true },
+            text: { type: String, required: true, trim: true },
+            createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+            createdAt: { type: Date, default: Date.now },
+            updatedAt: { type: Date }
+        }],
     order: { type: Number, default: 0 }
 }, {
     timestamps: true,

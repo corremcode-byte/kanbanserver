@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reorderTasks = exports.deleteTask = exports.updateTask = exports.createTask = exports.getTask = exports.getTasks = void 0;
+exports.getTaskHistory = exports.reorderTasks = exports.deleteTask = exports.updateTask = exports.createTask = exports.getTask = exports.getTasks = void 0;
 const models_1 = require("../models");
 const AuditLog_1 = require("../models/AuditLog");
 const ProjectPermission_1 = require("../models/ProjectPermission");
@@ -800,4 +800,109 @@ const reorderTasks = async (req, res) => {
     }
 };
 exports.reorderTasks = reorderTasks;
+const getTaskHistory = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const task = await models_1.Task.findById(id).populate('projectId');
+        if (!task) {
+            return (0, responses_1.notFoundResponse)(res, 'Task not found');
+        }
+        const project = task.projectId;
+        if (!project) {
+            return (0, responses_1.notFoundResponse)(res, 'Project not found');
+        }
+        const ownerId = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+        const isMember = project.members.some((member) => {
+            const memberId = typeof member === 'object' && member._id
+                ? member._id.toString()
+                : member.toString();
+            return memberId === req.user._id;
+        });
+        const isManager = project.managers && project.managers.some((manager) => {
+            const managerId = typeof manager === 'object' && manager._id
+                ? manager._id.toString()
+                : manager.toString();
+            return managerId === req.user._id;
+        });
+        const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager;
+        if (!isOwnerOrMemberOrManager) {
+            return (0, responses_1.errorResponse)(res, 'Access denied to this task', 403);
+        }
+        const history = await AuditLog_1.AuditLog.find({
+            projectId: project._id,
+            $or: [
+                { entityId: id },
+                { 'metadata.taskId': id }
+            ]
+        })
+            .populate('userId', 'displayName email photoURL')
+            .sort({ createdAt: -1 })
+            .limit(100);
+        const formattedHistory = history.map((log) => ({
+            action: log.action,
+            user: {
+                name: log.userId?.displayName || 'Unknown',
+                email: log.userId?.email || ''
+            },
+            timestamp: log.createdAt,
+            description: getActionDescription(log),
+            changes: extractChanges(log.metadata),
+            metadata: log.metadata
+        }));
+        return (0, responses_1.successResponse)(res, 'Task history retrieved successfully', formattedHistory);
+    }
+    catch (error) {
+        logger_1.logger.error('Error fetching task history:', error);
+        return (0, responses_1.internalServerErrorResponse)(res, 'Failed to fetch task history');
+    }
+};
+exports.getTaskHistory = getTaskHistory;
+function getActionDescription(log) {
+    const metadata = log.metadata || {};
+    switch (log.action) {
+        case 'task_created':
+            return `Task "${metadata.taskTitle || 'Unknown'}" was created`;
+        case 'task_updated':
+            return 'Task was updated';
+        case 'task_assigned':
+            return `Task assigned to ${metadata.assigneeName || 'someone'}`;
+        case 'task_status_changed':
+            return `Status changed from "${metadata.oldStatus || 'Unknown'}" to "${metadata.newStatus || 'Unknown'}"`;
+        case 'task_completed':
+            return 'Task was marked as completed';
+        case 'task_deleted':
+            return 'Task was deleted';
+        default:
+            return log.action.replace(/_/g, ' ');
+    }
+}
+function extractChanges(metadata) {
+    if (!metadata)
+        return {};
+    const changes = {};
+    if (metadata.oldStatus && metadata.newStatus) {
+        changes.status = {
+            from: metadata.oldStatus,
+            to: metadata.newStatus
+        };
+    }
+    if (metadata.oldPriority && metadata.newPriority) {
+        changes.priority = {
+            from: metadata.oldPriority,
+            to: metadata.newPriority
+        };
+    }
+    if (metadata.oldAssignee || metadata.newAssignee) {
+        changes.assignee = {
+            from: metadata.oldAssignee || 'None',
+            to: metadata.newAssignee || 'None'
+        };
+    }
+    if (metadata.changes) {
+        Object.assign(changes, metadata.changes);
+    }
+    return changes;
+}
 //# sourceMappingURL=tasksController.js.map

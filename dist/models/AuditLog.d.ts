@@ -2,7 +2,7 @@ import mongoose, { Document, Model } from 'mongoose';
 export interface IAuditLog extends Document {
     projectId: mongoose.Types.ObjectId;
     userId: mongoose.Types.ObjectId;
-    action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' | 'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' | 'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added';
+    action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' | 'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' | 'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' | 'comment_updated' | 'comment_deleted';
     entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log';
     entityId?: mongoose.Types.ObjectId;
     metadata?: {

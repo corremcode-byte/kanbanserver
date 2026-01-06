@@ -91,10 +91,10 @@ const getProjects = async (req, res) => {
                 }];
         }
         const projects = await models_1.Project.find(query)
-            .populate('ownerId', 'name email avatar')
-            .populate('owners', 'name email avatar')
-            .populate('members', 'name email avatar')
-            .populate('managers', 'name email avatar')
+            .populate('ownerId', 'name email avatar displayName photoURL')
+            .populate('owners', 'name email avatar displayName photoURL')
+            .populate('members', 'name email avatar displayName photoURL')
+            .populate('managers', 'name email avatar displayName photoURL')
             .sort({ updatedAt: -1 })
             .skip((pageNum - 1) * limitNum)
             .limit(limitNum);
@@ -164,10 +164,10 @@ const getProject = async (req, res) => {
             return (0, responses_1.errorResponse)(res, 'Invalid project ID', 400);
         }
         const project = await models_1.Project.findById(id)
-            .populate('ownerId', 'name email avatar')
-            .populate('owners', 'name email avatar')
-            .populate('members', 'name email avatar')
-            .populate('managers', 'name email avatar');
+            .populate('ownerId', 'name email avatar displayName photoURL')
+            .populate('owners', 'name email avatar displayName photoURL')
+            .populate('members', 'name email avatar displayName photoURL')
+            .populate('managers', 'name email avatar displayName photoURL');
         console.log('Project found:', project ? {
             id: project._id,
             owner: project.ownerId,

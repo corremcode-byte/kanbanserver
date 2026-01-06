@@ -62,7 +62,9 @@ const AuditLogSchema = new mongoose_1.Schema({
             'permission_changed',
             'project_updated',
             'time_logged',
-            'comment_added'
+            'comment_added',
+            'comment_updated',
+            'comment_deleted'
         ],
         required: true,
         index: true

@@ -16,5 +16,6 @@ export declare const createTask: (req: AuthenticatedRequest, res: Response) => P
 export declare const updateTask: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const deleteTask: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export declare const reorderTasks: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+export declare const getTaskHistory: (req: AuthenticatedRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 export {};
 //# sourceMappingURL=tasksController.d.ts.map

@@ -1010,3 +1010,136 @@ export const reorderTasks = async (req: AuthenticatedRequest, res: Response) => 
     return internalServerErrorResponse(res, 'Failed to reorder tasks');
   }
 };
+
+// Get task history (audit logs for a specific task)
+export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Verify task exists and user has access
+    const task = await Task.findById(id).populate('projectId');
+    if (!task) {
+      return notFoundResponse(res, 'Task not found');
+    }
+
+    const project = task.projectId as any;
+    if (!project) {
+      return notFoundResponse(res, 'Project not found');
+    }
+
+    // Check if user has access to the project
+    const ownerId = typeof project.ownerId === 'object' && project.ownerId._id
+      ? project.ownerId._id.toString()
+      : project.ownerId.toString();
+
+    const isMember = project.members.some((member: any) => {
+      const memberId = typeof member === 'object' && member._id
+        ? member._id.toString()
+        : member.toString();
+      return memberId === req.user._id;
+    });
+
+    const isManager = project.managers && project.managers.some((manager: any) => {
+      const managerId = typeof manager === 'object' && manager._id
+        ? manager._id.toString()
+        : manager.toString();
+      return managerId === req.user._id;
+    });
+
+    const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager;
+
+    if (!isOwnerOrMemberOrManager) {
+      return errorResponse(res, 'Access denied to this task', 403);
+    }
+
+    // Fetch audit logs for this task
+    const history = await AuditLog.find({
+      projectId: project._id,
+      $or: [
+        { entityId: id },
+        { 'metadata.taskId': id }
+      ]
+    })
+      .populate('userId', 'displayName email photoURL')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    // Transform the history to a more readable format
+    const formattedHistory = history.map((log: any) => ({
+      action: log.action,
+      user: {
+        name: log.userId?.displayName || 'Unknown',
+        email: log.userId?.email || ''
+      },
+      timestamp: log.createdAt,
+      description: getActionDescription(log),
+      changes: extractChanges(log.metadata),
+      metadata: log.metadata
+    }));
+
+    return successResponse(res, 'Task history retrieved successfully', formattedHistory);
+  } catch (error) {
+    logger.error('Error fetching task history:', error);
+    return internalServerErrorResponse(res, 'Failed to fetch task history');
+  }
+};
+
+// Helper function to get human-readable action description
+function getActionDescription(log: any): string {
+  const metadata = log.metadata || {};
+
+  switch (log.action) {
+    case 'task_created':
+      return `Task "${metadata.taskTitle || 'Unknown'}" was created`;
+    case 'task_updated':
+      return 'Task was updated';
+    case 'task_assigned':
+      return `Task assigned to ${metadata.assigneeName || 'someone'}`;
+    case 'task_status_changed':
+      return `Status changed from "${metadata.oldStatus || 'Unknown'}" to "${metadata.newStatus || 'Unknown'}"`;
+    case 'task_completed':
+      return 'Task was marked as completed';
+    case 'task_deleted':
+      return 'Task was deleted';
+    default:
+      return log.action.replace(/_/g, ' ');
+  }
+}
+
+// Helper function to extract field changes
+function extractChanges(metadata: any): any {
+  if (!metadata) return {};
+
+  const changes: any = {};
+
+  // Extract status change
+  if (metadata.oldStatus && metadata.newStatus) {
+    changes.status = {
+      from: metadata.oldStatus,
+      to: metadata.newStatus
+    };
+  }
+
+  // Extract priority change
+  if (metadata.oldPriority && metadata.newPriority) {
+    changes.priority = {
+      from: metadata.oldPriority,
+      to: metadata.newPriority
+    };
+  }
+
+  // Extract assignee change
+  if (metadata.oldAssignee || metadata.newAssignee) {
+    changes.assignee = {
+      from: metadata.oldAssignee || 'None',
+      to: metadata.newAssignee || 'None'
+    };
+  }
+
+  // Extract other field changes from metadata
+  if (metadata.changes) {
+    Object.assign(changes, metadata.changes);
+  }
+
+  return changes;
+}

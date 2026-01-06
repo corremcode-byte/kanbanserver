@@ -13,22 +13,37 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const uploadTaskAttachment = async (req, res) => {
     try {
         const { taskId } = req.params;
+        logger_1.logger.info(`📤 Upload request received for task: ${taskId}`);
+        logger_1.logger.info(`📎 File: ${req.file ? req.file.originalname : 'No file'}`);
+        logger_1.logger.info(`👤 User: ${req.user ? req.user._id : 'No user'}`);
         if (!req.file) {
+            logger_1.logger.error('❌ Upload failed: No file uploaded');
             res.status(400).json({ success: false, message: 'No file uploaded' });
             return;
         }
         if (!taskId || taskId === 'undefined' || taskId === 'null') {
+            logger_1.logger.error(`❌ Upload failed: Invalid task ID - ${taskId}`);
             res.status(400).json({ success: false, message: 'Invalid task ID' });
             return;
         }
+        logger_1.logger.info(`🔍 Looking up task: ${taskId}`);
         const task = await Task_1.default.findById(taskId).populate('projectId');
         if (!task) {
-            res.status(404).json({ success: false, message: 'Task not found' });
+            logger_1.logger.error(`❌ Upload failed: Task not found - ${taskId}`);
+            res.status(404).json({ success: false, message: `Task not found with ID: ${taskId}` });
             return;
         }
+        logger_1.logger.info(`✅ Task found: ${task.title}`);
         const project = await Project_1.default.findById(task.projectId);
         if (!project) {
+            logger_1.logger.error(`❌ Upload failed: Project not found`);
             res.status(404).json({ success: false, message: 'Project not found' });
+            return;
+        }
+        logger_1.logger.info(`✅ Project found: ${project.name}`);
+        if (!req.user || !req.user._id) {
+            logger_1.logger.error('❌ Upload failed: User not authenticated');
+            res.status(401).json({ success: false, message: 'Authentication required' });
             return;
         }
         const userId = req.user._id.toString();
@@ -81,8 +96,13 @@ const uploadTaskAttachment = async (req, res) => {
         stream.end(file.buffer);
     }
     catch (error) {
-        logger_1.logger.error('Error in uploadTaskAttachment:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        logger_1.logger.error('❌ Error in uploadTaskAttachment:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Server error';
+        logger_1.logger.error(`Error details: ${errorMessage}`);
+        res.status(500).json({
+            success: false,
+            message: `Upload failed: ${errorMessage}`
+        });
     }
 };
 exports.uploadTaskAttachment = uploadTaskAttachment;

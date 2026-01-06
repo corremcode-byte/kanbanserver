@@ -82,10 +82,10 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const projects = await Project.find(query)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar')
+      .populate('ownerId', 'name email avatar displayName photoURL')
+      .populate('owners', 'name email avatar displayName photoURL')
+      .populate('members', 'name email avatar displayName photoURL')
+      .populate('managers', 'name email avatar displayName photoURL')
       .sort({ updatedAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
@@ -170,10 +170,10 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const project = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar displayName photoURL')
+      .populate('owners', 'name email avatar displayName photoURL')
+      .populate('members', 'name email avatar displayName photoURL')
+      .populate('managers', 'name email avatar displayName photoURL');
 
     console.log('Project found:', project ? {
       id: project._id,

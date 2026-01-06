@@ -29,8 +29,8 @@ router.delete('/:id/leave', projectsController.leaveProject);
 
 // List/Column management
 router.post('/:id/lists', projectsController.addList);
+router.put('/:id/lists/reorder', projectsController.reorderLists); // Must be before :listId route
 router.put('/:id/lists/:listId', projectsController.updateList);
 router.delete('/:id/lists/:listId', projectsController.deleteList);
-router.put('/:id/lists/reorder', projectsController.reorderLists);
 
 export default router;
