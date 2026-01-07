@@ -231,6 +231,104 @@ export const markMessageAsRead = async (req: AuthenticatedRequest, res: Response
   }
 };
 
+// Edit a message (only sender can edit)
+export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    const { encryptedContent, nonce } = req.body;
+    const userId = req.user?._id;
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Check if user is the sender
+    if (message.senderId.toString() !== userId?.toString()) {
+      return res.status(403).json({ message: 'You can only edit your own messages' });
+    }
+
+    // Check if message is already deleted
+    if (message.isDeleted) {
+      return res.status(400).json({ message: 'Cannot edit a deleted message' });
+    }
+
+    // Update message content
+    message.encryptedContent = encryptedContent;
+    message.nonce = nonce;
+    await message.save();
+
+    // Populate sender info
+    await message.populate('senderId', 'displayName email photoURL');
+
+    // Notify all group members via Socket.IO
+    const chatGroup = await ChatGroup.findById(message.groupId);
+    if (chatGroup) {
+      chatGroup.members.forEach((memberId) => {
+        io.to(`user:${memberId.toString()}`).emit('chat:message:updated', {
+          groupId: message.groupId,
+          message
+        });
+      });
+    }
+
+    return res.json(message);
+  } catch (error) {
+    console.error('Error editing message:', error);
+    return res.status(500).json({ message: 'Failed to edit message' });
+  }
+};
+
+// Delete a message (sender or admin/group creator can delete)
+export const deleteMessage = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user?._id;
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Check if user is sender, admin, or group creator
+    const isSender = message.senderId.toString() === userId?.toString();
+    
+    const chatGroup = await ChatGroup.findById(message.groupId);
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    const isAdmin = req.user?.role === 'admin';
+    const isCreator = chatGroup.createdBy.toString() === userId?.toString();
+
+    if (!isSender && !isAdmin && !isCreator) {
+      return res.status(403).json({ message: 'You do not have permission to delete this message' });
+    }
+
+    // Soft delete
+    message.isDeleted = true;
+    await message.save();
+
+    // Populate sender info
+    await message.populate('senderId', 'displayName email photoURL');
+
+    // Notify all group members via Socket.IO
+    chatGroup.members.forEach((memberId) => {
+      io.to(`user:${memberId.toString()}`).emit('chat:message:deleted', {
+        groupId: message.groupId,
+        message
+      });
+    });
+
+    return res.json({ success: true, message });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    return res.status(500).json({ message: 'Failed to delete message' });
+  }
+};
+
 // Add members to a group (Admin or group creator only)
 export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -6,6 +6,8 @@ import {
   sendMessage,
   getGroupMessages,
   markMessageAsRead,
+  editMessage,
+  deleteMessage,
   addMembersToGroup,
   removeMemberFromGroup,
   updateChatGroup,
@@ -103,5 +105,7 @@ router.post('/groups/:groupId/upload', (req, res, next) => {
 router.post('/messages', sendMessage);
 router.get('/groups/:groupId/messages', getGroupMessages);
 router.put('/messages/:messageId/read', markMessageAsRead);
+router.put('/messages/:messageId', editMessage);
+router.delete('/messages/:messageId', deleteMessage);
 
 export default router;
