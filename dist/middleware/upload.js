@@ -17,12 +17,24 @@ const chatAttachmentsDir = path_1.default.join(uploadsDir, 'chat-attachments');
 });
 const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
+        console.log('📂 Upload destination check:', {
+            baseUrl: req.baseUrl,
+            path: req.path,
+            url: req.url,
+            originalUrl: req.originalUrl
+        });
         let dest = uploadsDir;
-        if (req.baseUrl.includes('/task/') || req.path.includes('/task/')) {
+        const fullPath = req.originalUrl || req.url;
+        if (req.baseUrl.includes('/task') || req.path.includes('/task') || fullPath.includes('/task')) {
             dest = taskAttachmentsDir;
+            console.log('✅ Destination: task-attachments');
         }
-        else if (req.baseUrl.includes('/chat/') || req.path.includes('/chat/')) {
+        else if (req.baseUrl.includes('/chat') || req.path.includes('/chat') || fullPath.includes('/chat')) {
             dest = chatAttachmentsDir;
+            console.log('✅ Destination: chat-attachments');
+        }
+        else {
+            console.log('⚠️ Destination: root uploads (no match)');
         }
         cb(null, dest);
     },
