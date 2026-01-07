@@ -55,8 +55,15 @@ export const getProjectPermissions = async (req: AuthenticatedRequest, res: Resp
 
     // Filter out permissions with null userId (deleted users)
     const validPermissions = permissions.filter(p => p.userId != null);
+    const normalizedPermissions = validPermissions.map((p) => {
+      const defaults = ProjectPermission.getDefaultPermissions(p.role);
+      return {
+        ...p.toJSON(),
+        permissions: { ...defaults, ...p.permissions }
+      };
+    });
 
-    return successResponse(res, 'Permissions retrieved successfully', validPermissions);
+    return successResponse(res, 'Permissions retrieved successfully', normalizedPermissions);
   } catch (error) {
     logger.error('Error getting project permissions:', error);
     return internalServerErrorResponse(res, 'Failed to retrieve permissions');
@@ -308,8 +315,11 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
       return notFoundResponse(res, 'Permission not found. You may not be a member of this project.');
     }
 
+    const defaults = ProjectPermission.getDefaultPermissions(permission.role);
+
     return successResponse(res, 'Permission retrieved successfully', {
       ...permission.toJSON(),
+      permissions: { ...defaults, ...permission.permissions },
       isOwner: false
     });
   } catch (error) {

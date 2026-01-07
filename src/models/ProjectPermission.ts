@@ -13,6 +13,8 @@ export interface IProjectPermission extends Document {
     canManageMembers: boolean;
     canViewAllTasks: boolean; // false = can only see own tasks
     canManagePermissions: boolean;
+    canCreateChatGroups: boolean;
+    canDeleteChatGroups: boolean;
   };
   customPermissions?: Record<string, boolean>; // For future extensibility
   createdAt: Date;
@@ -50,7 +52,9 @@ const ProjectPermissionSchema = new Schema<IProjectPermission>({
     canEditProject: { type: Boolean, default: false },
     canManageMembers: { type: Boolean, default: false },
     canViewAllTasks: { type: Boolean, default: false },
-    canManagePermissions: { type: Boolean, default: false }
+    canManagePermissions: { type: Boolean, default: false },
+    canCreateChatGroups: { type: Boolean, default: false },
+    canDeleteChatGroups: { type: Boolean, default: false }
   },
   customPermissions: {
     type: Map,
@@ -93,7 +97,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: true,
       canManageMembers: true,
       canViewAllTasks: true,
-      canManagePermissions: true
+        canManagePermissions: true,
+        canCreateChatGroups: true,
+        canDeleteChatGroups: true
     },
     manager: {
       canCreateTasks: true,
@@ -103,7 +109,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: false,
       canManageMembers: false,
       canViewAllTasks: true,
-      canManagePermissions: false
+        canManagePermissions: false,
+        canCreateChatGroups: false,
+        canDeleteChatGroups: false
     },
     assignee: {
       canCreateTasks: false,
@@ -113,7 +121,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: false,
       canManageMembers: false,
       canViewAllTasks: false, // Can only view own tasks
-      canManagePermissions: false
+        canManagePermissions: false,
+        canCreateChatGroups: false,
+        canDeleteChatGroups: false
     }
   };
 

@@ -6,8 +6,8 @@ export interface IAuditLog extends Document {
   action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' |
           'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' |
           'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' |
-          'comment_updated' | 'comment_deleted';
-  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log';
+          'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted';
+  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group';
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
     taskId?: string;
@@ -83,14 +83,16 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'time_logged',
       'comment_added',
       'comment_updated',
-      'comment_deleted'
+      'comment_deleted',
+      'chat_group_created',
+      'chat_group_deleted'
     ],
     required: true,
     index: true
   },
   entityType: {
     type: String,
-    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log'],
+    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group'],
     required: true
   },
   entityId: {

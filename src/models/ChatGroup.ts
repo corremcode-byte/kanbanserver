@@ -5,6 +5,7 @@ export interface IChatGroup extends Document {
   description?: string;
   createdBy: mongoose.Types.ObjectId;
   members: mongoose.Types.ObjectId[];
+  projectId?: mongoose.Types.ObjectId;
   encryptionPublicKey: string; // Group's public key for encryption
   isActive: boolean;
   createdAt: Date;
@@ -35,6 +36,11 @@ const chatGroupSchema = new Schema<IChatGroup>(
       ref: 'User',
       required: true
     }],
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Project',
+      index: true
+    },
     encryptionPublicKey: {
       type: String,
       required: true

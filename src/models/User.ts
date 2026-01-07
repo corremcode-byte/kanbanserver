@@ -18,6 +18,10 @@ export interface IUser extends Document {
   isActive: boolean;
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
+  permissions?: {
+    canCreateChatGroups?: boolean;
+    canDeleteOwnChatGroups?: boolean;
+  };
   settings?: {
     appearance?: {
       theme?: 'light' | 'dark' | 'system';
@@ -116,6 +120,16 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       }
     }
   }],
+  permissions: {
+    canCreateChatGroups: {
+      type: Boolean,
+      default: false
+    },
+    canDeleteOwnChatGroups: {
+      type: Boolean,
+      default: false
+    }
+  },
   settings: {
     appearance: {
       theme: {

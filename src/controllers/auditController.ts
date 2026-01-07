@@ -20,6 +20,8 @@ const actionToEventMap: Record<string, string> = {
   'project_updated': 'project.updated',
   'time_logged': 'time.logged',
   'comment_added': 'comment.added',
+  'chat_group_created': 'chat_group.created',
+  'chat_group_deleted': 'chat_group.deleted'
 };
 
 // Generate user-friendly details from audit log entry
@@ -57,6 +59,10 @@ const generateDetails = (log: any): string => {
       return `Logged ${metadata.duration || 0} minutes on task`;
     case 'comment_added':
       return `Added comment to task`;
+    case 'chat_group_created':
+      return `Created chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` in project "${metadata.projectName}"` : ''}`;
+    case 'chat_group_deleted':
+      return `Deleted chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` from project "${metadata.projectName}"` : ''}`;
     default:
       return `Performed action: ${log.action}`;
   }

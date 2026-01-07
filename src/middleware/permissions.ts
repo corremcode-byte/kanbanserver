@@ -21,7 +21,9 @@ type Permission =
   | 'canEditProject'
   | 'canManageMembers'
   | 'canViewAllTasks'
-  | 'canManagePermissions';
+  | 'canManagePermissions'
+  | 'canCreateChatGroups'
+  | 'canDeleteChatGroups';
 
 /**
  * Middleware to check if user has specific permission for a project
