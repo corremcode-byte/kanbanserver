@@ -4,7 +4,8 @@ import upload from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,
-  getTaskAttachments
+  getTaskAttachments,
+  uploadChatAttachment
 } from '../controllers/uploadController';
 import { MulterError } from 'multer';
 
@@ -61,5 +62,12 @@ router.get('/task/:taskId/attachments', getTaskAttachments);
  * @access  Private (owner/manager/uploader only)
  */
 router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
+
+/**
+ * @route   POST /api/upload/chat/:groupId
+ * @desc    Upload attachment for chat message
+ * @access  Private (chat group members only)
+ */
+router.post('/chat/:groupId', upload.single('file'), handleMulterError, uploadChatAttachment);
 
 export default router;

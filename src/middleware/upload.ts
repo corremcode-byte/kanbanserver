@@ -1,8 +1,43 @@
 import multer from 'multer';
 import { Request } from 'express';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 
-// Configure multer for memory storage (we'll upload to Firebase from memory)
-const storage = multer.memoryStorage();
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(process.cwd(), 'uploads');
+const taskAttachmentsDir = path.join(uploadsDir, 'task-attachments');
+const chatAttachmentsDir = path.join(uploadsDir, 'chat-attachments');
+
+// Ensure directories exist
+[uploadsDir, taskAttachmentsDir, chatAttachmentsDir].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
+// Configure multer for disk storage (files stored on VPS)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Determine destination based on route
+    let dest = uploadsDir;
+    if (req.baseUrl.includes('/task/') || req.path.includes('/task/')) {
+      dest = taskAttachmentsDir;
+    } else if (req.baseUrl.includes('/chat/') || req.path.includes('/chat/')) {
+      dest = chatAttachmentsDir;
+    }
+    cb(null, dest);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with UUID and timestamp
+    const uniqueId = uuidv4();
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const baseName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `${timestamp}-${uniqueId}-${baseName}${ext}`;
+    cb(null, fileName);
+  }
+});
 
 // File filter to restrict file types
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {

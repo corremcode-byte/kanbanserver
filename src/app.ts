@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import path from 'path';
 import connectDB from './config/database';
 import routes from './routes';
 import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -58,6 +59,9 @@ app.use(cors({
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Connect to database (lazy connection for serverless)
 // NOTE: Currently configured for MongoDB, but should be migrated to MySQL

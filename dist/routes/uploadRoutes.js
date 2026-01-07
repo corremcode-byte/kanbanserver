@@ -37,5 +37,6 @@ const handleMulterError = (err, req, res, next) => {
 router.post('/task/:taskId', upload_1.default.single('file'), handleMulterError, uploadController_1.uploadTaskAttachment);
 router.get('/task/:taskId/attachments', uploadController_1.getTaskAttachments);
 router.delete('/task/:taskId/attachment/:attachmentId', uploadController_1.deleteTaskAttachment);
+router.post('/chat/:groupId', upload_1.default.single('file'), handleMulterError, uploadController_1.uploadChatAttachment);
 exports.default = router;
 //# sourceMappingURL=uploadRoutes.js.map

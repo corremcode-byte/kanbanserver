@@ -4,7 +4,37 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const multer_1 = __importDefault(require("multer"));
-const storage = multer_1.default.memoryStorage();
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const uuid_1 = require("uuid");
+const uploadsDir = path_1.default.join(process.cwd(), 'uploads');
+const taskAttachmentsDir = path_1.default.join(uploadsDir, 'task-attachments');
+const chatAttachmentsDir = path_1.default.join(uploadsDir, 'chat-attachments');
+[uploadsDir, taskAttachmentsDir, chatAttachmentsDir].forEach(dir => {
+    if (!fs_1.default.existsSync(dir)) {
+        fs_1.default.mkdirSync(dir, { recursive: true });
+    }
+});
+const storage = multer_1.default.diskStorage({
+    destination: (req, file, cb) => {
+        let dest = uploadsDir;
+        if (req.baseUrl.includes('/task/') || req.path.includes('/task/')) {
+            dest = taskAttachmentsDir;
+        }
+        else if (req.baseUrl.includes('/chat/') || req.path.includes('/chat/')) {
+            dest = chatAttachmentsDir;
+        }
+        cb(null, dest);
+    },
+    filename: (req, file, cb) => {
+        const uniqueId = (0, uuid_1.v4)();
+        const timestamp = Date.now();
+        const ext = path_1.default.extname(file.originalname);
+        const baseName = path_1.default.basename(file.originalname, ext).replace(/[^a-zA-Z0-9]/g, '_');
+        const fileName = `${timestamp}-${uniqueId}-${baseName}${ext}`;
+        cb(null, fileName);
+    }
+});
 const fileFilter = (req, file, cb) => {
     const allowedTypes = [
         'image/jpeg',

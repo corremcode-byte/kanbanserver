@@ -4,13 +4,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadChatAttachment = exports.getTaskAttachments = exports.deleteTaskAttachment = exports.uploadTaskAttachment = void 0;
-const firebase_1 = require("../config/firebase");
 const uuid_1 = require("uuid");
 const logger_1 = require("../utils/logger");
 const Task_1 = __importDefault(require("../models/Task"));
 const Project_1 = __importDefault(require("../models/Project"));
 const ChatGroup_1 = require("../models/ChatGroup");
 const mongoose_1 = __importDefault(require("mongoose"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const getBaseUrl = (req) => {
+    if (process.env.API_URL) {
+        return process.env.API_URL;
+    }
+    const protocol = req.protocol;
+    const host = req.get('host');
+    return `${protocol}://${host}`;
+};
 const uploadTaskAttachment = async (req, res) => {
     try {
         const { taskId } = req.params;
@@ -57,56 +66,27 @@ const uploadTaskAttachment = async (req, res) => {
         }
         const file = req.file;
         const fileId = (0, uuid_1.v4)();
-        const fileName = `task-attachments/${taskId}/${fileId}-${file.originalname}`;
-        logger_1.logger.info(`📦 Preparing to upload file: ${fileName}`);
-        logger_1.logger.info(`📦 Bucket name: ${firebase_1.bucket.name}`);
-        const fileUpload = firebase_1.bucket.file(fileName);
-        const stream = fileUpload.createWriteStream({
-            metadata: {
-                contentType: file.mimetype,
-                metadata: {
-                    uploadedBy: userId,
-                    taskId: taskId,
-                    originalName: file.originalname
-                }
-            }
+        const baseUrl = getBaseUrl(req);
+        const publicUrl = `${baseUrl}/uploads/task-attachments/${file.filename}`;
+        logger_1.logger.info(`📦 File saved to disk: ${file.path}`);
+        logger_1.logger.info(`🔗 Public URL: ${publicUrl}`);
+        const attachment = {
+            id: fileId,
+            name: file.originalname,
+            url: publicUrl,
+            type: file.mimetype,
+            size: file.size,
+            uploadedBy: new mongoose_1.default.Types.ObjectId(req.user._id),
+            uploadedAt: new Date()
+        };
+        task.attachments.push(attachment);
+        await task.save();
+        logger_1.logger.info(`✅ File uploaded successfully: ${file.filename}`);
+        res.json({
+            success: true,
+            message: 'File uploaded successfully',
+            attachment
         });
-        stream.on('error', (error) => {
-            logger_1.logger.error('❌ Error uploading file to Firebase:', error);
-            logger_1.logger.error('Error details:', {
-                message: error.message,
-                code: error.code,
-                stack: error.stack
-            });
-            if (!res.headersSent) {
-                res.status(500).json({
-                    success: false,
-                    message: `Failed to upload file: ${error.message}`
-                });
-            }
-        });
-        stream.on('finish', async () => {
-            await fileUpload.makePublic();
-            const publicUrl = `https://storage.googleapis.com/${firebase_1.bucket.name}/${fileName}`;
-            const attachment = {
-                id: fileId,
-                name: file.originalname,
-                url: publicUrl,
-                type: file.mimetype,
-                size: file.size,
-                uploadedBy: new mongoose_1.default.Types.ObjectId(req.user._id),
-                uploadedAt: new Date()
-            };
-            task.attachments.push(attachment);
-            await task.save();
-            logger_1.logger.info(`File uploaded successfully: ${fileName}`);
-            res.json({
-                success: true,
-                message: 'File uploaded successfully',
-                attachment
-            });
-        });
-        stream.end(file.buffer);
     }
     catch (error) {
         logger_1.logger.error('❌ Error in uploadTaskAttachment:', error);
@@ -145,13 +125,20 @@ const deleteTaskAttachment = async (req, res) => {
             res.status(403).json({ success: false, message: 'Access denied' });
             return;
         }
-        const fileName = `task-attachments/${taskId}/${attachmentId}-${attachment.name}`;
         try {
-            await firebase_1.bucket.file(fileName).delete();
-            logger_1.logger.info(`Deleted file from storage: ${fileName}`);
+            const urlParts = attachment.url.split('/');
+            const filename = urlParts[urlParts.length - 1];
+            const filePath = path_1.default.join(process.cwd(), 'uploads', 'task-attachments', filename);
+            if (fs_1.default.existsSync(filePath)) {
+                fs_1.default.unlinkSync(filePath);
+                logger_1.logger.info(`Deleted file from storage: ${filePath}`);
+            }
+            else {
+                logger_1.logger.warn(`File not found in storage: ${filePath}`);
+            }
         }
         catch (error) {
-            logger_1.logger.warn(`File not found in storage: ${fileName}`, error);
+            logger_1.logger.warn(`Error deleting file from storage:`, error);
         }
         task.attachments = task.attachments.filter((a) => a.id !== attachmentId);
         await task.save();
@@ -191,19 +178,9 @@ const uploadChatAttachment = async (req, res) => {
         logger_1.logger.info(`📤 Chat upload request received for group: ${groupId}`);
         logger_1.logger.info(`📎 File: ${req.file ? req.file.originalname : 'No file'}`);
         logger_1.logger.info(`👤 User: ${req.user ? req.user._id : 'No user'}`);
-        logger_1.logger.info(`📦 File details: ${req.file ? JSON.stringify({
-            size: req.file.size,
-            mimetype: req.file.mimetype,
-            bufferLength: req.file.buffer?.length
-        }) : 'N/A'}`);
         if (!req.file) {
             logger_1.logger.error('❌ Upload failed: No file uploaded');
             res.status(400).json({ success: false, message: 'No file uploaded' });
-            return;
-        }
-        if (!req.file.buffer) {
-            logger_1.logger.error('❌ Upload failed: No file buffer');
-            res.status(400).json({ success: false, message: 'No file buffer received' });
             return;
         }
         if (!groupId || groupId === 'undefined' || groupId === 'null') {
@@ -224,65 +201,22 @@ const uploadChatAttachment = async (req, res) => {
         }
         logger_1.logger.info(`✅ Chat group found: ${chatGroup.name}`);
         const file = req.file;
-        const fileId = (0, uuid_1.v4)();
-        const fileName = `chat-attachments/${groupId}/${fileId}-${file.originalname}`;
-        if (!firebase_1.bucket || !firebase_1.bucket.name) {
-            logger_1.logger.error('❌ Firebase Storage bucket not initialized');
-            res.status(500).json({ success: false, message: 'Storage not configured' });
-            return;
-        }
-        logger_1.logger.info(`🪣 Uploading to bucket: ${firebase_1.bucket.name}, path: ${fileName}`);
-        const fileUpload = firebase_1.bucket.file(fileName);
-        const stream = fileUpload.createWriteStream({
-            metadata: {
-                contentType: file.mimetype,
-                metadata: {
-                    uploadedBy: req.user._id.toString(),
-                    groupId: groupId,
-                    originalName: file.originalname
-                }
-            }
+        const baseUrl = getBaseUrl(req);
+        const publicUrl = `${baseUrl}/uploads/chat-attachments/${file.filename}`;
+        logger_1.logger.info(`📦 Chat file saved to disk: ${file.path}`);
+        logger_1.logger.info(`🔗 Public URL: ${publicUrl}`);
+        const attachment = {
+            fileName: file.originalname,
+            fileUrl: publicUrl,
+            fileType: file.mimetype,
+            fileSize: file.size
+        };
+        logger_1.logger.info(`✅ Chat file uploaded successfully: ${file.filename}`);
+        res.json({
+            success: true,
+            message: 'File uploaded successfully',
+            attachment
         });
-        stream.on('error', (error) => {
-            logger_1.logger.error('❌ Firebase Stream Error:', {
-                message: error.message,
-                code: error.code,
-                statusCode: error.statusCode,
-                errors: error.errors
-            });
-            logger_1.logger.error('Full error:', error);
-            res.status(500).json({
-                success: false,
-                message: `Failed to upload file: ${error.message}`
-            });
-        });
-        stream.on('finish', async () => {
-            try {
-                await fileUpload.makePublic();
-                const publicUrl = `https://storage.googleapis.com/${firebase_1.bucket.name}/${fileName}`;
-                const attachment = {
-                    fileName: file.originalname,
-                    fileUrl: publicUrl,
-                    fileType: file.mimetype,
-                    fileSize: file.size
-                };
-                logger_1.logger.info(`Chat file uploaded successfully: ${fileName}`);
-                logger_1.logger.info(`Public URL: ${publicUrl}`);
-                res.json({
-                    success: true,
-                    message: 'File uploaded successfully',
-                    attachment
-                });
-            }
-            catch (finishError) {
-                logger_1.logger.error('Error in stream finish handler:', finishError);
-                res.status(500).json({
-                    success: false,
-                    message: 'Failed to finalize file upload'
-                });
-            }
-        });
-        stream.end(file.buffer);
     }
     catch (error) {
         logger_1.logger.error('❌ Error in uploadChatAttachment:', error);
