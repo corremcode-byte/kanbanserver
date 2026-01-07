@@ -12,7 +12,9 @@ const database_1 = __importDefault(require("./config/database"));
 const routes_1 = __importDefault(require("./routes"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const app = (0, express_1.default)();
-app.use((0, helmet_1.default)());
+app.use((0, helmet_1.default)({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.options('*', (req, res) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -44,7 +46,19 @@ app.use((0, cors_1.default)({
 app.use((0, morgan_1.default)('combined'));
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
-app.use('/uploads', express_1.default.static(path_1.default.join(process.cwd(), 'uploads')));
+const uploadsPath = path_1.default.join(process.cwd(), 'uploads');
+console.log('📁 Serving static files from:', uploadsPath);
+app.use('/uploads', (req, res, next) => {
+    console.log('🔍 Static file request:', req.method, req.url);
+    next();
+});
+app.use('/uploads', express_1.default.static(uploadsPath, {
+    setHeaders: (res, filePath) => {
+        console.log('📤 Serving file:', filePath);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+}));
 let dbConnectionPromise = null;
 const ensureDBConnection = async () => {
     if (!process.env.MONGODB_URI) {
@@ -96,6 +110,17 @@ app.get('/health', (req, res) => {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime()
+    });
+});
+app.get('/uploads-test', (req, res) => {
+    const fs = require('fs');
+    const uploadsPath = path_1.default.join(process.cwd(), 'uploads');
+    const exists = fs.existsSync(uploadsPath);
+    const files = exists ? fs.readdirSync(uploadsPath) : [];
+    res.json({
+        uploadsPath,
+        exists,
+        subdirectories: files
     });
 });
 app.use('/api', routes_1.default);

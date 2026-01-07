@@ -10,7 +10,10 @@ import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler';
 const app = express();
 
 // Middleware
-app.use(helmet());
+// Configure helmet to allow serving static files
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // Handle preflight OPTIONS requests explicitly before CORS
 app.options('*', (req, res) => {
@@ -60,8 +63,25 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve uploaded files statically
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Serve uploaded files statically - MUST be before database connection middleware
+// Log uploads directory path
+const uploadsPath = path.join(process.cwd(), 'uploads');
+console.log('📁 Serving static files from:', uploadsPath);
+
+// Add logging middleware for uploads route
+app.use('/uploads', (req, res, next) => {
+  console.log('🔍 Static file request:', req.method, req.url);
+  next();
+});
+
+// Use setHeaders to ensure CORS headers are set for static files
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    console.log('📤 Serving file:', filePath);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 // Connect to database (lazy connection for serverless)
 // NOTE: Currently configured for MongoDB, but should be migrated to MySQL
@@ -125,6 +145,19 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
+  });
+});
+
+// Test route to verify uploads directory
+app.get('/uploads-test', (req, res) => {
+  const fs = require('fs');
+  const uploadsPath = path.join(process.cwd(), 'uploads');
+  const exists = fs.existsSync(uploadsPath);
+  const files = exists ? fs.readdirSync(uploadsPath) : [];
+  res.json({
+    uploadsPath,
+    exists,
+    subdirectories: files
   });
 });
 
