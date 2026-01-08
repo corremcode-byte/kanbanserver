@@ -31,7 +31,7 @@ export interface ITask extends Document {
   assignedBy?: mongoose.Types.ObjectId;
   assignedAt?: Date; // Track when task was first assigned
   createdBy: mongoose.Types.ObjectId;
-  dueDate?: Date;
+  dueDate: Date;
   completedAt?: Date; // Track when task was marked as completed
   reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours';
   lastReminderSent?: Date;
@@ -104,7 +104,10 @@ const TaskSchema = new Schema<ITask>({
     ref: 'User',
     required: true
   },
-  dueDate: { type: Date },
+  dueDate: { 
+    type: Date,
+    required: true
+  },
   completedAt: {
     type: Date,
     index: true

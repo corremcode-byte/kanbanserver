@@ -225,6 +225,10 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Project ID is required', 400);
     }
 
+    if (!dueDate) {
+      return errorResponse(res, 'Due date is required', 400);
+    }
+
     // Check if project exists and user has access
     const project = await Project.findById(projectId);
     if (!project) {
@@ -307,7 +311,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       listId: validatedListId, // Use validated listId
       status: status || validatedListId || 'todo', // For backward compatibility
       priority: priority || 'medium',
-      dueDate: dueDate ? new Date(dueDate) : undefined,
+      dueDate: new Date(dueDate),
       reminderFrequency: reminderFrequency || '24hours', // Default to 24 hours if not specified
       createdBy: req.user._id,
       order

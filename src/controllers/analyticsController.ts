@@ -418,7 +418,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
               dueDate: { $exists: true, $lt: new Date() }
             });
 
-            // Get completed tasks for time calculation
+            // Get completed tasks for time calculation (including dueDate for speed bonus)
             const completedTasksForTime = await Task.find({
               projectId: project._id,
               $or: [
@@ -430,7 +430,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
               status: 'completed',
               assignedAt: { $exists: true },
               completedAt: { $exists: true, $gte: start, $lte: end }
-            }).select('assignedAt completedAt');
+            }).select('assignedAt completedAt dueDate');
 
             if (completedTasksForTime.length > 0) {
               const projectTime = completedTasksForTime.reduce((sum, task: any) => {
@@ -461,25 +461,74 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
             avgCompletionTime = totalCompletionTime / completedTasksCount / (1000 * 60 * 60); // Convert to hours
           }
 
+          // Calculate speed bonus based on fraction of completion time to deadline (per task, then averaged)
+          let speedBonus = 0;
+          if (totalTasksCompleted > 0) {
+            // Collect all completed tasks with deadlines across all projects
+            const allCompletedTasksWithDeadlines: any[] = [];
+            for (const project of allProjects) {
+              const tasks = await Task.find({
+                projectId: project._id,
+                $or: [
+                  { assigneeId: memberId },
+                  { assignedTo: memberId },
+                  { assignees: memberId },
+                  { createdBy: memberId }
+                ],
+                status: 'completed',
+                assignedAt: { $exists: true },
+                completedAt: { $exists: true, $gte: start, $lte: end },
+                dueDate: { $exists: true }
+              }).select('assignedAt completedAt dueDate');
+              allCompletedTasksWithDeadlines.push(...tasks);
+            }
+
+            if (allCompletedTasksWithDeadlines.length > 0) {
+              // Calculate per-task speed score based on fraction of completion time to deadline
+              const taskSpeedScores = allCompletedTasksWithDeadlines.map((task: any) => {
+                if (!task.assignedAt || !task.completedAt || !task.dueDate) return 0;
+
+                const assignedAt = new Date(task.assignedAt).getTime();
+                const completedAt = new Date(task.completedAt).getTime();
+                const dueDate = new Date(task.dueDate).getTime();
+
+                const completionTime = completedAt - assignedAt;
+                const availableTime = dueDate - assignedAt;
+
+                if (availableTime <= 0) return 0; // Invalid deadline
+
+                // Calculate fraction: completionTime / availableTime
+                // fraction < 1 means completed before deadline (good)
+                // fraction > 1 means completed after deadline (bad)
+                const fraction = completionTime / availableTime;
+
+                // Map fraction to score (0-15 points)
+                // Lower fraction = better performance
+                if (fraction < 0.5) {
+                  return 15; // Completed in less than half the time
+                } else if (fraction < 0.75) {
+                  return 12; // Completed in 50-75% of time
+                } else if (fraction < 1.0) {
+                  return 9; // Completed before deadline
+                } else if (fraction < 1.25) {
+                  return 6; // Slightly late (0-25% over)
+                } else if (fraction < 1.5) {
+                  return 3; // Moderately late (25-50% over)
+                } else {
+                  return 0; // Very late (>50% over deadline)
+                }
+              });
+
+              // Average the per-task scores
+              const totalScore = taskSpeedScores.reduce((sum, score) => sum + score, 0);
+              speedBonus = Math.round(totalScore / taskSpeedScores.length);
+            }
+          }
+
           // Calculate productivity score
           let productivityScore = 0;
           if (totalTasksAssigned > 0) {
             const completionRate = (totalTasksCompleted / totalTasksAssigned) * 35;
-
-            let speedBonus = 0;
-            if (avgCompletionTime > 0 && totalTasksCompleted > 0) {
-              if (avgCompletionTime < 1) {
-                speedBonus = 15;
-              } else if (avgCompletionTime < 4) {
-                speedBonus = 12;
-              } else if (avgCompletionTime < 8) {
-                speedBonus = 9;
-              } else if (avgCompletionTime < 24) {
-                speedBonus = 6;
-              } else if (avgCompletionTime < 48) {
-                speedBonus = 3;
-              }
-            }
 
             const activityRate = Math.min((totalActionsCount / 100) * 25, 25);
             const timeScore = Math.min((totalTimeLogged / 600) * 15, 15);
@@ -697,7 +746,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           status: 'completed',
           assignedAt: { $exists: true },
           completedAt: { $exists: true, $gte: start, $lte: end }
-        }).select('assignedAt completedAt title');
+        }).select('assignedAt completedAt dueDate title');
 
         let avgCompletionTime = 0;
         if (completedTasksForTime.length > 0) {
@@ -712,34 +761,71 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           avgCompletionTime = totalTime / completedTasksForTime.length / (1000 * 60 * 60); // Convert to hours
         }
 
+        // Calculate speed bonus based on fraction of completion time to deadline (per task, then averaged)
+        let speedBonus = 0;
+        if (tasksCompleted > 0) {
+          // Get completed tasks with deadlines
+          const completedTasksWithDeadlines = await Task.find({
+            projectId,
+            $or: [
+              { assigneeId: memberId },
+              { assignedTo: memberId },
+              { assignees: memberId },
+              { createdBy: memberId }
+            ],
+            status: 'completed',
+            assignedAt: { $exists: true },
+            completedAt: { $exists: true, $gte: start, $lte: end },
+            dueDate: { $exists: true }
+          }).select('assignedAt completedAt dueDate');
+
+          if (completedTasksWithDeadlines.length > 0) {
+            // Calculate per-task speed score based on fraction of completion time to deadline
+            const taskSpeedScores = completedTasksWithDeadlines.map((task: any) => {
+              if (!task.assignedAt || !task.completedAt || !task.dueDate) return 0;
+
+              const assignedAt = new Date(task.assignedAt).getTime();
+              const completedAt = new Date(task.completedAt).getTime();
+              const dueDate = new Date(task.dueDate).getTime();
+
+              const completionTime = completedAt - assignedAt;
+              const availableTime = dueDate - assignedAt;
+
+              if (availableTime <= 0) return 0; // Invalid deadline
+
+              // Calculate fraction: completionTime / availableTime
+              // fraction < 1 means completed before deadline (good)
+              // fraction > 1 means completed after deadline (bad)
+              const fraction = completionTime / availableTime;
+
+              // Map fraction to score (0-15 points)
+              // Lower fraction = better performance
+              if (fraction < 0.5) {
+                return 15; // Completed in less than half the time
+              } else if (fraction < 0.75) {
+                return 12; // Completed in 50-75% of time
+              } else if (fraction < 1.0) {
+                return 9; // Completed before deadline
+              } else if (fraction < 1.25) {
+                return 6; // Slightly late (0-25% over)
+              } else if (fraction < 1.5) {
+                return 3; // Moderately late (25-50% over)
+              } else {
+                return 0; // Very late (>50% over deadline)
+              }
+            });
+
+            // Average the per-task scores
+            const totalScore = taskSpeedScores.reduce((sum, score) => sum + score, 0);
+            speedBonus = Math.round(totalScore / taskSpeedScores.length);
+          }
+        }
+
         // Calculate productivity score (0-100)
         let productivityScore = 0;
         if (tasksAssigned > 0) {
           // 1. Completion Rate (35 points max) - percentage of tasks completed
           const completionRate = (tasksCompleted / tasksAssigned) * 35;
-
-          // 2. Speed Bonus (15 points max) - faster completion = higher score
-          let speedBonus = 0;
-          if (avgCompletionTime > 0 && tasksCompleted > 0) {
-            // Award points based on completion speed:
-            // < 1 hour = 15 points
-            // < 4 hours = 12 points
-            // < 8 hours = 9 points
-            // < 24 hours = 6 points
-            // < 48 hours = 3 points
-            // >= 48 hours = 0 points
-            if (avgCompletionTime < 1) {
-              speedBonus = 15;
-            } else if (avgCompletionTime < 4) {
-              speedBonus = 12;
-            } else if (avgCompletionTime < 8) {
-              speedBonus = 9;
-            } else if (avgCompletionTime < 24) {
-              speedBonus = 6;
-            } else if (avgCompletionTime < 48) {
-              speedBonus = 3;
-            }
-          }
 
           // 3. Activity Rate (25 points max) - based on actions taken
           const activityRate = Math.min((stats.actionsCount / 100) * 25, 25);
