@@ -13,13 +13,9 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
   try {
     const { name, description, memberIds = [], encryptionPublicKey, projectId } = req.body;
 
-    if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) {
-      return res.status(400).json({ message: 'A valid projectId is required to create a chat group' });
-    }
-
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Group name is required' });
     }
 
     const userId = req.user?._id?.toString();
@@ -27,45 +23,65 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
-      ? (project.ownerId as any)._id.toString()
-      : project.ownerId.toString();
-
-    const ownerIds = new Set<string>([
-      ownerId,
-      ...(project.owners || []).map((o: any) => (typeof o === 'object' && o._id ? o._id.toString() : o.toString()))
-    ]);
-
-    const projectMembers = new Set<string>([
-      ...ownerIds,
-      ...(project.managers || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString())),
-      ...(project.members || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString()))
-    ]);
-
-    if (!projectMembers.has(userId)) {
-      return res.status(403).json({ message: 'You must be a member of the project to create a chat group' });
-    }
-
-    const isOwner = ownerIds.has(userId);
     const isAdmin = req.user?.role === 'admin';
+    let project: any = null;
+    let projectMembers = new Set<string>();
+    let hasPermission = false;
 
-    let hasPermission = isAdmin || isOwner;
-    if (!hasPermission) {
-      const permission = await ProjectPermission.findOne({ projectId, userId });
-      hasPermission = !!permission?.permissions?.canCreateChatGroups;
-    }
+    // If projectId is provided, validate project and permissions
+    if (projectId) {
+      if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        return res.status(400).json({ message: 'Invalid projectId format' });
+      }
 
-    if (!hasPermission) {
-      return res.status(403).json({ message: 'You do not have permission to create chat groups for this project' });
+      project = await Project.findById(projectId);
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
+        ? (project.ownerId as any)._id.toString()
+        : project.ownerId.toString();
+
+      const ownerIds = new Set<string>([
+        ownerId,
+        ...(project.owners || []).map((o: any) => (typeof o === 'object' && o._id ? o._id.toString() : o.toString()))
+      ]);
+
+      projectMembers = new Set<string>([
+        ...ownerIds,
+        ...(project.managers || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString())),
+        ...(project.members || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString()))
+      ]);
+
+      if (!projectMembers.has(userId)) {
+        return res.status(403).json({ message: 'You must be a member of the project to create a chat group' });
+      }
+
+      const isOwner = ownerIds.has(userId);
+      hasPermission = isAdmin || isOwner;
+      if (!hasPermission) {
+        const permission = await ProjectPermission.findOne({ projectId, userId });
+        hasPermission = !!permission?.permissions?.canCreateChatGroups;
+      }
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: 'You do not have permission to create chat groups for this project' });
+      }
+    } else {
+      // No projectId - allow admins or any authenticated user to create groups
+      hasPermission = true;
     }
 
     // Ensure creator is included in members list
     const allMemberIds = [...new Set([userId, ...(Array.isArray(memberIds) ? memberIds : [])].map(id => id.toString()))];
 
-    // Validate that all members belong to the project
-    const invalidMember = allMemberIds.find(id => !projectMembers.has(id));
-    if (invalidMember) {
-      return res.status(400).json({ message: 'All members must belong to the selected project' });
+    // If projectId is provided, validate that all members belong to the project
+    if (projectId && projectMembers.size > 0) {
+      const invalidMember = allMemberIds.find(id => !projectMembers.has(id));
+      if (invalidMember) {
+        return res.status(400).json({ message: 'All members must belong to the selected project' });
+      }
     }
 
     // Validate members exist and are active
@@ -98,28 +114,36 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       io.to(`user:${memberId}`).emit('chat:group:created', chatGroup);
     });
 
-    // Log audit entry for project context
-    try {
-      await AuditLog.logAction({
-        projectId,
-        userId,
-        action: 'chat_group_created',
-        entityType: 'chat_group',
-        entityId: chatGroup._id.toString(),
-        metadata: {
-          groupName: name,
-          memberCount: allMemberIds.length,
-          projectName: project.name
-        }
-      });
-    } catch (auditErr) {
-      console.error('Failed to log chat group creation audit event:', auditErr);
+    // Log audit entry for project context (if projectId is provided)
+    if (projectId) {
+      try {
+        await AuditLog.logAction({
+          projectId,
+          userId,
+          action: 'chat_group_created',
+          entityType: 'chat_group',
+          entityId: chatGroup._id.toString(),
+          metadata: {
+            groupName: name,
+            memberCount: allMemberIds.length,
+            projectName: project?.name || 'Unknown'
+          }
+        });
+      } catch (auditErr) {
+        console.error('Failed to log chat group creation audit event:', auditErr);
+      }
     }
 
     return res.status(201).json(chatGroup);
   } catch (error) {
     console.error('Error creating chat group:', error);
-    return res.status(500).json({ message: 'Failed to create chat group' });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error details:', {
+      message: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+      body: req.body
+    });
+    return res.status(500).json({ message: 'Failed to create chat group', error: errorMessage });
   }
 };
 
@@ -205,7 +229,7 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
 // Send a message to a group
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, encryptedContent, nonce, attachments } = req.body;
+    const { groupId, encryptedContent, nonce, attachments, replyTo } = req.body;
     const senderId = req.user?._id;
 
     // Check if user is a member of the group
@@ -219,6 +243,15 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ message: 'Not authorized to send messages to this group' });
     }
 
+    let replyToMessage: any = null;
+    if (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) {
+      replyToMessage = await Message.findById(replyTo);
+      // Ensure reply target belongs to the same group
+      if (!replyToMessage || replyToMessage.groupId.toString() !== groupId) {
+        replyToMessage = null;
+      }
+    }
+
     // Create message
     const message = await Message.create({
       groupId,
@@ -226,11 +259,19 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       encryptedContent,
       nonce,
       attachments: attachments || [],
+      replyTo: replyToMessage?._id,
       readBy: [{ userId: senderId, readAt: new Date() }]
     });
 
-    // Populate sender info
+    // Populate sender info and reply target
     await message.populate('senderId', 'displayName email photoURL');
+    if (message.replyTo) {
+      await message.populate({
+        path: 'replyTo',
+        select: 'senderId encryptedContent nonce attachments isDeleted createdAt',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      });
+    }
 
     // Update group's updatedAt timestamp
     chatGroup.updatedAt = new Date();
@@ -276,6 +317,11 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     })
       .populate('senderId', 'displayName email photoURL')
+      .populate({
+        path: 'replyTo',
+        select: 'senderId encryptedContent nonce attachments isDeleted createdAt',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
