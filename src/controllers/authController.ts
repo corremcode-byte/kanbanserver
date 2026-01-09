@@ -583,7 +583,7 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
     // Return settings with defaults if not set
     const settings = user.settings || {
       appearance: {
-        theme: 'system',
+        theme: 'light',
         colorScheme: 'blue',
         fontSize: 'medium'
       },
@@ -623,7 +623,7 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
     if (!user.settings) {
       user.settings = {
         appearance: {
-          theme: 'system',
+          theme: 'light',
           colorScheme: 'blue',
           fontSize: 'medium'
         },

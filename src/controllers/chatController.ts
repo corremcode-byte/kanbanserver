@@ -440,19 +440,17 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ message: 'Message not found' });
     }
 
-    // Check if user is sender, admin, or group creator
+    // Check if user is the sender of the message
+    // Users can only delete their own messages
     const isSender = message.senderId.toString() === userId?.toString();
-    
+
+    if (!isSender) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
+    }
+
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (!chatGroup) {
       return res.status(404).json({ message: 'Chat group not found' });
-    }
-
-    const isAdmin = req.user?.role === 'admin';
-    const isCreator = chatGroup.createdBy.toString() === userId?.toString();
-
-    if (!isSender && !isAdmin && !isCreator) {
-      return res.status(403).json({ message: 'You do not have permission to delete this message' });
     }
 
     // Soft delete
