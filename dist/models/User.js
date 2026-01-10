@@ -95,6 +95,16 @@ const userSchema = new mongoose_1.Schema({
                 }
             }
         }],
+    permissions: {
+        canCreateChatGroups: {
+            type: Boolean,
+            default: false
+        },
+        canDeleteOwnChatGroups: {
+            type: Boolean,
+            default: false
+        }
+    },
     settings: {
         appearance: {
             theme: {

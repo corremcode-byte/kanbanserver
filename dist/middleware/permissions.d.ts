@@ -9,7 +9,7 @@ interface AuthenticatedRequest extends Request {
         isManager: boolean;
     };
 }
-type Permission = 'canCreateTasks' | 'canEditTasks' | 'canDeleteTasks' | 'canAssignTasks' | 'canEditProject' | 'canManageMembers' | 'canViewAllTasks' | 'canManagePermissions';
+type Permission = 'canCreateTasks' | 'canEditTasks' | 'canDeleteTasks' | 'canAssignTasks' | 'canEditProject' | 'canManageMembers' | 'canViewAllTasks' | 'canManagePermissions' | 'canCreateChatGroups' | 'canDeleteChatGroups';
 export declare const checkPermission: (permission: Permission) => (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
 export declare const checkCanEditTask: (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
 export declare const checkCanDeleteTask: (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;

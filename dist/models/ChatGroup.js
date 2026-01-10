@@ -58,6 +58,11 @@ const chatGroupSchema = new mongoose_1.Schema({
             ref: 'User',
             required: true
         }],
+    projectId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Project',
+        index: true
+    },
     encryptionPublicKey: {
         type: String,
         required: true

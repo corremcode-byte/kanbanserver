@@ -61,7 +61,9 @@ const ProjectPermissionSchema = new mongoose_1.Schema({
         canEditProject: { type: Boolean, default: false },
         canManageMembers: { type: Boolean, default: false },
         canViewAllTasks: { type: Boolean, default: false },
-        canManagePermissions: { type: Boolean, default: false }
+        canManagePermissions: { type: Boolean, default: false },
+        canCreateChatGroups: { type: Boolean, default: false },
+        canDeleteChatGroups: { type: Boolean, default: false }
     },
     customPermissions: {
         type: Map,
@@ -93,7 +95,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function (role) {
             canEditProject: true,
             canManageMembers: true,
             canViewAllTasks: true,
-            canManagePermissions: true
+            canManagePermissions: true,
+            canCreateChatGroups: true,
+            canDeleteChatGroups: true
         },
         manager: {
             canCreateTasks: true,
@@ -103,7 +107,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function (role) {
             canEditProject: false,
             canManageMembers: false,
             canViewAllTasks: true,
-            canManagePermissions: false
+            canManagePermissions: false,
+            canCreateChatGroups: false,
+            canDeleteChatGroups: false
         },
         assignee: {
             canCreateTasks: false,
@@ -113,7 +119,9 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function (role) {
             canEditProject: false,
             canManageMembers: false,
             canViewAllTasks: false,
-            canManagePermissions: false
+            canManagePermissions: false,
+            canCreateChatGroups: false,
+            canDeleteChatGroups: false
         }
     };
     return defaults[role];

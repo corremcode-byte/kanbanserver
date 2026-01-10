@@ -468,7 +468,7 @@ const getSettings = async (req, res) => {
         }
         const settings = user.settings || {
             appearance: {
-                theme: 'system',
+                theme: 'light',
                 colorScheme: 'blue',
                 fontSize: 'medium'
             },
@@ -504,7 +504,7 @@ const updateSettings = async (req, res) => {
         if (!user.settings) {
             user.settings = {
                 appearance: {
-                    theme: 'system',
+                    theme: 'light',
                     colorScheme: 'blue',
                     fontSize: 'medium'
                 },

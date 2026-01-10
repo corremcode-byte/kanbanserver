@@ -201,6 +201,9 @@ const createTask = async (req, res) => {
         if (!projectId) {
             return (0, responses_1.errorResponse)(res, 'Project ID is required', 400);
         }
+        if (!dueDate) {
+            return (0, responses_1.errorResponse)(res, 'Due date is required', 400);
+        }
         const project = await models_1.Project.findById(projectId);
         if (!project) {
             return (0, responses_1.notFoundResponse)(res, 'Project not found');
@@ -263,7 +266,7 @@ const createTask = async (req, res) => {
             listId: validatedListId,
             status: status || validatedListId || 'todo',
             priority: priority || 'medium',
-            dueDate: dueDate ? new Date(dueDate) : undefined,
+            dueDate: new Date(dueDate),
             reminderFrequency: reminderFrequency || '24hours',
             createdBy: req.user._id,
             order

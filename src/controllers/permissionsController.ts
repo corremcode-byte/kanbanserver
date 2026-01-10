@@ -89,7 +89,14 @@ export const getUserPermission = async (req: AuthenticatedRequest, res: Response
       return notFoundResponse(res, 'Permission not found');
     }
 
-    return successResponse(res, 'Permission retrieved successfully', permission);
+    // Normalize permissions with defaults to ensure all fields are present
+    const defaults = ProjectPermission.getDefaultPermissions(permission.role);
+    const normalizedPermission = {
+      ...permission.toJSON(),
+      permissions: { ...defaults, ...permission.permissions }
+    };
+
+    return successResponse(res, 'Permission retrieved successfully', normalizedPermission);
   } catch (error) {
     logger.error('Error getting user permission:', error);
     return internalServerErrorResponse(res, 'Failed to retrieve permission');
@@ -141,23 +148,33 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
 
     if (!permission) {
       // Create new permission
+      const defaultPerms = ProjectPermission.getDefaultPermissions(role || 'assignee');
+      const mergedPermissions = permissions ? { ...defaultPerms, ...permissions } : defaultPerms;
+      
       permission = new ProjectPermission({
         projectId,
         userId,
         role: role || 'assignee',
-        permissions: permissions || ProjectPermission.getDefaultPermissions(role || 'assignee')
+        permissions: mergedPermissions
       });
     } else {
       // Update existing permission
       if (permissions) {
+        // Get default permissions for current role (or new role if changing)
+        const targetRole = role || permission.role;
+        const defaultPerms = ProjectPermission.getDefaultPermissions(targetRole);
+        
+        // Merge defaults with provided permissions to ensure all fields are present
+        const mergedPermissions = { ...defaultPerms, ...permissions };
+        
         // Explicitly set each permission to ensure false values are saved
-        Object.keys(permissions).forEach(key => {
-          permission.permissions[key as keyof typeof permission.permissions] = permissions[key as keyof typeof permissions];
+        Object.keys(mergedPermissions).forEach(key => {
+          permission.permissions[key as keyof typeof permission.permissions] = mergedPermissions[key as keyof typeof mergedPermissions];
         });
         // Mark the permissions field as modified for Mongoose
         permission.markModified('permissions');
       }
-      if (role) {
+      if (role && role !== permission.role) {
         permission.role = role;
         // Update role in project arrays
         if (role === 'manager') {
@@ -189,8 +206,8 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
         entityId: userId,
         metadata: {
           targetUserId: userId,
-          newRole: role,
-          newPermissions: permissions
+          newRole: role || permission.role,
+          newPermissions: permission.permissions
         }
       });
     } catch (auditError) {
@@ -199,7 +216,14 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
 
     await permission.populate('userId', 'displayName email photoURL role');
 
-    return successResponse(res, 'Permission updated successfully', permission);
+    // Normalize permissions with defaults to ensure all fields are present in response
+    const defaults = ProjectPermission.getDefaultPermissions(permission.role);
+    const normalizedPermission = {
+      ...permission.toJSON(),
+      permissions: { ...defaults, ...permission.permissions }
+    };
+
+    return successResponse(res, 'Permission updated successfully', normalizedPermission);
   } catch (error) {
     logger.error('Error updating user permission:', error);
     return internalServerErrorResponse(res, 'Failed to update permission');

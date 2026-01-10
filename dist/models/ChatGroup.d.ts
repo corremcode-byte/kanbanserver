@@ -4,6 +4,7 @@ export interface IChatGroup extends Document {
     description?: string;
     createdBy: mongoose.Types.ObjectId;
     members: mongoose.Types.ObjectId[];
+    projectId?: mongoose.Types.ObjectId;
     encryptionPublicKey: string;
     isActive: boolean;
     createdAt: Date;

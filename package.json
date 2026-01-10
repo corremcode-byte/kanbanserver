@@ -11,7 +11,9 @@
     "test": "jest",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "migrate:displayname": "ts-node src/scripts/addUniqueDisplayNameIndex.ts"
+    "migrate:displayname": "ts-node src/scripts/addUniqueDisplayNameIndex.ts",
+    "check:permissions": "ts-node src/scripts/checkPermissions.ts",
+    "fix:permissions": "ts-node src/scripts/fixPermissionFields.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",

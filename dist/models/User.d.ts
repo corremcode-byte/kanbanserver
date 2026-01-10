@@ -16,6 +16,10 @@ export interface IUser extends Document {
     isActive: boolean;
     lastLoginAt: Date;
     pushSubscriptions?: IPushSubscription[];
+    permissions?: {
+        canCreateChatGroups?: boolean;
+        canDeleteOwnChatGroups?: boolean;
+    };
     settings?: {
         appearance?: {
             theme?: 'light' | 'dark' | 'system';

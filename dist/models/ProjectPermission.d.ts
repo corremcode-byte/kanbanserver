@@ -12,6 +12,8 @@ export interface IProjectPermission extends Document {
         canManageMembers: boolean;
         canViewAllTasks: boolean;
         canManagePermissions: boolean;
+        canCreateChatGroups: boolean;
+        canDeleteChatGroups: boolean;
     };
     customPermissions?: Record<string, boolean>;
     createdAt: Date;

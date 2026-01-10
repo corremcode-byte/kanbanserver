@@ -10,6 +10,7 @@ export interface IMessage extends Document {
         fileType: string;
         fileSize: number;
     }[];
+    replyTo?: mongoose.Types.ObjectId;
     readBy: {
         userId: mongoose.Types.ObjectId;
         readAt: Date;

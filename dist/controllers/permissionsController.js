@@ -32,7 +32,14 @@ const getProjectPermissions = async (req, res) => {
             .populate('userId', 'displayName email photoURL role')
             .sort({ createdAt: -1 });
         const validPermissions = permissions.filter(p => p.userId != null);
-        return (0, responses_1.successResponse)(res, 'Permissions retrieved successfully', validPermissions);
+        const normalizedPermissions = validPermissions.map((p) => {
+            const defaults = models_1.ProjectPermission.getDefaultPermissions(p.role);
+            return {
+                ...p.toJSON(),
+                permissions: { ...defaults, ...p.permissions }
+            };
+        });
+        return (0, responses_1.successResponse)(res, 'Permissions retrieved successfully', normalizedPermissions);
     }
     catch (error) {
         logger_1.logger.error('Error getting project permissions:', error);
@@ -52,7 +59,12 @@ const getUserPermission = async (req, res) => {
         if (!permission) {
             return (0, responses_1.notFoundResponse)(res, 'Permission not found');
         }
-        return (0, responses_1.successResponse)(res, 'Permission retrieved successfully', permission);
+        const defaults = models_1.ProjectPermission.getDefaultPermissions(permission.role);
+        const normalizedPermission = {
+            ...permission.toJSON(),
+            permissions: { ...defaults, ...permission.permissions }
+        };
+        return (0, responses_1.successResponse)(res, 'Permission retrieved successfully', normalizedPermission);
     }
     catch (error) {
         logger_1.logger.error('Error getting user permission:', error);
@@ -90,21 +102,26 @@ const updateUserPermission = async (req, res) => {
         }
         let permission = await models_1.ProjectPermission.findOne({ projectId, userId });
         if (!permission) {
+            const defaultPerms = models_1.ProjectPermission.getDefaultPermissions(role || 'assignee');
+            const mergedPermissions = permissions ? { ...defaultPerms, ...permissions } : defaultPerms;
             permission = new models_1.ProjectPermission({
                 projectId,
                 userId,
                 role: role || 'assignee',
-                permissions: permissions || models_1.ProjectPermission.getDefaultPermissions(role || 'assignee')
+                permissions: mergedPermissions
             });
         }
         else {
             if (permissions) {
-                Object.keys(permissions).forEach(key => {
-                    permission.permissions[key] = permissions[key];
+                const targetRole = role || permission.role;
+                const defaultPerms = models_1.ProjectPermission.getDefaultPermissions(targetRole);
+                const mergedPermissions = { ...defaultPerms, ...permissions };
+                Object.keys(mergedPermissions).forEach(key => {
+                    permission.permissions[key] = mergedPermissions[key];
                 });
                 permission.markModified('permissions');
             }
-            if (role) {
+            if (role && role !== permission.role) {
                 permission.role = role;
                 if (role === 'manager') {
                     if (!project.managers) {
@@ -132,8 +149,8 @@ const updateUserPermission = async (req, res) => {
                 entityId: userId,
                 metadata: {
                     targetUserId: userId,
-                    newRole: role,
-                    newPermissions: permissions
+                    newRole: role || permission.role,
+                    newPermissions: permission.permissions
                 }
             });
         }
@@ -141,7 +158,12 @@ const updateUserPermission = async (req, res) => {
             logger_1.logger.error('Failed to log audit action:', auditError);
         }
         await permission.populate('userId', 'displayName email photoURL role');
-        return (0, responses_1.successResponse)(res, 'Permission updated successfully', permission);
+        const defaults = models_1.ProjectPermission.getDefaultPermissions(permission.role);
+        const normalizedPermission = {
+            ...permission.toJSON(),
+            permissions: { ...defaults, ...permission.permissions }
+        };
+        return (0, responses_1.successResponse)(res, 'Permission updated successfully', normalizedPermission);
     }
     catch (error) {
         logger_1.logger.error('Error updating user permission:', error);
@@ -230,8 +252,10 @@ const getMyPermission = async (req, res) => {
         if (!permission) {
             return (0, responses_1.notFoundResponse)(res, 'Permission not found. You may not be a member of this project.');
         }
+        const defaults = models_1.ProjectPermission.getDefaultPermissions(permission.role);
         return (0, responses_1.successResponse)(res, 'Permission retrieved successfully', {
             ...permission.toJSON(),
+            permissions: { ...defaults, ...permission.permissions },
             isOwner: false
         });
     }

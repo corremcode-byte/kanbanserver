@@ -64,14 +64,16 @@ const AuditLogSchema = new mongoose_1.Schema({
             'time_logged',
             'comment_added',
             'comment_updated',
-            'comment_deleted'
+            'comment_deleted',
+            'chat_group_created',
+            'chat_group_deleted'
         ],
         required: true,
         index: true
     },
     entityType: {
         type: String,
-        enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log'],
+        enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group'],
         required: true
     },
     entityId: {

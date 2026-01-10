@@ -79,5 +79,7 @@ router.post('/groups/:groupId/upload', (req, res, next) => {
 router.post('/messages', chatController_1.sendMessage);
 router.get('/groups/:groupId/messages', chatController_1.getGroupMessages);
 router.put('/messages/:messageId/read', chatController_1.markMessageAsRead);
+router.put('/messages/:messageId', chatController_1.editMessage);
+router.delete('/messages/:messageId', chatController_1.deleteMessage);
 exports.default = router;
 //# sourceMappingURL=chatRoutes.js.map

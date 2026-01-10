@@ -337,7 +337,7 @@ const getPerformanceMatrix = async (req, res) => {
                         status: 'completed',
                         assignedAt: { $exists: true },
                         completedAt: { $exists: true, $gte: start, $lte: end }
-                    }).select('assignedAt completedAt');
+                    }).select('assignedAt completedAt dueDate');
                     if (completedTasksForTime.length > 0) {
                         const projectTime = completedTasksForTime.reduce((sum, task) => {
                             if (task.completedAt && task.assignedAt) {
@@ -362,27 +362,63 @@ const getPerformanceMatrix = async (req, res) => {
                 if (completedTasksCount > 0) {
                     avgCompletionTime = totalCompletionTime / completedTasksCount / (1000 * 60 * 60);
                 }
+                let speedBonus = 0;
+                if (totalTasksCompleted > 0) {
+                    const allCompletedTasksWithDeadlines = [];
+                    for (const project of allProjects) {
+                        const tasks = await models_1.Task.find({
+                            projectId: project._id,
+                            $or: [
+                                { assigneeId: memberId },
+                                { assignedTo: memberId },
+                                { assignees: memberId },
+                                { createdBy: memberId }
+                            ],
+                            status: 'completed',
+                            assignedAt: { $exists: true },
+                            completedAt: { $exists: true, $gte: start, $lte: end },
+                            dueDate: { $exists: true }
+                        }).select('assignedAt completedAt dueDate');
+                        allCompletedTasksWithDeadlines.push(...tasks);
+                    }
+                    if (allCompletedTasksWithDeadlines.length > 0) {
+                        const taskSpeedScores = allCompletedTasksWithDeadlines.map((task) => {
+                            if (!task.assignedAt || !task.completedAt || !task.dueDate)
+                                return 0;
+                            const assignedAt = new Date(task.assignedAt).getTime();
+                            const completedAt = new Date(task.completedAt).getTime();
+                            const dueDate = new Date(task.dueDate).getTime();
+                            const completionTime = completedAt - assignedAt;
+                            const availableTime = dueDate - assignedAt;
+                            if (availableTime <= 0)
+                                return 0;
+                            const fraction = completionTime / availableTime;
+                            if (fraction < 0.5) {
+                                return 15;
+                            }
+                            else if (fraction < 0.75) {
+                                return 12;
+                            }
+                            else if (fraction < 1.0) {
+                                return 9;
+                            }
+                            else if (fraction < 1.25) {
+                                return 6;
+                            }
+                            else if (fraction < 1.5) {
+                                return 3;
+                            }
+                            else {
+                                return 0;
+                            }
+                        });
+                        const totalScore = taskSpeedScores.reduce((sum, score) => sum + score, 0);
+                        speedBonus = Math.round(totalScore / taskSpeedScores.length);
+                    }
+                }
                 let productivityScore = 0;
                 if (totalTasksAssigned > 0) {
                     const completionRate = (totalTasksCompleted / totalTasksAssigned) * 35;
-                    let speedBonus = 0;
-                    if (avgCompletionTime > 0 && totalTasksCompleted > 0) {
-                        if (avgCompletionTime < 1) {
-                            speedBonus = 15;
-                        }
-                        else if (avgCompletionTime < 4) {
-                            speedBonus = 12;
-                        }
-                        else if (avgCompletionTime < 8) {
-                            speedBonus = 9;
-                        }
-                        else if (avgCompletionTime < 24) {
-                            speedBonus = 6;
-                        }
-                        else if (avgCompletionTime < 48) {
-                            speedBonus = 3;
-                        }
-                    }
                     const activityRate = Math.min((totalActionsCount / 100) * 25, 25);
                     const timeScore = Math.min((totalTimeLogged / 600) * 15, 15);
                     const overdueDeduction = Math.min(totalOverdueTasks * 2, 10);
@@ -561,7 +597,7 @@ const getPerformanceMatrix = async (req, res) => {
                 status: 'completed',
                 assignedAt: { $exists: true },
                 completedAt: { $exists: true, $gte: start, $lte: end }
-            }).select('assignedAt completedAt title');
+            }).select('assignedAt completedAt dueDate title');
             let avgCompletionTime = 0;
             if (completedTasksForTime.length > 0) {
                 const totalTime = completedTasksForTime.reduce((sum, task) => {
@@ -573,27 +609,59 @@ const getPerformanceMatrix = async (req, res) => {
                 }, 0);
                 avgCompletionTime = totalTime / completedTasksForTime.length / (1000 * 60 * 60);
             }
+            let speedBonus = 0;
+            if (tasksCompleted > 0) {
+                const completedTasksWithDeadlines = await models_1.Task.find({
+                    projectId,
+                    $or: [
+                        { assigneeId: memberId },
+                        { assignedTo: memberId },
+                        { assignees: memberId },
+                        { createdBy: memberId }
+                    ],
+                    status: 'completed',
+                    assignedAt: { $exists: true },
+                    completedAt: { $exists: true, $gte: start, $lte: end },
+                    dueDate: { $exists: true }
+                }).select('assignedAt completedAt dueDate');
+                if (completedTasksWithDeadlines.length > 0) {
+                    const taskSpeedScores = completedTasksWithDeadlines.map((task) => {
+                        if (!task.assignedAt || !task.completedAt || !task.dueDate)
+                            return 0;
+                        const assignedAt = new Date(task.assignedAt).getTime();
+                        const completedAt = new Date(task.completedAt).getTime();
+                        const dueDate = new Date(task.dueDate).getTime();
+                        const completionTime = completedAt - assignedAt;
+                        const availableTime = dueDate - assignedAt;
+                        if (availableTime <= 0)
+                            return 0;
+                        const fraction = completionTime / availableTime;
+                        if (fraction < 0.5) {
+                            return 15;
+                        }
+                        else if (fraction < 0.75) {
+                            return 12;
+                        }
+                        else if (fraction < 1.0) {
+                            return 9;
+                        }
+                        else if (fraction < 1.25) {
+                            return 6;
+                        }
+                        else if (fraction < 1.5) {
+                            return 3;
+                        }
+                        else {
+                            return 0;
+                        }
+                    });
+                    const totalScore = taskSpeedScores.reduce((sum, score) => sum + score, 0);
+                    speedBonus = Math.round(totalScore / taskSpeedScores.length);
+                }
+            }
             let productivityScore = 0;
             if (tasksAssigned > 0) {
                 const completionRate = (tasksCompleted / tasksAssigned) * 35;
-                let speedBonus = 0;
-                if (avgCompletionTime > 0 && tasksCompleted > 0) {
-                    if (avgCompletionTime < 1) {
-                        speedBonus = 15;
-                    }
-                    else if (avgCompletionTime < 4) {
-                        speedBonus = 12;
-                    }
-                    else if (avgCompletionTime < 8) {
-                        speedBonus = 9;
-                    }
-                    else if (avgCompletionTime < 24) {
-                        speedBonus = 6;
-                    }
-                    else if (avgCompletionTime < 48) {
-                        speedBonus = 3;
-                    }
-                }
                 const activityRate = Math.min((stats.actionsCount / 100) * 25, 25);
                 const timeScore = Math.min((stats.totalTimeLogged / 600) * 15, 15);
                 const overdueDeduction = Math.min(overdueTasks * 2, 10);

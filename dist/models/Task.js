@@ -89,7 +89,10 @@ const TaskSchema = new mongoose_1.Schema({
         ref: 'User',
         required: true
     },
-    dueDate: { type: Date },
+    dueDate: {
+        type: Date,
+        required: true
+    },
     completedAt: {
         type: Date,
         index: true
