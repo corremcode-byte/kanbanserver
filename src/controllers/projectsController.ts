@@ -86,7 +86,7 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
       .populate('owners', 'name email avatar displayName photoURL')
       .populate('members', 'name email avatar displayName photoURL')
       .populate('managers', 'name email avatar displayName photoURL')
-      .sort({ updatedAt: -1 })
+      .sort({ createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
 
@@ -276,11 +276,8 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createProject = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    const user = await User.findById(req.user._id);
-    if (!user || user.role !== 'admin') {
-      return errorResponse(res, 'Only admin users can create projects', 403);
-    }
+    // Permission check is handled by middleware (checkCanCreateProject)
+    // No need to check again here
 
     const { name, description, members = [], lists } = req.body;
 
@@ -532,10 +529,8 @@ export const deleteProject = async (req: AuthenticatedRequest, res: Response) =>
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner can delete project
-    if (project.ownerId.toString() !== req.user._id) {
-      return errorResponse(res, 'Only project owner can delete project', 403);
-    }
+    // Permission check is handled by middleware (checkCanDeleteProject)
+    // Middleware allows: owners, users in owners array, and users with global canDeleteProjects permission
 
     const projectName = project.name;
     const memberIds = [...project.members.map(m => m.toString()), ...project.managers.map(m => m.toString())];

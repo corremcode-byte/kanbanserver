@@ -19,8 +19,35 @@ export interface IUser extends Document {
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
   permissions?: {
+    // Project permissions
+    canCreateProjects?: boolean;
+    canDeleteProjects?: boolean;
+    canManageAllProjects?: boolean;
+    canViewAllProjects?: boolean;
+    // Task permissions
+    canCreateTasks?: boolean;
+    canEditTasks?: boolean;
+    canDeleteTasks?: boolean;
+    canAssignTasks?: boolean;
+    // Chat permissions
     canCreateChatGroups?: boolean;
-    canDeleteOwnChatGroups?: boolean;
+    canEditChatGroups?: boolean;
+    canDeleteChatGroups?: boolean;
+    // System permissions
+    canViewAnalytics?: boolean;
+    canExportData?: boolean;
+    canManageUsers?: boolean; // Global permission for user management
+    // Module permissions
+    modules?: {
+      dashboard?: { view?: boolean; edit?: boolean; };
+      myTasks?: { view?: boolean; edit?: boolean; };
+      projects?: { view?: boolean; edit?: boolean; };
+      chat?: { view?: boolean; edit?: boolean; };
+      profile?: { view?: boolean; edit?: boolean; };
+      userManagement?: { view?: boolean; edit?: boolean; };
+      performance?: { view?: boolean; edit?: boolean; };
+      auditLog?: { view?: boolean; edit?: boolean; };
+    };
   };
   settings?: {
     appearance?: {
@@ -121,13 +148,100 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     }
   }],
   permissions: {
-    canCreateChatGroups: {
+    // Project permissions
+    canCreateProjects: {
+      type: Boolean,
+      default: true
+    },
+    canDeleteProjects: {
       type: Boolean,
       default: false
     },
-    canDeleteOwnChatGroups: {
+    canManageAllProjects: {
       type: Boolean,
       default: false
+    },
+    canViewAllProjects: {
+      type: Boolean,
+      default: false
+    },
+    // Task permissions
+    canCreateTasks: {
+      type: Boolean,
+      default: true
+    },
+    canEditTasks: {
+      type: Boolean,
+      default: true
+    },
+    canDeleteTasks: {
+      type: Boolean,
+      default: false
+    },
+    canAssignTasks: {
+      type: Boolean,
+      default: true
+    },
+    // Chat permissions
+    canCreateChatGroups: {
+      type: Boolean,
+      default: true
+    },
+    canEditChatGroups: {
+      type: Boolean,
+      default: false
+    },
+    canDeleteChatGroups: {
+      type: Boolean,
+      default: false
+    },
+    // System permissions
+    canViewAnalytics: {
+      type: Boolean,
+      default: false
+    },
+    canExportData: {
+      type: Boolean,
+      default: false
+    },
+    canManageUsers: {
+      type: Boolean,
+      default: false
+    },
+    // Module permissions
+    modules: {
+      dashboard: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: false }
+      },
+      myTasks: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true }
+      },
+      projects: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: false }
+      },
+      chat: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true }
+      },
+      profile: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true }
+      },
+      userManagement: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      performance: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      auditLog: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      }
     }
   },
   settings: {

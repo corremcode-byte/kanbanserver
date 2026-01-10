@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { ProjectPermission, Project, Task } from '../models';
+import { ProjectPermission, Project, Task, User } from '../models';
 import { errorResponse } from '../utils/responses';
 
 interface AuthenticatedRequest extends Request {
@@ -48,17 +48,53 @@ export const checkPermission = (permission: Permission) => {
         projectId = req.body.projectId;
       }
 
-      // 3. From task (if updating/deleting a task and not a project route)
+      // 3. From chat group (if checking chat permissions)
+      if (!projectId && req.params.groupId) {
+        const ChatGroup = (await import('../models/ChatGroup')).ChatGroup;
+        const chatGroup = await ChatGroup.findById(req.params.groupId);
+        if (chatGroup && chatGroup.projectId) {
+          projectId = chatGroup.projectId.toString();
+        }
+      }
+
+      // 4. From task (if updating/deleting a task and not a project route)
       if (!projectId) {
-        return errorResponse(res, 'Project ID not found', 400);
+        const task = await Task.findById(req.params.id || req.body.taskId);
+        if (task) {
+          projectId = task.projectId.toString();
+        }
       }
 
-      // Verify if projectId is a task ID, and if so, get the project from the task
-      const task = await Task.findById(projectId);
-      if (task) {
-        projectId = task.projectId.toString();
+      // Get user's global permissions BEFORE checking project
+      const user = await User.findById(userId);
+
+      console.log(`🔍 Permission check for ${permission}:`, {
+        userId,
+        userEmail: user?.email,
+        hasPermissionsField: !!user?.permissions,
+        specificPermission: user?.permissions?.[permission as keyof typeof user.permissions],
+        projectId: projectId || 'none'
+      });
+
+      // Check global permissions first - they work regardless of project
+      if (user && user.permissions) {
+        const globalPermission = user.permissions[permission as keyof typeof user.permissions];
+        let effectiveGlobalPermission = globalPermission;
+
+        // Map project-level permissions to global equivalents
+        if ((permission === 'canEditProject' || permission === 'canManageMembers') &&
+            user.permissions.canManageAllProjects === true) {
+          effectiveGlobalPermission = true;
+        }
+
+        // If user has global permission, allow immediately (no project check needed)
+        if (effectiveGlobalPermission === true) {
+          console.log(`✅ User has global ${permission} - allowing action (no project check needed)`);
+          return next();
+        }
       }
 
+      // If no global permission, we need a project to check project-level permissions
       if (!projectId) {
         return errorResponse(res, 'Project ID not found', 400);
       }
@@ -84,17 +120,20 @@ export const checkPermission = (permission: Permission) => {
         return next();
       }
 
-      // Check user's permissions
+      // At this point: user is not owner and doesn't have global permission
+      // Check project-level permissions
       const userPermission = await ProjectPermission.findOne({
         projectId,
         userId
       });
 
+      // If user has no project permission record, they can't access via project permissions
+      // (but they would have been allowed earlier if they had global permissions)
       if (!userPermission) {
         return errorResponse(res, 'You are not a member of this project', 403);
       }
 
-      // Check if user has the required permission
+      // Check if user has the required permission at project level
       if (!userPermission.permissions[permission]) {
         return errorResponse(res, `You don't have permission to ${permission.replace('can', '').toLowerCase()}`, 403);
       }
@@ -172,7 +211,22 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
       return next();
     }
 
-    // Check user's permissions for non-assigned users
+    // Get user's global permissions
+    const user = await User.findById(userId);
+
+    console.log('Task edit - Global permission check:', {
+      userId,
+      userFound: !!user,
+      canEditTasks: user?.permissions?.canEditTasks
+    });
+
+    // If user has global permission to edit tasks, allow immediately
+    if (user && user.permissions && user.permissions.canEditTasks === true) {
+      console.log('User has global canEditTasks permission - allowing edit');
+      return next();
+    }
+
+    // Otherwise, check project-level permissions
     const userPermission = await ProjectPermission.findOne({
       projectId,
       userId
@@ -182,7 +236,7 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
       return errorResponse(res, 'You are not a member of this project', 403);
     }
 
-    // Check if user has canEditTasks permission
+    // Check if user has canEditTasks permission at project level
     if (!userPermission.permissions.canEditTasks) {
       return errorResponse(res, 'You don\'t have permission to edit tasks', 403);
     }
@@ -240,7 +294,15 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
       return next();
     }
 
-    // Check user's permissions
+    // Get user's global permissions
+    const user = await User.findById(userId);
+
+    // If user has global permission to delete tasks, allow immediately
+    if (user && user.permissions && user.permissions.canDeleteTasks === true) {
+      return next();
+    }
+
+    // Otherwise, check project-level permissions
     const userPermission = await ProjectPermission.findOne({
       projectId,
       userId
@@ -250,7 +312,7 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
       return errorResponse(res, 'You are not a member of this project', 403);
     }
 
-    // Must have canDeleteTasks permission
+    // Must have canDeleteTasks permission at project level
     if (!userPermission.permissions.canDeleteTasks) {
       return errorResponse(res, 'You don\'t have permission to delete tasks', 403);
     }
@@ -258,6 +320,121 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
     next();
   } catch (error) {
     console.error('Task delete check error:', error);
+    return errorResponse(res, 'Permission check failed', 500);
+  }
+};
+
+/**
+ * Middleware to check if user can create projects (global permission)
+ */
+export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?._id;
+
+    if (!userId) {
+      return errorResponse(res, 'Unauthorized', 401);
+    }
+
+    // Get user's global permissions
+    const user = await User.findById(userId);
+
+    console.log('🔍 Create project - Global permission check:', {
+      userId,
+      userFound: !!user,
+      userEmail: user?.email,
+      userRole: user?.role,
+      reqUserRole: req.user?.role,
+      hasPermissionsField: !!user?.permissions,
+      allPermissions: user?.permissions,
+      canCreateProjects: user?.permissions?.canCreateProjects,
+      canCreateProjectsType: typeof user?.permissions?.canCreateProjects
+    });
+
+    // Admins and managers can always create projects
+    if (req.user?.role === 'admin' || req.user?.role === 'manager') {
+      console.log('✅ User is admin or manager - allowing project creation');
+      return next();
+    }
+
+    // Check if user has global permission to create projects
+    if (user && user.permissions && user.permissions.canCreateProjects === true) {
+      // If explicitly set to true, allow
+      console.log('✅ User has global canCreateProjects permission - allowing');
+      return next();
+    }
+
+    // If no global permission, deny by default (user needs the permission to create projects)
+    console.log('❌ User does NOT have canCreateProjects permission - denying');
+    return errorResponse(res, 'You don\'t have permission to create projects', 403);
+  } catch (error) {
+    console.error('Create project check error:', error);
+    return errorResponse(res, 'Permission check failed', 500);
+  }
+};
+
+/**
+ * Middleware to check if user can delete projects (owner or global permission)
+ */
+export const checkCanDeleteProject = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?._id;
+    const projectId = req.params.id;
+
+    if (!userId || !projectId) {
+      console.log('❌ Delete project check - Invalid request');
+      return errorResponse(res, 'Invalid request', 400);
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      console.log('❌ Delete project check - Project not found');
+      return errorResponse(res, 'Project not found', 404);
+    }
+
+    // Check if user is project owner
+    const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
+      ? (project.ownerId as any)._id.toString()
+      : project.ownerId.toString();
+
+    const isOwner = ownerId === userId;
+    const isInOwners = project.owners && project.owners.some((owner: any) => {
+      const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
+      return owId === userId;
+    });
+
+    console.log('🔍 Delete project check:', {
+      userId,
+      projectId,
+      projectName: project.name,
+      isOwner,
+      isInOwners
+    });
+
+    // Owners can delete their projects
+    if (isOwner || isInOwners) {
+      console.log('✅ User is owner - allowing delete');
+      return next();
+    }
+
+    // Get user's global permissions
+    const user = await User.findById(userId);
+
+    console.log('🔍 Delete project - Global permission check:', {
+      hasPermissionsField: !!user?.permissions,
+      canDeleteProjects: user?.permissions?.canDeleteProjects,
+      canDeleteProjectsType: typeof user?.permissions?.canDeleteProjects
+    });
+
+    // Check if user has global permission to delete any project (admin feature)
+    if (user && user.permissions && user.permissions.canDeleteProjects === true) {
+      console.log('✅ User has global canDeleteProjects permission - allowing delete');
+      return next();
+    }
+
+    console.log('❌ User does NOT have permission to delete this project');
+    return errorResponse(res, 'You don\'t have permission to delete this project', 403);
+  } catch (error) {
+    console.error('❌ Delete project check error:', error);
     return errorResponse(res, 'Permission check failed', 500);
   }
 };

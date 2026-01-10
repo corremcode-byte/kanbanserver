@@ -196,6 +196,36 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
 
     await permission.save();
 
+    // Grant global canManageUsers permission if user has userManagement.edit module permission
+    if (permission.permissions.modules?.userManagement?.edit === true) {
+      try {
+        const targetUser = await User.findById(userId);
+        if (targetUser) {
+          if (!targetUser.permissions) {
+            targetUser.permissions = {};
+          }
+          targetUser.permissions.canManageUsers = true;
+          await targetUser.save();
+          logger.info(`Granted global canManageUsers permission to user ${userId} due to userManagement.edit module permission`);
+        }
+      } catch (userUpdateError) {
+        logger.error('Failed to update user global permissions:', userUpdateError);
+        // Don't fail the request, just log the error
+      }
+    } else if (permission.permissions.modules?.userManagement?.edit === false) {
+      // Remove global canManageUsers permission if userManagement.edit is revoked
+      try {
+        const targetUser = await User.findById(userId);
+        if (targetUser && targetUser.permissions?.canManageUsers === true) {
+          targetUser.permissions.canManageUsers = false;
+          await targetUser.save();
+          logger.info(`Revoked global canManageUsers permission from user ${userId} due to userManagement.edit module permission removal`);
+        }
+      } catch (userUpdateError) {
+        logger.error('Failed to update user global permissions:', userUpdateError);
+      }
+    }
+
     // Log permission change
     try {
       await AuditLog.logAction({
@@ -320,11 +350,16 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
 
     const isOwner = ownerId === req.user._id;
 
+    // Get user's global permissions
+    const user = await User.findById(req.user._id);
+    const globalPermissions = user?.permissions || {};
+
     if (isOwner) {
       // Return owner permissions
       return successResponse(res, 'Permission retrieved successfully', {
         role: 'owner',
         permissions: ProjectPermission.getDefaultPermissions('owner'),
+        globalPermissions,
         isOwner: true
       });
     }
@@ -341,9 +376,50 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
 
     const defaults = ProjectPermission.getDefaultPermissions(permission.role);
 
+    // Merge global permissions with project permissions
+    // Global permissions override project permissions if they are true
+    const mergedPermissions = { ...defaults, ...permission.permissions };
+
+    // Apply global permissions as overrides (excluding 'modules' since it's an object)
+    Object.keys(globalPermissions).forEach(key => {
+      if (key === 'modules') return; // Skip the modules object
+      const globalValue = globalPermissions[key as keyof typeof globalPermissions];
+      if (globalValue === true && typeof globalValue === 'boolean') {
+        // Global permission grants access
+        mergedPermissions[key as keyof typeof mergedPermissions] = true as any;
+      }
+    });
+
+    // Map global project permissions to project-level permissions
+    if (globalPermissions.canManageAllProjects === true) {
+      // canManageAllProjects grants both canEditProject and canManageMembers
+      mergedPermissions.canEditProject = true;
+      mergedPermissions.canManageMembers = true;
+      mergedPermissions.canManagePermissions = true;
+    }
+
+    if (globalPermissions.canViewAllProjects === true) {
+      // canViewAllProjects grants canViewAllTasks
+      mergedPermissions.canViewAllTasks = true;
+    }
+
+    // Map module permissions to global permissions
+    if (globalPermissions.canManageUsers === true) {
+      // Global canManageUsers grants userManagement module permissions
+      if (!mergedPermissions.modules) {
+        mergedPermissions.modules = {} as any;
+      }
+      if (!mergedPermissions.modules.userManagement) {
+        mergedPermissions.modules.userManagement = { view: false, edit: false };
+      }
+      mergedPermissions.modules.userManagement.view = true;
+      mergedPermissions.modules.userManagement.edit = true;
+    }
+
     return successResponse(res, 'Permission retrieved successfully', {
       ...permission.toJSON(),
-      permissions: { ...defaults, ...permission.permissions },
+      permissions: mergedPermissions,
+      globalPermissions,
       isOwner: false
     });
   } catch (error) {

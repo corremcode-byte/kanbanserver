@@ -225,3 +225,101 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can modify user permissions.', 403);
+    }
+
+    const { userIds, permissions } = req.body;
+
+    console.log('Update bulk permissions called:', {
+      userIds,
+      permissions,
+      requestingUserId: req.user?._id,
+      requestingUserRole: req.user?.role
+    });
+
+    // Validate input
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return errorResponse(res, 'userIds must be a non-empty array', 400);
+    }
+
+    if (!permissions || typeof permissions !== 'object') {
+      return errorResponse(res, 'permissions must be an object', 400);
+    }
+
+    // Update permissions for all selected users
+    // Convert boolean values properly - checked = true, unchecked = false
+    const updateResult = await User.updateMany(
+      { _id: { $in: userIds } },
+      {
+        $set: {
+          permissions: {
+            canCreateProjects: permissions.canCreateProjects === true,
+            canDeleteProjects: permissions.canDeleteProjects === true,
+            canManageAllProjects: permissions.canManageAllProjects === true,
+            canViewAllProjects: permissions.canViewAllProjects === true,
+            canCreateTasks: permissions.canCreateTasks === true,
+            canEditTasks: permissions.canEditTasks === true,
+            canDeleteTasks: permissions.canDeleteTasks === true,
+            canAssignTasks: permissions.canAssignTasks === true,
+            canCreateChatGroups: permissions.canCreateChatGroups === true,
+            canEditChatGroups: permissions.canEditChatGroups === true,
+            canDeleteChatGroups: permissions.canDeleteChatGroups === true,
+            canViewAnalytics: permissions.canViewAnalytics === true,
+            canExportData: permissions.canExportData === true,
+            canManageUsers: permissions.canManageUsers === true,
+            // Module permissions
+            modules: permissions.modules ? {
+              dashboard: {
+                view: permissions.modules.dashboard?.view === true,
+                edit: permissions.modules.dashboard?.edit === true
+              },
+              myTasks: {
+                view: permissions.modules.myTasks?.view === true,
+                edit: permissions.modules.myTasks?.edit === true
+              },
+              projects: {
+                view: permissions.modules.projects?.view === true,
+                edit: permissions.modules.projects?.edit === true
+              },
+              chat: {
+                view: permissions.modules.chat?.view === true,
+                edit: permissions.modules.chat?.edit === true
+              },
+              profile: {
+                view: permissions.modules.profile?.view === true,
+                edit: permissions.modules.profile?.edit === true
+              },
+              userManagement: {
+                view: permissions.modules.userManagement?.view === true,
+                edit: permissions.modules.userManagement?.edit === true
+              },
+              performance: {
+                view: permissions.modules.performance?.view === true,
+                edit: permissions.modules.performance?.edit === true
+              },
+              auditLog: {
+                view: permissions.modules.auditLog?.view === true,
+                edit: permissions.modules.auditLog?.edit === true
+              }
+            } : undefined
+          }
+        }
+      }
+    );
+
+    logger.info(`Updated permissions for ${updateResult.modifiedCount} users`);
+
+    return successResponse(res, `Permissions updated for ${updateResult.modifiedCount} user(s)`, {
+      modifiedCount: updateResult.modifiedCount,
+      matchedCount: updateResult.matchedCount
+    });
+  } catch (error) {
+    logger.error('Error updating bulk user permissions:', error);
+    return internalServerErrorResponse(res, 'Failed to update user permissions');
+  }
+};
+
