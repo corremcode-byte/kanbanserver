@@ -19,8 +19,72 @@ export interface IUser extends Document {
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
   permissions?: {
+    // Project permissions
+    canCreateProjects?: boolean;
+    canDeleteProjects?: boolean;
+    canManageAllProjects?: boolean;
+    canViewAllProjects?: boolean;
+    // Task permissions
+    canCreateTasks?: boolean;
+    canEditTasks?: boolean;
+    canDeleteTasks?: boolean;
+    canAssignTasks?: boolean;
+    canMoveTasks?: boolean;
+    // Chat permissions
     canCreateChatGroups?: boolean;
+    canEditChatGroups?: boolean;
+    canDeleteChatGroups?: boolean;
     canDeleteOwnChatGroups?: boolean;
+    // System permissions
+    canViewAnalytics?: boolean;
+    canExportData?: boolean;
+    canManageUsers?: boolean;
+    // Auto-logout permission
+    autoLogout?: boolean;
+    autoLogoutTimerMinutes?: number; // Timer in minutes
+    // Module permissions (with sub-permissions)
+    modules?: {
+      dashboard?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      myTasks?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      projects?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      chat?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      profile?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      userManagement?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      performance?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+      auditLog?: { 
+        view?: boolean; 
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
+    };
   };
   settings?: {
     appearance?: {
@@ -121,13 +185,54 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     }
   }],
   permissions: {
-    canCreateChatGroups: {
-      type: Boolean,
-      default: false
-    },
-    canDeleteOwnChatGroups: {
-      type: Boolean,
-      default: false
+    // Project permissions
+    canCreateProjects: { type: Boolean, default: false },
+    canDeleteProjects: { type: Boolean, default: false },
+    canManageAllProjects: { type: Boolean, default: false },
+    canViewAllProjects: { type: Boolean, default: false },
+    // Task permissions
+    canCreateTasks: { type: Boolean, default: false },
+    canEditTasks: { type: Boolean, default: false },
+    canDeleteTasks: { type: Boolean, default: false },
+    canAssignTasks: { type: Boolean, default: false },
+    canMoveTasks: { type: Boolean, default: false },
+    // Chat permissions
+    canCreateChatGroups: { type: Boolean, default: false },
+    canEditChatGroups: { type: Boolean, default: false },
+    canDeleteChatGroups: { type: Boolean, default: false },
+    canDeleteOwnChatGroups: { type: Boolean, default: false },
+    // System permissions
+    canViewAnalytics: { type: Boolean, default: false },
+    canExportData: { type: Boolean, default: false },
+    canManageUsers: { type: Boolean, default: false },
+    // Auto-logout permission
+    autoLogout: { type: Boolean, default: false },
+    autoLogoutTimerMinutes: { type: Number, default: null, min: 1 },
+    // Module permissions (with sub-permissions)
+    modules: {
+      dashboard: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      myTasks: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      projects: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      chat: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      profile: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      userManagement: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } },
+      performance: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } },
+      auditLog: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } }
     }
   },
   settings: {

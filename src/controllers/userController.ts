@@ -170,6 +170,241 @@ export const updateUserRole = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can update user permissions.', 403);
+    }
+
+    const { userIds, permissions } = req.body;
+
+    // Validate input
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return errorResponse(res, 'userIds must be a non-empty array', 400);
+    }
+
+    if (!permissions || typeof permissions !== 'object') {
+      return errorResponse(res, 'permissions must be an object', 400);
+    }
+
+    // Prevent modifying own permissions
+    if (userIds.includes(req.user._id)) {
+      return errorResponse(res, 'You cannot modify your own permissions.', 400);
+    }
+
+    // Update permissions for all specified users
+    const updatedUsers = [];
+    const errors = [];
+
+    for (const userId of userIds) {
+      try {
+        const user = await User.findById(userId);
+        if (!user) {
+          errors.push({ userId, error: 'User not found' });
+          continue;
+        }
+
+        // Merge new permissions with existing permissions
+        if (!user.permissions) {
+          user.permissions = {};
+        }
+
+        // Create a copy of permissions to avoid mutating the original
+        const permissionsToApply = { ...permissions };
+
+        // Handle modules separately if they exist
+        if (permissionsToApply.modules) {
+          if (!user.permissions.modules) {
+            user.permissions.modules = {};
+          }
+          // Merge module permissions
+          Object.assign(user.permissions.modules, permissionsToApply.modules);
+          delete permissionsToApply.modules;
+        }
+
+        // Update other permissions (excluding modules which we already handled)
+        Object.assign(user.permissions, permissionsToApply);
+
+        // Mark permissions as modified for Mongoose
+        user.markModified('permissions');
+        await user.save();
+
+        updatedUsers.push({
+          userId: user._id,
+          email: user.email,
+          displayName: user.displayName
+        });
+      } catch (error: any) {
+        logger.error(`Error updating permissions for user ${userId}:`, error);
+        errors.push({ userId, error: error.message || 'Failed to update permissions' });
+      }
+    }
+
+    if (updatedUsers.length === 0) {
+      return errorResponse(res, 'Failed to update any user permissions', 500);
+    }
+
+    return successResponse(res, `Permissions updated for ${updatedUsers.length} user(s)`, {
+      updated: updatedUsers,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    logger.error('Error updating bulk user permissions:', error);
+    return internalServerErrorResponse(res, 'Failed to update user permissions');
+  }
+};
+
+export const createUser = async (req: AuthenticatedRequest, res: Response) => {
+  // Declare firebaseUser and firebaseUid at function scope for cleanup in catch block
+  let firebaseUser: any = null;
+  let firebaseUid: string | null = null;
+
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can create users.', 403);
+    }
+
+    const { email, password, displayName, role = 'member', permissions } = req.body;
+
+    // Validate required fields
+    if (!email || !email.trim()) {
+      return errorResponse(res, 'Email is required', 400);
+    }
+
+    if (!password || password.length < 6) {
+      return errorResponse(res, 'Password must be at least 6 characters', 400);
+    }
+
+    if (!displayName || !displayName.trim()) {
+      return errorResponse(res, 'Display name is required', 400);
+    }
+
+    // Validate role
+    if (role && !['admin', 'member', 'manager'].includes(role)) {
+      return errorResponse(res, 'Invalid role. Must be admin, member, or manager', 400);
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existingUser) {
+      return errorResponse(res, 'User with this email already exists', 400);
+    }
+
+    // Check if displayName is already taken
+    const existingDisplayName = await User.findOne({ displayName: displayName.trim() });
+    if (existingDisplayName) {
+      return errorResponse(res, 'Display name is already taken', 400);
+    }
+
+    // Create Firebase user
+    const admin = require('../config/firebase').default;
+    try {
+      firebaseUser = await admin.auth().createUser({
+        email: email.toLowerCase().trim(),
+        password: password,
+        displayName: displayName.trim(),
+        emailVerified: false,
+      });
+      firebaseUid = firebaseUser.uid;
+      logger.info(`Created Firebase user: ${firebaseUid}`);
+    } catch (firebaseError: any) {
+      logger.error('Error creating Firebase user:', firebaseError);
+      if (firebaseError.code === 'auth/email-already-exists') {
+        return errorResponse(res, 'Email is already registered', 400);
+      }
+      return errorResponse(res, 'Failed to create user account', 500);
+    }
+
+    // Process permissions object
+    let processedPermissions: any = permissions || {};
+    
+    // Handle auto-logout settings
+    if (processedPermissions.autoLogoutTimerMinutes !== undefined) {
+      // Only set autoLogoutTimerMinutes if autoLogout is true and timer is > 0
+      if (!processedPermissions.autoLogout || !processedPermissions.autoLogoutTimerMinutes || processedPermissions.autoLogoutTimerMinutes <= 0) {
+        processedPermissions.autoLogout = false;
+        processedPermissions.autoLogoutTimerMinutes = undefined;
+      }
+    }
+    
+    // Ensure modules are properly structured
+    if (processedPermissions.modules) {
+      // Mark modules as modified to ensure Mongoose saves them
+      Object.keys(processedPermissions.modules).forEach(moduleKey => {
+        if (processedPermissions.modules[moduleKey]) {
+          // Ensure each module has at least view and edit
+          if (typeof processedPermissions.modules[moduleKey] === 'object') {
+            processedPermissions.modules[moduleKey] = {
+              ...processedPermissions.modules[moduleKey]
+            };
+          }
+        }
+      });
+    }
+
+    // Create user in database
+    const user = new User({
+      firebaseUid: firebaseUid!,
+      email: email.toLowerCase().trim(),
+      displayName: displayName.trim(),
+      role: role || 'member',
+      isActive: true,
+      lastLoginAt: new Date(),
+      permissions: processedPermissions,
+    });
+
+    // Mark permissions as modified to ensure Mongoose saves nested objects
+    if (user.permissions) {
+      user.markModified('permissions');
+      if (user.permissions.modules) {
+        user.markModified('permissions.modules');
+      }
+    }
+
+    await user.save();
+
+    logger.info(`User created successfully: ${user.email} (${user._id})`);
+    return successResponse(res, 'User created successfully', {
+      _id: user._id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      permissions: user.permissions,
+    });
+  } catch (error: any) {
+    logger.error('Error creating user:', error);
+    logger.error('Error stack:', error.stack);
+    logger.error('Error details:', {
+      message: error.message,
+      name: error.name,
+      code: error.code,
+      errors: error.errors
+    });
+    
+    // If user was created in Firebase but not in DB, try to clean up
+    // Note: firebaseUid is captured from the outer scope
+    if (firebaseUid) {
+      try {
+        const admin = require('../config/firebase').default;
+        await admin.auth().deleteUser(firebaseUid);
+        logger.info(`Cleaned up Firebase user: ${firebaseUid}`);
+      } catch (cleanupError) {
+        logger.error('Error cleaning up Firebase user:', cleanupError);
+      }
+    }
+    
+    // Return more specific error message
+    const errorMessage = error.message || 'Failed to create user';
+    if (error.name === 'ValidationError') {
+      return errorResponse(res, `Validation error: ${errorMessage}`, 400);
+    }
+    
+    return internalServerErrorResponse(res, errorMessage);
+  }
+};
+
 export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Check if user is admin
@@ -222,6 +457,52 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     logger.error('Error deleting user:', error);
     return internalServerErrorResponse(res, 'Failed to delete user');
+  }
+};
+
+// Delete user's Firebase auth credentials (for auto-logout)
+export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return errorResponse(res, 'Unauthorized', 401);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user has autoLogout permission
+    if (!user.permissions?.autoLogout) {
+      return errorResponse(res, 'Auto-logout permission not set', 403);
+    }
+
+    // Delete from Firebase Authentication
+    try {
+      const admin = require('../config/firebase').default;
+      await admin.auth().deleteUser(user.firebaseUid);
+      logger.info(`Deleted Firebase user credentials for auto-logout: ${user.firebaseUid}`);
+    } catch (firebaseError: any) {
+      if (firebaseError.code === 'auth/user-not-found') {
+        logger.warn(`Firebase user not found for UID: ${user.firebaseUid}`);
+      } else {
+        logger.error('Error deleting Firebase user:', firebaseError);
+        throw firebaseError;
+      }
+    }
+
+    // Deactivate user in database
+    user.isActive = false;
+    user.permissions = user.permissions || {};
+    user.permissions.autoLogout = false; // Clear the permission
+    await user.save();
+
+    logger.info(`User auth deleted for auto-logout: ${user.email} (${userId})`);
+    return successResponse(res, 'User credentials deleted successfully', { userId });
+  } catch (error) {
+    logger.error('Error deleting user auth:', error);
+    return internalServerErrorResponse(res, 'Failed to delete user credentials');
   }
 };
 

@@ -76,13 +76,8 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
     // Ensure creator is included in members list
     const allMemberIds = [...new Set([userId, ...(Array.isArray(memberIds) ? memberIds : [])].map(id => id.toString()))];
 
-    // If projectId is provided, validate that all members belong to the project
-    if (projectId && projectMembers.size > 0) {
-      const invalidMember = allMemberIds.find(id => !projectMembers.has(id));
-      if (invalidMember) {
-        return res.status(400).json({ message: 'All members must belong to the selected project' });
-      }
-    }
+    // Note: Removed validation that restricts members to project members
+    // Users can now add anyone to chat groups, regardless of project membership
 
     // Validate members exist and are active
     const members = await User.find({
