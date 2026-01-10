@@ -35,15 +35,11 @@ const fixPermissionFields = async () => {
 
     for (const perm of permissions) {
       const missingFields: string[] = [];
-      const updates: Record<string, boolean> = {};
 
       // Check for missing fields
       requiredFields.forEach(field => {
         if (!(field in perm.permissions) || perm.permissions[field as keyof typeof perm.permissions] === undefined || perm.permissions[field as keyof typeof perm.permissions] === null) {
           missingFields.push(field);
-          // Get default value based on role
-          const defaults = ProjectPermission.getDefaultPermissions(perm.role);
-          updates[field] = defaults[field as keyof typeof defaults] || false;
         }
       });
 
@@ -61,16 +57,21 @@ const fixPermissionFields = async () => {
         let needsUpdate = false;
 
         missingFields.forEach(field => {
-          const defaultValue = defaults[field as keyof typeof defaults] || false;
-          permissionDoc.permissions[field as keyof typeof permissionDoc.permissions] = defaultValue;
-          needsUpdate = true;
+          // Type guard to check if the field is a boolean permission (not modules)
+          if (field !== 'modules' && field in defaults) {
+            const defaultValue = defaults[field as keyof typeof defaults];
+            if (typeof defaultValue === 'boolean') {
+              (permissionDoc.permissions as Record<string, unknown>)[field] = defaultValue;
+              needsUpdate = true;
+            }
+          }
         });
 
         if (needsUpdate) {
           // Mark permissions field as modified
           permissionDoc.markModified('permissions');
           await permissionDoc.save();
-          
+
           fixedCount++;
           logger.info(`✅ Fixed permission ${perm._id} (User: ${perm.userId}, Project: ${perm.projectId})`);
           logger.info(`   Added missing fields: ${missingFields.join(', ')}`);
