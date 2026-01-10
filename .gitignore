@@ -1,36 +1,28 @@
 # Dependencies
 node_modules/
-<<<<<<< HEAD
+package-lock.json
 
 # Environment variables
 .env
 .env.local
 .env.*.local
-=======
-package-lock.json
->>>>>>> 89193c91 (8jan)
+.env.production
 
-# Build output
+# Build output directories
 dist/
 build/
 
-<<<<<<< HEAD
-=======
-# Environment variables
-.env
-.env.local
-.env.production
+# Compiled JavaScript files (from TypeScript)
+*.js.map
+*.d.ts.map
+*.tsbuildinfo
 
->>>>>>> 89193c91 (8jan)
 # Logs
 logs/
 *.log
 npm-debug.log*
-<<<<<<< HEAD
 yarn-debug.log*
 yarn-error.log*
-=======
->>>>>>> 89193c91 (8jan)
 
 # OS files
 .DS_Store
@@ -41,19 +33,11 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-<<<<<<< HEAD
 *~
-
-# TypeScript
-*.tsbuildinfo
-
-# Uploads
-uploads/*
-!uploads/.gitkeep
-=======
 
 # Uploads directory (user-uploaded files)
 uploads/
+!uploads/.gitkeep
 
 # Testing
 coverage/
@@ -62,4 +46,3 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
->>>>>>> 89193c91 (8jan)
