@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { checkPermission } from '../middleware/permissions';
+import { checkPermission, checkCanCreateProject, checkCanDeleteProject } from '../middleware/permissions';
 import * as projectsController from '../controllers/projectsController';
 
 const router = Router();
@@ -10,10 +10,10 @@ router.use(authenticate);
 
 // Project CRUD operations
 router.get('/', projectsController.getProjects);
-router.post('/', projectsController.createProject);
+router.post('/', checkCanCreateProject, projectsController.createProject);
 router.get('/:id', projectsController.getProject);
 router.put('/:id', checkPermission('canEditProject'), projectsController.updateProject);
-router.delete('/:id', projectsController.deleteProject);
+router.delete('/:id', checkCanDeleteProject, projectsController.deleteProject);
 
 // Project member management
 router.post('/:id/members', checkPermission('canManageMembers'), projectsController.addMember);

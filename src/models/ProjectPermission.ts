@@ -5,6 +5,7 @@ export interface IProjectPermission extends Document {
   userId: mongoose.Types.ObjectId;
   role: 'owner' | 'manager' | 'assignee';
   permissions: {
+    // Legacy task permissions (keeping for backward compatibility)
     canCreateTasks: boolean;
     canEditTasks: boolean;
     canDeleteTasks: boolean;
@@ -15,6 +16,42 @@ export interface IProjectPermission extends Document {
     canManagePermissions: boolean;
     canCreateChatGroups: boolean;
     canDeleteChatGroups: boolean;
+
+    // Module-based permissions (View & Edit for each module)
+    modules: {
+      dashboard: {
+        view: boolean;
+        edit: boolean;
+      };
+      myTasks: {
+        view: boolean;
+        edit: boolean;
+      };
+      projects: {
+        view: boolean;
+        edit: boolean;
+      };
+      chat: {
+        view: boolean;
+        edit: boolean;
+      };
+      profile: {
+        view: boolean;
+        edit: boolean;
+      };
+      userManagement: {
+        view: boolean;
+        edit: boolean;
+      };
+      performance: {
+        view: boolean;
+        edit: boolean;
+      };
+      auditLog: {
+        view: boolean;
+        edit: boolean;
+      };
+    };
   };
   customPermissions?: Record<string, boolean>; // For future extensibility
   createdAt: Date;
@@ -54,7 +91,41 @@ const ProjectPermissionSchema = new Schema<IProjectPermission>({
     canViewAllTasks: { type: Boolean, default: false },
     canManagePermissions: { type: Boolean, default: false },
     canCreateChatGroups: { type: Boolean, default: false },
-    canDeleteChatGroups: { type: Boolean, default: false }
+    canDeleteChatGroups: { type: Boolean, default: false },
+    modules: {
+      dashboard: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      myTasks: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      projects: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      chat: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      profile: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      userManagement: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      performance: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      },
+      auditLog: {
+        view: { type: Boolean, default: false },
+        edit: { type: Boolean, default: false }
+      }
+    }
   },
   customPermissions: {
     type: Map,
@@ -97,9 +168,19 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: true,
       canManageMembers: true,
       canViewAllTasks: true,
-        canManagePermissions: true,
-        canCreateChatGroups: true,
-        canDeleteChatGroups: true
+      canManagePermissions: true,
+      canCreateChatGroups: true,
+      canDeleteChatGroups: true,
+      modules: {
+        dashboard: { view: true, edit: true },
+        myTasks: { view: true, edit: true },
+        projects: { view: true, edit: true },
+        chat: { view: true, edit: true },
+        profile: { view: true, edit: true },
+        userManagement: { view: true, edit: true },
+        performance: { view: true, edit: true },
+        auditLog: { view: true, edit: true }
+      }
     },
     manager: {
       canCreateTasks: true,
@@ -109,9 +190,19 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: false,
       canManageMembers: false,
       canViewAllTasks: true,
-        canManagePermissions: false,
-        canCreateChatGroups: false,
-        canDeleteChatGroups: false
+      canManagePermissions: false,
+      canCreateChatGroups: false,
+      canDeleteChatGroups: false,
+      modules: {
+        dashboard: { view: true, edit: false },
+        myTasks: { view: true, edit: true },
+        projects: { view: true, edit: false },
+        chat: { view: true, edit: true },
+        profile: { view: true, edit: true },
+        userManagement: { view: false, edit: false },
+        performance: { view: false, edit: false },
+        auditLog: { view: false, edit: false }
+      }
     },
     assignee: {
       canCreateTasks: false,
@@ -121,9 +212,19 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
       canEditProject: false,
       canManageMembers: false,
       canViewAllTasks: false, // Can only view own tasks
-        canManagePermissions: false,
-        canCreateChatGroups: false,
-        canDeleteChatGroups: false
+      canManagePermissions: false,
+      canCreateChatGroups: false,
+      canDeleteChatGroups: false,
+      modules: {
+        dashboard: { view: true, edit: false },
+        myTasks: { view: true, edit: true },
+        projects: { view: true, edit: false },
+        chat: { view: true, edit: false },
+        profile: { view: true, edit: true },
+        userManagement: { view: false, edit: false },
+        performance: { view: false, edit: false },
+        auditLog: { view: false, edit: false }
+      }
     }
   };
 

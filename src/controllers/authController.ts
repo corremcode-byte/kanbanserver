@@ -131,6 +131,14 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'Account is deactivated', 403);
     }
 
+    console.log('🔍 getCurrentUser - User permissions:', {
+      userId: user._id,
+      email: user.email,
+      role: user.role,
+      hasPermissionsField: !!user.permissions,
+      permissions: user.permissions
+    });
+
     return successResponse(res, 'User retrieved successfully', user);
   } catch (error) {
     logger.error('Error getting current user:', error);

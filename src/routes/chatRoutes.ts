@@ -15,6 +15,7 @@ import {
 } from '../controllers/chatController';
 import { uploadChatAttachment } from '../controllers/uploadController';
 import { authenticate } from '../middleware/auth';
+import { checkPermission } from '../middleware/permissions';
 import upload from '../middleware/upload';
 import { bucket } from '../config/firebase';
 
@@ -77,13 +78,13 @@ router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) =>
 });
 
 // Chat group routes
-router.post('/groups', createChatGroup);
+router.post('/groups', checkPermission('canCreateChatGroups'), createChatGroup);
 router.get('/groups', getUserChatGroups);
 router.get('/groups/:groupId', getChatGroup);
 router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
-router.delete('/groups/:groupId', deleteChatGroup);
+router.delete('/groups/:groupId', checkPermission('canDeleteChatGroups'), deleteChatGroup);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
