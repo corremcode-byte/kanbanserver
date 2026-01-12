@@ -440,3 +440,33 @@ export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+// Delete all users (admin only, excludes current user)
+export const deleteAllUsers = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Check if current user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Only admins can delete all users', 403);
+    }
+
+    // Delete all users except the current user
+    const result = await User.deleteMany({
+      _id: { $ne: currentUserId }
+    });
+
+    logger.warn(`All users deleted by admin: ${req.user.email}. Count: ${result.deletedCount}`);
+
+    return successResponse(res, `Successfully deleted ${result.deletedCount} users`, {
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    logger.error('Error deleting all users:', error);
+    return internalServerErrorResponse(res, 'Failed to delete all users');
+  }
+};
+
