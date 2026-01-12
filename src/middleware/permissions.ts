@@ -5,7 +5,6 @@ import { errorResponse } from '../utils/responses';
 interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
-    firebaseUid: string;
     email: string;
     displayName: string;
     role: string;

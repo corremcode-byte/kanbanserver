@@ -6,13 +6,11 @@ import { logger } from '../utils/logger';
 interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
-    firebaseUid: string;
     email: string;
     displayName: string;
     role: string;
     isManager: boolean;
   };
-  firebaseUser?: any;
 }
 
 export const getUsers = async (req: AuthenticatedRequest, res: Response) => {
@@ -89,7 +87,7 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const users = await User.find()
-      .select('firebaseUid email displayName photoURL role isActive lastLoginAt createdAt')
+      .select('email displayName photoURL role isActive lastLoginAt createdAt')
       .sort({ createdAt: -1 });
 
     const stats = {
@@ -256,10 +254,6 @@ export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: 
 };
 
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
-  // Declare firebaseUser and firebaseUid at function scope for cleanup in catch block
-  let firebaseUser: any = null;
-  let firebaseUid: string | null = null;
-
   try {
     // Check if user is admin
     if (req.user?.role !== 'admin') {
@@ -298,28 +292,9 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Display name is already taken', 400);
     }
 
-    // Create Firebase user
-    const admin = require('../config/firebase').default;
-    try {
-      firebaseUser = await admin.auth().createUser({
-        email: email.toLowerCase().trim(),
-        password: password,
-        displayName: displayName.trim(),
-        emailVerified: false,
-      });
-      firebaseUid = firebaseUser.uid;
-      logger.info(`Created Firebase user: ${firebaseUid}`);
-    } catch (firebaseError: any) {
-      logger.error('Error creating Firebase user:', firebaseError);
-      if (firebaseError.code === 'auth/email-already-exists') {
-        return errorResponse(res, 'Email is already registered', 400);
-      }
-      return errorResponse(res, 'Failed to create user account', 500);
-    }
-
     // Process permissions object
     let processedPermissions: any = permissions || {};
-    
+
     // Handle auto-logout settings
     if (processedPermissions.autoLogoutTimerMinutes !== undefined) {
       // Only set autoLogoutTimerMinutes if autoLogout is true and timer is > 0
@@ -328,7 +303,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
         processedPermissions.autoLogoutTimerMinutes = undefined;
       }
     }
-    
+
     // Ensure modules are properly structured
     if (processedPermissions.modules) {
       // Mark modules as modified to ensure Mongoose saves them
@@ -344,10 +319,10 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // Create user in database
+    // Create user in database with password (will be hashed by pre-save middleware)
     const user = new User({
-      firebaseUid: firebaseUid!,
       email: email.toLowerCase().trim(),
+      password: password, // Will be hashed by pre-save middleware
       displayName: displayName.trim(),
       role: role || 'member',
       isActive: true,
@@ -382,19 +357,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       code: error.code,
       errors: error.errors
     });
-    
-    // If user was created in Firebase but not in DB, try to clean up
-    // Note: firebaseUid is captured from the outer scope
-    if (firebaseUid) {
-      try {
-        const admin = require('../config/firebase').default;
-        await admin.auth().deleteUser(firebaseUid);
-        logger.info(`Cleaned up Firebase user: ${firebaseUid}`);
-      } catch (cleanupError) {
-        logger.error('Error cleaning up Firebase user:', cleanupError);
-      }
-    }
-    
+
     // Return more specific error message
     const errorMessage = error.message || 'Failed to create user';
     if (error.name === 'ValidationError') {
@@ -424,21 +387,6 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Delete from Firebase Authentication first
-    try {
-      const admin = require('../config/firebase').default;
-      await admin.auth().deleteUser(user.firebaseUid);
-      logger.info(`Deleted Firebase user: ${user.firebaseUid}`);
-    } catch (firebaseError: any) {
-      // Log but continue if Firebase user doesn't exist
-      if (firebaseError.code === 'auth/user-not-found') {
-        logger.warn(`Firebase user not found for UID: ${user.firebaseUid}`);
-      } else {
-        logger.error('Error deleting Firebase user:', firebaseError);
-        throw firebaseError; // Re-throw if it's a different error
-      }
-    }
-
     // Delete associated project permissions
     const ProjectPermission = require('../models').ProjectPermission;
     try {
@@ -460,7 +408,7 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// Delete user's Firebase auth credentials (for auto-logout)
+// Deactivate user auth (for auto-logout) - MongoDB only
 export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?._id?.toString();
@@ -478,21 +426,7 @@ export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'Auto-logout permission not set', 403);
     }
 
-    // Delete from Firebase Authentication
-    try {
-      const admin = require('../config/firebase').default;
-      await admin.auth().deleteUser(user.firebaseUid);
-      logger.info(`Deleted Firebase user credentials for auto-logout: ${user.firebaseUid}`);
-    } catch (firebaseError: any) {
-      if (firebaseError.code === 'auth/user-not-found') {
-        logger.warn(`Firebase user not found for UID: ${user.firebaseUid}`);
-      } else {
-        logger.error('Error deleting Firebase user:', firebaseError);
-        throw firebaseError;
-      }
-    }
-
-    // Deactivate user in database
+    // Deactivate user in database (logout by marking as inactive)
     user.isActive = false;
     user.permissions = user.permissions || {};
     user.permissions.autoLogout = false; // Clear the permission

@@ -3,118 +3,138 @@ import { User, Task, Project } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
-import { getAuth } from 'firebase-admin/auth';
+import jwt from 'jsonwebtoken';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
-    firebaseUid: string;
     email: string;
     displayName: string;
     role: string;
     isManager: boolean;
   };
-  firebaseUser?: any; // Firebase user from token verification
 }
 
-// Remove any direct password-based login/register logic and references
-
-export const syncFirebaseUser = async (req: AuthenticatedRequest, res: Response) => {
+// MongoDB-only authentication - Login endpoint
+export const login = async (req: Request, res: Response) => {
   try {
-    const { firebaseUid, email, displayName, photoURL, role = 'member' } = req.body;
+    const { email, password } = req.body;
 
-    if (!firebaseUid || !email) {
-      return errorResponse(res, 'Firebase UID and email are required', 400);
+    if (!email || !password) {
+      return errorResponse(res, 'Email and password are required', 400);
     }
 
-    // Check if user already exists by Firebase UID
-    let user = await User.findOne({ firebaseUid });
+    // Find user by email and include password field
+    const user = await User.findOne({ email: email.toLowerCase(), isActive: true }).select('+password');
 
-    if (user) {
-      // Update existing user (but don't change displayName if it would cause a conflict)
-      if (displayName && displayName !== user.displayName) {
-        // Check if new displayName is already taken by another user
-        const existingUser = await User.findOne({ displayName, _id: { $ne: user._id } });
-        if (existingUser) {
-          logger.warn(`Attempted to change displayName to existing name: ${displayName}`);
-          // Keep the old displayName
-        } else {
-          user.displayName = displayName;
-        }
-      }
-      user.photoURL = photoURL || user.photoURL;
-      user.email = email;
-      user.lastLoginAt = new Date();
-      await user.save();
-
-      logger.info(`Firebase user synced: ${user.email}`);
-      return successResponse(res, 'User synced successfully', user);
+    if (!user) {
+      return errorResponse(res, 'Invalid email or password', 401);
     }
 
-    // Check if user exists by email (invited user scenario)
-    user = await User.findOne({ email });
-    if (user && !user.firebaseUid) {
-      // Update existing user with Firebase UID
-      user.firebaseUid = firebaseUid;
-      if (displayName && displayName !== user.displayName) {
-        // Check if new displayName is already taken
-        const existingUser = await User.findOne({ displayName, _id: { $ne: user._id } });
-        if (existingUser) {
-          logger.warn(`Attempted to set displayName to existing name: ${displayName}`);
-          // Keep the old displayName or generate a new one
-        } else {
-          user.displayName = displayName;
-        }
-      }
-      user.photoURL = photoURL || user.photoURL;
-      user.lastLoginAt = new Date();
-      await user.save();
+    // Compare password
+    const isPasswordValid = await user.comparePassword(password);
 
-      logger.info(`Existing user linked to Firebase: ${user.email}`);
-      return successResponse(res, 'User linked successfully', user);
+    if (!isPasswordValid) {
+      return errorResponse(res, 'Invalid email or password', 401);
     }
 
-    // Create new user - ensure displayName is unique
-    let uniqueDisplayName = displayName || email.split('@')[0];
+    // Generate JWT token
+    const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    const token = jwt.sign(
+      {
+        userId: user._id.toString(),
+        email: user.email,
+        role: user.role
+      },
+      jwtSecret,
+      { expiresIn: '7d' }
+    );
 
-    // Check if displayName is already taken
-    let existingUser = await User.findOne({ displayName: uniqueDisplayName });
+    // Update last login
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    // Remove password from response
+    const userResponse = user.toJSON();
+
+    logger.info(`User logged in: ${user.email}`);
+
+    return successResponse(res, 'Login successful', {
+      token,
+      user: userResponse
+    });
+  } catch (error) {
+    logger.error('Login error:', error);
+    return internalServerErrorResponse(res, 'Login failed');
+  }
+};
+
+// MongoDB-only authentication - Create user endpoint
+export const createUser = async (req: Request, res: Response) => {
+  try {
+    const { email, password, displayName, role = 'member', permissions, settings } = req.body;
+
+    if (!email || !password) {
+      return errorResponse(res, 'Email and password are required', 400);
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      // Generate a unique displayName by appending a number
+      return errorResponse(res, 'User with this email already exists', 400);
+    }
+
+    // Generate unique displayName if not provided or if it's already taken
+    let uniqueDisplayName = displayName || email.split('@')[0];
+    let existingDisplayName = await User.findOne({ displayName: uniqueDisplayName });
+
+    if (existingDisplayName) {
       let counter = 1;
-      while (existingUser) {
+      while (existingDisplayName) {
         uniqueDisplayName = `${displayName || email.split('@')[0]}_${counter}`;
-        existingUser = await User.findOne({ displayName: uniqueDisplayName });
+        existingDisplayName = await User.findOne({ displayName: uniqueDisplayName });
         counter++;
       }
       logger.info(`DisplayName was taken, generated unique name: ${uniqueDisplayName}`);
     }
 
-    user = new User({
-      firebaseUid,
-      email,
+    // Create new user
+    const user = new User({
+      email: email.toLowerCase(),
+      password,
       displayName: uniqueDisplayName,
-      photoURL,
       role,
+      permissions,
+      settings,
       isActive: true,
       lastLoginAt: new Date()
     });
 
     await user.save();
-    logger.info(`New Firebase user created: ${user.email}`);
 
-    return successResponse(res, 'User created successfully', user);
+    // Remove password from response
+    const userResponse = user.toJSON();
+
+    logger.info(`New user created: ${user.email}`);
+
+    return successResponse(res, 'User created successfully', userResponse, 201);
   } catch (error: any) {
-    logger.error('Firebase user sync error:', error);
+    logger.error('Create user error:', error);
 
-    // Handle duplicate key error specifically
-    if (error.code === 11000 && error.keyPattern && error.keyPattern.displayName) {
-      return errorResponse(res, 'This username is already taken. Please choose a different username.', 400);
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      if (error.keyPattern?.email) {
+        return errorResponse(res, 'User with this email already exists', 400);
+      }
+      if (error.keyPattern?.displayName) {
+        return errorResponse(res, 'This username is already taken', 400);
+      }
     }
 
-    return internalServerErrorResponse(res, 'Failed to sync user');
+    return internalServerErrorResponse(res, 'Failed to create user');
   }
 };
+
 
 export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -146,29 +166,6 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-export const getUserByFirebaseUid = async (req: Request, res: Response) => {
-  try {
-    const { firebaseUid } = req.params;
-    
-    if (!firebaseUid) {
-      return errorResponse(res, 'Firebase UID is required', 400);
-    }
-
-    const user = await User.findOne({ firebaseUid });
-    if (!user) {
-      return notFoundResponse(res, 'User not found');
-    }
-
-    if (!user.isActive) {
-      return errorResponse(res, 'Account is deactivated', 403);
-    }
-
-    return successResponse(res, 'User retrieved successfully', user);
-  } catch (error) {
-    logger.error('Error getting user by Firebase UID:', error);
-    return internalServerErrorResponse(res, 'Failed to get user');
-  }
-};
 
 export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -712,14 +709,36 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    // Since we're using Firebase authentication, password changes should be handled
-    // through Firebase Admin SDK or client-side Firebase SDK
-    // For now, we'll return an appropriate message
-    return errorResponse(
-      res,
-      'Password changes must be done through Firebase authentication. Please use the Firebase password reset feature.',
-      400
-    );
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return errorResponse(res, 'Current password and new password are required', 400);
+    }
+
+    if (newPassword.length < 6) {
+      return errorResponse(res, 'New password must be at least 6 characters long', 400);
+    }
+
+    // Find user with password field
+    const user = await User.findById(req.user._id).select('+password');
+
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    // Verify current password
+    const isPasswordValid = await user.comparePassword(currentPassword);
+
+    if (!isPasswordValid) {
+      return errorResponse(res, 'Current password is incorrect', 401);
+    }
+
+    // Update password (will be hashed by pre-save middleware)
+    user.password = newPassword;
+    await user.save();
+
+    logger.info(`Password updated for user: ${user.email}`);
+    return successResponse(res, 'Password updated successfully');
   } catch (error) {
     logger.error('Error updating password:', error);
     return internalServerErrorResponse(res, 'Failed to update password');
@@ -792,7 +811,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Check if user exists
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail, isActive: true });
 
     // For security, always return success even if user doesn't exist
     // This prevents email enumeration attacks
@@ -801,17 +820,24 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       return successResponse(res, 'If this email exists in our system, a password reset link has been sent');
     }
 
-    // Generate Firebase password reset link
+    // Generate password reset token
+    const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    const resetToken = jwt.sign(
+      {
+        userId: user._id.toString(),
+        email: user.email,
+        type: 'password-reset'
+      },
+      jwtSecret,
+      { expiresIn: '1h' } // Token expires in 1 hour
+    );
+
+    // Create password reset link
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
+
+    // Send password reset email
     try {
-      const auth = getAuth();
-      const appUrl = process.env.APP_URL || 'http://localhost:3000';
-
-      // Generate password reset link using Firebase Admin SDK
-      const resetLink = await auth.generatePasswordResetLink(normalizedEmail, {
-        url: `${appUrl}/login`, // Redirect URL after password reset
-      });
-
-      // Send password reset email
       const emailSent = await emailService.sendPasswordResetEmail(normalizedEmail, {
         userName: user.displayName || user.email,
         resetLink,
@@ -821,24 +847,66 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       if (emailSent) {
         logger.info(`Password reset email sent to: ${email}`);
       } else {
-        logger.warn(`Failed to send password reset email to: ${email}, but link was generated`);
+        logger.warn(`Failed to send password reset email to: ${email}`);
       }
-
-      return successResponse(
-        res,
-        'If this email exists in our system, a password reset link has been sent'
-      );
-    } catch (firebaseError: any) {
-      logger.error('Firebase password reset error:', firebaseError);
-
-      // Even on error, return generic success message for security
-      return successResponse(
-        res,
-        'If this email exists in our system, a password reset link has been sent'
-      );
+    } catch (emailError) {
+      logger.error('Email sending error:', emailError);
+      // Don't throw error, still return success for security
     }
+
+    return successResponse(
+      res,
+      'If this email exists in our system, a password reset link has been sent'
+    );
   } catch (error) {
     logger.error('Error requesting password reset:', error);
     return internalServerErrorResponse(res, 'Failed to process password reset request');
+  }
+};
+
+// Reset password with token
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return errorResponse(res, 'Token and new password are required', 400);
+    }
+
+    if (newPassword.length < 6) {
+      return errorResponse(res, 'Password must be at least 6 characters long', 400);
+    }
+
+    // Verify token
+    const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    let decoded: any;
+
+    try {
+      decoded = jwt.verify(token, jwtSecret);
+    } catch (err) {
+      return errorResponse(res, 'Invalid or expired reset token', 400);
+    }
+
+    // Check token type
+    if (decoded.type !== 'password-reset') {
+      return errorResponse(res, 'Invalid reset token', 400);
+    }
+
+    // Find user
+    const user = await User.findById(decoded.userId);
+
+    if (!user || !user.isActive) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Update password (will be hashed by pre-save middleware)
+    user.password = newPassword;
+    await user.save();
+
+    logger.info(`Password reset successful for user: ${user.email}`);
+    return successResponse(res, 'Password has been reset successfully');
+  } catch (error) {
+    logger.error('Error resetting password:', error);
+    return internalServerErrorResponse(res, 'Failed to reset password');
   }
 };

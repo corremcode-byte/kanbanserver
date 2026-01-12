@@ -11,13 +11,11 @@ import { emailService } from '../services/emailService';
 interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
-    firebaseUid: string;
     email: string;
     displayName: string;
     role: string;
     isManager: boolean;
   };
-  firebaseUser?: any;
 }
 
 export const getTasks = async (req: AuthenticatedRequest, res: Response) => {

@@ -3,11 +3,9 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models';
 import { errorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
-import admin from '../config/firebase';
 
 export interface AuthenticatedRequest extends Request {
   user?: any;
-  firebaseUser?: any; // Added for Firebase authentication
 }
 
 export const authenticate = async (
@@ -38,20 +36,20 @@ export const authenticate = async (
     console.log('Auth debug - Token received from', req.cookies?.auth_token ? 'cookie' : 'header', ', verifying...');
 
     // Verify JWT token
-    const decoded = jwt.verify(token, secret) as { id: string };
+    const decoded = jwt.verify(token, secret) as { userId: string };
 
     console.log('Auth debug - Token decoded:', decoded);
 
-    if (!decoded || !decoded.id) {
-      console.log('Auth error: Invalid token or missing id');
+    if (!decoded || !decoded.userId) {
+      console.log('Auth error: Invalid token or missing userId');
       errorResponse(res, 'Invalid token', 401);
       return;
     }
 
     // Find user in database
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.userId);
     if (!user) {
-      console.log('Auth error: User not found in database:', decoded.id);
+      console.log('Auth error: User not found in database:', decoded.userId);
       errorResponse(res, 'User not found', 404);
       return;
     }
@@ -65,7 +63,6 @@ export const authenticate = async (
     // Attach user to request with proper _id
     req.user = {
       _id: user._id.toString(),
-      firebaseUid: user.firebaseUid,
       email: user.email,
       displayName: user.displayName,
       role: user.role,
@@ -112,15 +109,14 @@ export const optionalAuth = async (
 
     try {
       // Verify JWT token
-      const decoded = jwt.verify(token, secret) as { id: string };
+      const decoded = jwt.verify(token, secret) as { userId: string };
 
-      if (decoded && decoded.id) {
+      if (decoded && decoded.userId) {
         // Find user in database
-        const user = await User.findById(decoded.id);
+        const user = await User.findById(decoded.userId);
         if (user && user.isActive) {
           req.user = {
             _id: user._id.toString(),
-            firebaseUid: user.firebaseUid,
             email: user.email,
             displayName: user.displayName,
             role: user.role,
@@ -250,54 +246,4 @@ export const requireOwnershipOrAdmin = (resourceUserId: string) => {
 
     next();
   };
-};
-
-// Firebase authentication middleware
-export const authenticateFirebaseToken = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      errorResponse(res, 'Firebase token required', 401);
-      return;
-    }
-
-    const firebaseToken = authHeader.split(' ')[1];
-
-    try {
-      // Verify Firebase ID token using Admin SDK
-      const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
-      if (!decodedToken || !decodedToken.uid || !decodedToken.email) {
-        errorResponse(res, 'Invalid Firebase token', 401);
-        return;
-      }
-
-      // Find user by Firebase UID
-      const user = await User.findOne({ firebaseUid: decodedToken.uid });
-      if (!user) {
-        errorResponse(res, 'User not found', 404);
-        return;
-      }
-      if (!user.isActive) {
-        errorResponse(res, 'Account is deactivated', 403);
-        return;
-      }
-
-      // Attach user to request
-      req.user = user;
-      req.firebaseUser = decodedToken;
-      next();
-    } catch (tokenError) {
-      logger.error('Firebase token verification error:', tokenError);
-      errorResponse(res, 'Invalid Firebase token', 401);
-      return;
-    }
-  } catch (error) {
-    logger.error('Firebase authentication error:', error);
-    errorResponse(res, 'Authentication failed', 401);
-    return;
-  }
 };

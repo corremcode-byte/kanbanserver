@@ -13,13 +13,11 @@ import { emailService } from '../services/emailService';
 interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
-    firebaseUid: string;
     email: string;
     displayName: string;
     role: string;
     isManager: boolean;
   };
-  firebaseUser?: any;
 }
 
 // Helper function to check if user is a manager (owner or in managers array)

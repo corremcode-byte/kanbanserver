@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 export interface IPushSubscription {
   endpoint: string;
@@ -9,8 +10,8 @@ export interface IPushSubscription {
 }
 
 export interface IUser extends Document {
-  firebaseUid: string;
   email: string;
+  password: string;
   displayName: string;
   photoURL?: string;
   bio?: string;
@@ -18,6 +19,7 @@ export interface IUser extends Document {
   isActive: boolean;
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
+  comparePassword(candidatePassword: string): Promise<boolean>;
   permissions?: {
     // Project permissions
     canCreateProjects?: boolean;
@@ -120,17 +122,10 @@ interface IUserMethods {
 }
 
 interface IUserModel extends Model<IUser, {}, IUserMethods> {
-  findByFirebaseUid(firebaseUid: string): Promise<IUser | null>;
   searchUsers(query: string, limit?: number): Promise<IUser[]>;
 }
 
 const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
-  firebaseUid: {
-    type: String,
-    required: true,
-    unique: true,
-    index: true
-  },
   email: {
     type: String,
     required: true,
@@ -138,6 +133,11 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     lowercase: true,
     trim: true,
     index: true
+  },
+  password: {
+    type: String,
+    required: true,
+    select: false // Don't include password in queries by default
   },
   displayName: {
     type: String,
@@ -317,22 +317,26 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
 
 // Indexes for better query performance
 userSchema.index({ email: 1, isActive: 1 });
-userSchema.index({ firebaseUid: 1, isActive: 1 });
 userSchema.index({ displayName: 'text', email: 'text' }); // For search functionality
 
 // Instance methods
 userSchema.methods.toJSON = function(): Partial<IUser> {
   const user = this.toObject();
-  
+
   // Remove sensitive fields
   delete user.__v;
-  
+  delete user.password; // Never expose password
+
   return user;
 };
 
-// Static methods
-userSchema.statics.findByFirebaseUid = function(firebaseUid: string) {
-  return this.findOne({ firebaseUid, isActive: true });
+// Compare password method
+userSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
+  try {
+    return await bcrypt.compare(candidatePassword, this.password);
+  } catch (error) {
+    return false;
+  }
 };
 
 // Search users static method
@@ -348,23 +352,29 @@ userSchema.statics.searchUsers = function(query: string, limit: number = 10): Pr
       }
     ]
   })
-  .select('firebaseUid email displayName photoURL role lastLoginAt')
+  .select('email displayName photoURL role lastLoginAt')
   .limit(limit)
   .exec();
 };
 
 // Pre-save middleware
-userSchema.pre('save', function(next) {
+userSchema.pre('save', async function(next) {
   // Ensure email is lowercase
   if (this.isModified('email')) {
     this.email = this.email.toLowerCase();
   }
-  
+
   // Set displayName from email if not provided
   if (this.isNew && !this.displayName) {
     this.displayName = this.email.split('@')[0];
   }
-  
+
+  // Hash password if it's modified
+  if (this.isModified('password')) {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+  }
+
   next();
 });
 

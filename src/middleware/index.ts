@@ -15,8 +15,7 @@ export {
   getCurrentUserId,
   requireOwnershipOrAdmin,
   requireManagerOrAdmin,
-  requireAdmin,
-  authenticateFirebaseToken
+  requireAdmin
 } from './auth';
 
 export {
