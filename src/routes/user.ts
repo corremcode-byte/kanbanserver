@@ -9,6 +9,7 @@ router.use(authenticate);
 // Regular user routes
 router.get('/', usersController.getUsers);
 router.get('/search', usersController.searchUsers);
+router.put('/profile', usersController.updateProfile); // Update own profile
 
 // Admin routes for user management
 router.get('/all', usersController.getAllUsers);

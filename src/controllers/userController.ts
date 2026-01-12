@@ -87,7 +87,7 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const users = await User.find()
-      .select('email displayName photoURL role isActive lastLoginAt createdAt')
+      .select('username email displayName photoURL role isActive lastLoginAt createdAt')
       .sort({ createdAt: -1 });
 
     const stats = {
@@ -320,9 +320,19 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Access denied. Only admins can create users.', 403);
     }
 
-    const { email, password, displayName, role = 'member', permissions } = req.body;
+    const { username, email, password, displayName, role = 'member', permissions } = req.body;
 
     // Validate required fields
+    if (!username || !username.trim()) {
+      return errorResponse(res, 'Username is required', 400);
+    }
+
+    // Validate username format
+    const usernameRegex = /^[a-z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(username.trim().toLowerCase())) {
+      return errorResponse(res, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores', 400);
+    }
+
     if (!email || !email.trim()) {
       return errorResponse(res, 'Email is required', 400);
     }
@@ -338,6 +348,12 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
     // Validate role
     if (role && !['admin', 'member', 'manager'].includes(role)) {
       return errorResponse(res, 'Invalid role. Must be admin, member, or manager', 400);
+    }
+
+    // Check if username is already taken
+    const existingUsername = await User.findOne({ username: username.toLowerCase().trim() });
+    if (existingUsername) {
+      return errorResponse(res, 'Username is already taken', 400);
     }
 
     // Check if user already exists
@@ -381,6 +397,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
     // Create user in database with password (will be hashed by pre-save middleware)
     const user = new User({
+      username: username.toLowerCase().trim(),
       email: email.toLowerCase().trim(),
       password: password, // Will be hashed by pre-save middleware
       displayName: displayName.trim(),
@@ -400,9 +417,10 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
     await user.save();
 
-    logger.info(`User created successfully: ${user.email} (${user._id})`);
+    logger.info(`User created successfully: ${user.username} / ${user.email} (${user._id})`);
     return successResponse(res, 'User created successfully', {
       _id: user._id,
+      username: user.username,
       email: user.email,
       displayName: user.displayName,
       role: user.role,
@@ -735,6 +753,115 @@ export const deleteAllUsers = async (req: AuthenticatedRequest, res: Response) =
   } catch (error) {
     logger.error('Error deleting all users:', error);
     return internalServerErrorResponse(res, 'Failed to delete all users');
+  }
+};
+
+// Update user profile (with permission checks)
+export const updateProfile = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const { displayName, email, password, currentPassword } = req.body;
+
+    // Find the user with permissions
+    const user = await User.findById(userId).select('+password');
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    let updated = false;
+
+    // Update display name (requires canEditDisplayName permission)
+    if (displayName !== undefined && displayName !== user.displayName) {
+      if (!user.permissions?.canEditDisplayName && user.role !== 'admin') {
+        return errorResponse(res, 'You do not have permission to edit your display name', 403);
+      }
+
+      // Check if display name is already taken
+      const existingDisplayName = await User.findOne({
+        displayName: displayName.trim(),
+        _id: { $ne: userId }
+      });
+      if (existingDisplayName) {
+        return errorResponse(res, 'Display name is already taken', 400);
+      }
+
+      user.displayName = displayName.trim();
+      updated = true;
+    }
+
+    // Update email (requires canEditEmail permission)
+    if (email !== undefined && email !== user.email) {
+      if (!user.permissions?.canEditEmail && user.role !== 'admin') {
+        return errorResponse(res, 'You do not have permission to edit your email', 403);
+      }
+
+      // Validate email format
+      const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+      if (!emailRegex.test(email)) {
+        return errorResponse(res, 'Invalid email format', 400);
+      }
+
+      // Check if email is already taken
+      const existingEmail = await User.findOne({
+        email: email.toLowerCase().trim(),
+        _id: { $ne: userId }
+      });
+      if (existingEmail) {
+        return errorResponse(res, 'Email is already taken', 400);
+      }
+
+      user.email = email.toLowerCase().trim();
+      updated = true;
+    }
+
+    // Update password (requires canEditPassword permission)
+    if (password !== undefined) {
+      if (!user.permissions?.canEditPassword && user.role !== 'admin') {
+        return errorResponse(res, 'You do not have permission to edit your password', 403);
+      }
+
+      // Require current password for security
+      if (!currentPassword) {
+        return errorResponse(res, 'Current password is required to change password', 400);
+      }
+
+      // Verify current password
+      const isPasswordValid = await user.comparePassword(currentPassword);
+      if (!isPasswordValid) {
+        return errorResponse(res, 'Current password is incorrect', 400);
+      }
+
+      // Validate new password
+      if (password.length < 6) {
+        return errorResponse(res, 'New password must be at least 6 characters', 400);
+      }
+
+      user.password = password;
+      updated = true;
+    }
+
+    if (!updated) {
+      return errorResponse(res, 'No valid fields to update', 400);
+    }
+
+    await user.save();
+
+    logger.info(`User profile updated: ${user.username} (${user._id})`);
+    return successResponse(res, 'Profile updated successfully', {
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      role: user.role,
+    });
+  } catch (error) {
+    logger.error('Error updating profile:', error);
+    return internalServerErrorResponse(res, 'Failed to update profile');
   }
 };
 

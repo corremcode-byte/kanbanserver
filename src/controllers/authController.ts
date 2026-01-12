@@ -21,21 +21,27 @@ export const login = async (req: Request, res: Response) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return errorResponse(res, 'Email and password are required', 400);
+      return errorResponse(res, 'Username/Email and password are required', 400);
     }
 
-    // Find user by email and include password field
-    const user = await User.findOne({ email: email.toLowerCase(), isActive: true }).select('+password');
+    // Find user by username or email and include password field
+    const user = await User.findOne({
+      $or: [
+        { email: email.toLowerCase() },
+        { username: email.toLowerCase() }
+      ],
+      isActive: true
+    }).select('+password');
 
     if (!user) {
-      return errorResponse(res, 'Invalid email or password', 401);
+      return errorResponse(res, 'Invalid username/email or password', 401);
     }
 
     // Compare password
     const isPasswordValid = await user.comparePassword(password);
 
     if (!isPasswordValid) {
-      return errorResponse(res, 'Invalid email or password', 401);
+      return errorResponse(res, 'Invalid username/email or password', 401);
     }
 
     // Generate JWT token

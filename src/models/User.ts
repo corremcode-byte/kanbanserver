@@ -10,6 +10,7 @@ export interface IPushSubscription {
 }
 
 export interface IUser extends Document {
+  username: string;  // Unique, immutable username
   email: string;
   password: string;
   displayName: string;
@@ -41,6 +42,10 @@ export interface IUser extends Document {
     canViewAnalytics?: boolean;
     canExportData?: boolean;
     canManageUsers?: boolean;
+    // Profile editing permissions
+    canEditDisplayName?: boolean;
+    canEditEmail?: boolean;
+    canEditPassword?: boolean;
     // Auto-logout permission
     autoLogout?: boolean;
     autoLogoutTimerMinutes?: number; // Timer in minutes
@@ -126,6 +131,16 @@ interface IUserModel extends Model<IUser, {}, IUserMethods> {
 }
 
 const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true,
+    index: true,
+    immutable: true,  // Username cannot be changed after creation
+    match: [/^[a-z0-9_-]{3,20}$/, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores']
+  },
   email: {
     type: String,
     required: true,
@@ -205,6 +220,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     canViewAnalytics: { type: Boolean, default: false },
     canExportData: { type: Boolean, default: false },
     canManageUsers: { type: Boolean, default: false },
+    // Profile editing permissions
+    canEditDisplayName: { type: Boolean, default: false },
+    canEditEmail: { type: Boolean, default: false },
+    canEditPassword: { type: Boolean, default: false },
     // Auto-logout permission
     autoLogout: { type: Boolean, default: false },
     autoLogoutTimerMinutes: { type: Number, default: null, min: 1 },
@@ -317,7 +336,8 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
 
 // Indexes for better query performance
 userSchema.index({ email: 1, isActive: 1 });
-userSchema.index({ displayName: 'text', email: 'text' }); // For search functionality
+userSchema.index({ username: 1, isActive: 1 });
+userSchema.index({ displayName: 'text', email: 'text', username: 'text' }); // For search functionality
 
 // Instance methods
 userSchema.methods.toJSON = function(): Partial<IUser> {
@@ -346,13 +366,14 @@ userSchema.statics.searchUsers = function(query: string, limit: number = 10): Pr
       { isActive: true },
       {
         $or: [
+          { username: { $regex: query, $options: 'i' } },
           { displayName: { $regex: query, $options: 'i' } },
           { email: { $regex: query, $options: 'i' } }
         ]
       }
     ]
   })
-  .select('email displayName photoURL role lastLoginAt')
+  .select('username email displayName photoURL role lastLoginAt')
   .limit(limit)
   .exec();
 };
