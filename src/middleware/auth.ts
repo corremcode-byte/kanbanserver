@@ -31,9 +31,11 @@ export const authenticate = async (
       return;
     }
 
-    const secret = process.env.JWT_SECRET || 'your-default-secret';
+    const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 
     console.log('Auth debug - Token received from', req.cookies?.auth_token ? 'cookie' : 'header', ', verifying...');
+    console.log('Auth debug - Token preview:', token.substring(0, 50) + '...');
+    console.log('Auth debug - Using JWT_SECRET:', secret === process.env.JWT_SECRET ? 'from .env' : 'fallback');
 
     // Verify JWT token
     const decoded = jwt.verify(token, secret) as { userId: string };
@@ -77,6 +79,12 @@ export const authenticate = async (
 
     next();
   } catch (error) {
+    console.error('Auth debug - JWT verification failed:', error instanceof Error ? error.message : error);
+    if (error instanceof Error && error.name === 'JsonWebTokenError') {
+      console.error('Auth debug - JWT Error details:', error.message);
+    } else if (error instanceof Error && error.name === 'TokenExpiredError') {
+      console.error('Auth debug - Token has expired');
+    }
     logger.error('Authentication error:', error);
     errorResponse(res, 'Invalid token', 401);
     return;
@@ -105,7 +113,7 @@ export const optionalAuth = async (
       return;
     }
 
-    const secret = process.env.JWT_SECRET || 'your-default-secret';
+    const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 
     try {
       // Verify JWT token

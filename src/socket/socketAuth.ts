@@ -18,19 +18,22 @@ export const socketAuth = async (socket: AuthenticatedSocket, next: Function) =>
     }
 
     // Verify JWT token
-    const secret = process.env.JWT_SECRET || 'your-default-secret';
-    const decoded = jwt.verify(token, secret) as { id: string };
-    
-    if (!decoded || !decoded.id) {
+    const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    const decoded = jwt.verify(token, secret) as { userId: string; id?: string };
+
+    // Support both userId (from auth controller) and id (legacy)
+    const userId = decoded.userId || decoded.id;
+
+    if (!decoded || !userId) {
       logger.warn('Invalid token provided for socket connection');
       return next(new Error('Invalid token'));
     }
-    
+
     // Find user in our database
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(userId);
     
     if (!user) {
-      logger.warn(`Socket connection attempted for non-existent user: ${decoded.id}`);
+      logger.warn(`Socket connection attempted for non-existent user: ${userId}`);
       return next(new Error('User not found'));
     }
 

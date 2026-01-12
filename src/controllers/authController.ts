@@ -40,6 +40,7 @@ export const login = async (req: Request, res: Response) => {
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    console.log('Login debug - Using JWT_SECRET:', jwtSecret === process.env.JWT_SECRET ? 'from .env' : 'fallback');
     const token = jwt.sign(
       {
         userId: user._id.toString(),
@@ -49,6 +50,7 @@ export const login = async (req: Request, res: Response) => {
       jwtSecret,
       { expiresIn: '7d' }
     );
+    console.log('Login debug - Generated token preview:', token.substring(0, 50) + '...');
 
     // Update last login
     user.lastLoginAt = new Date();

@@ -493,3 +493,35 @@ export const getAuditLogs = async (req: any, res: Response) => {
     });
   }
 };
+
+/**
+ * DELETE /api/audit
+ * Deletes all audit logs
+ *
+ * Access: admin only (enforced by middleware)
+ */
+export const deleteAllAuditLogs = async (req: any, res: Response) => {
+  try {
+    console.log('Delete all audit logs endpoint called by user:', req.user?.email);
+
+    // Delete all audit logs
+    const result = await AuditLog.deleteMany({});
+
+    console.log(`Deleted ${result.deletedCount} audit logs`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} audit logs`,
+      data: {
+        deletedCount: result.deletedCount
+      }
+    });
+  } catch (error: any) {
+    console.error('Error deleting audit logs:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete audit logs',
+      error: error.message,
+    });
+  }
+};
