@@ -18,6 +18,7 @@ router.get('/:userId/permissions', usersController.getUserPermissions);
 router.put('/:userId/permissions', usersController.updateUserPermissions);
 router.put('/:userId/toggle-active', usersController.toggleUserActiveStatus);
 router.put('/:userId/role', usersController.updateUserRole);
+router.put('/:userId/profile', usersController.updateUserProfile);
 router.delete('/delete-all', usersController.deleteAllUsers); // Delete all users (admin only)
 router.delete('/:userId', usersController.deleteUser);
 

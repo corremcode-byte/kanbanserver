@@ -603,6 +603,79 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+// Update user profile (name, email, password)
+export const updateUserProfile = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can update user profiles.', 403);
+    }
+
+    const { userId } = req.params;
+    const { displayName, email, currentPassword, password } = req.body;
+
+    // Prevent updating self through this endpoint
+    if (userId === req.user._id) {
+      return errorResponse(res, 'You cannot update your own profile through this endpoint.', 400);
+    }
+
+    const user = await User.findById(userId).select('+password');
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Update fields if provided
+    if (displayName !== undefined) {
+      if (!displayName.trim()) {
+        return errorResponse(res, 'Display name cannot be empty', 400);
+      }
+      user.displayName = displayName.trim();
+    }
+
+    if (email !== undefined) {
+      if (!email.trim()) {
+        return errorResponse(res, 'Email cannot be empty', 400);
+      }
+
+      // Check if email is already taken by another user
+      const existingUser = await User.findOne({
+        email: email.trim(),
+        _id: { $ne: userId }
+      });
+
+      if (existingUser) {
+        return errorResponse(res, 'Email is already taken by another user', 400);
+      }
+
+      user.email = email.trim();
+    }
+
+    if (password !== undefined) {
+      if (password.length < 6) {
+        return errorResponse(res, 'New password must be at least 6 characters long', 400);
+      }
+      user.password = password; // Will be hashed by pre-save hook
+    }
+
+    await user.save();
+
+    logger.info(`User profile updated for ${user.email} (${userId}) by admin ${req.user.email}`);
+
+    return successResponse(res, 'User profile updated successfully', {
+      user: {
+        _id: user._id,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        isActive: user.isActive
+      }
+    });
+  } catch (error) {
+    logger.error('Error updating user profile:', error);
+    return internalServerErrorResponse(res, 'Failed to update user profile');
+  }
+};
+
 // Deactivate user auth (for auto-logout) - MongoDB only
 export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) => {
   try {
