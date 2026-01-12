@@ -10,7 +10,7 @@ export interface IPushSubscription {
 }
 
 export interface IUser extends Document {
-  username: string;  // Unique, immutable username
+  username?: string;  // Optional username
   email: string;
   password: string;
   displayName: string;
@@ -133,12 +133,13 @@ interface IUserModel extends Model<IUser, {}, IUserMethods> {
 const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   username: {
     type: String,
-    required: true,
+    required: false, // Make username optional
     unique: true,
+    sparse: true, // Allow multiple null values
     lowercase: true,
     trim: true,
     index: true,
-    immutable: true,  // Username cannot be changed after creation
+    immutable: false,  // Username can be changed
     match: [/^[a-z0-9_-]{3,20}$/, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores']
   },
   email: {
@@ -353,8 +354,19 @@ userSchema.methods.toJSON = function(): Partial<IUser> {
 // Compare password method
 userSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   try {
-    return await bcrypt.compare(candidatePassword, this.password);
+    if (!this.password) {
+      console.error('Password field is missing for user:', this.email);
+      return false;
+    }
+    if (!candidatePassword) {
+      console.error('Candidate password is missing');
+      return false;
+    }
+    const result = await bcrypt.compare(candidatePassword, this.password);
+    console.log('Password comparison result for', this.email, ':', result);
+    return result;
   } catch (error) {
+    console.error('Error comparing password:', error);
     return false;
   }
 };

@@ -20,29 +20,38 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
+    console.log('Login attempt for:', email);
+
     if (!email || !password) {
       return errorResponse(res, 'Username/Email and password are required', 400);
     }
 
-    // Find user by username or email and include password field
+    // Find user by email only (username is optional, not required for login)
+    const normalizedEmail = email.toLowerCase().trim();
+    console.log('Searching for user with email:', normalizedEmail);
+    
+    // Only search by email - username is optional and not required for login
     const user = await User.findOne({
-      $or: [
-        { email: email.toLowerCase() },
-        { username: email.toLowerCase() }
-      ],
+      email: normalizedEmail,
       isActive: true
     }).select('+password');
 
     if (!user) {
+      console.log('User not found or inactive:', normalizedEmail);
       return errorResponse(res, 'Invalid username/email or password', 401);
     }
+
+    console.log('User found:', user.email, 'Password field exists:', !!user.password);
 
     // Compare password
     const isPasswordValid = await user.comparePassword(password);
 
     if (!isPasswordValid) {
+      console.log('Password validation failed for user:', user.email);
       return errorResponse(res, 'Invalid username/email or password', 401);
     }
+
+    console.log('Password validated successfully for user:', user.email);
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';

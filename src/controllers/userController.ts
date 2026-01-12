@@ -322,17 +322,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
     const { username, email, password, displayName, role = 'member', permissions } = req.body;
 
-    // Validate required fields
-    if (!username || !username.trim()) {
-      return errorResponse(res, 'Username is required', 400);
-    }
-
-    // Validate username format
-    const usernameRegex = /^[a-z0-9_-]{3,20}$/;
-    if (!usernameRegex.test(username.trim().toLowerCase())) {
-      return errorResponse(res, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores', 400);
-    }
-
+    // Validate required fields - username is now optional
     if (!email || !email.trim()) {
       return errorResponse(res, 'Email is required', 400);
     }
@@ -350,10 +340,18 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Invalid role. Must be admin, member, or manager', 400);
     }
 
-    // Check if username is already taken
-    const existingUsername = await User.findOne({ username: username.toLowerCase().trim() });
-    if (existingUsername) {
-      return errorResponse(res, 'Username is already taken', 400);
+    // Validate username format only if provided (username is optional)
+    if (username && username.trim()) {
+      const usernameRegex = /^[a-z0-9_-]{3,20}$/;
+      if (!usernameRegex.test(username.trim().toLowerCase())) {
+        return errorResponse(res, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores', 400);
+      }
+      
+      // Check if username is already taken
+      const existingUsername = await User.findOne({ username: username.toLowerCase().trim() });
+      if (existingUsername) {
+        return errorResponse(res, 'Username is already taken', 400);
+      }
     }
 
     // Check if user already exists
@@ -396,8 +394,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Create user in database with password (will be hashed by pre-save middleware)
-    const user = new User({
-      username: username.toLowerCase().trim(),
+    const userData: any = {
       email: email.toLowerCase().trim(),
       password: password, // Will be hashed by pre-save middleware
       displayName: displayName.trim(),
@@ -405,7 +402,14 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       isActive: true,
       lastLoginAt: new Date(),
       permissions: processedPermissions,
-    });
+    };
+    
+    // Only add username if provided (it's optional)
+    if (username && username.trim()) {
+      userData.username = username.toLowerCase().trim();
+    }
+    
+    const user = new User(userData);
 
     // Mark permissions as modified to ensure Mongoose saves nested objects
     if (user.permissions) {

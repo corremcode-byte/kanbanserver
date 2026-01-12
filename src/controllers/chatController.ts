@@ -153,7 +153,7 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
 // Send a message to a group
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, encryptedContent, nonce, attachments } = req.body;
+    const { groupId, encryptedContent, nonce, attachments, replyTo } = req.body;
     const senderId = req.user?._id;
     const userId = senderId?.toString();
 
@@ -185,14 +185,21 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Create message
-    const message = await Message.create({
+    const messageData: any = {
       groupId,
       senderId,
       encryptedContent,
       nonce,
       attachments: attachments || [],
       readBy: [{ userId: senderId, readAt: new Date() }]
-    });
+    };
+
+    // Add replyTo if provided
+    if (replyTo) {
+      messageData.replyTo = replyTo;
+    }
+
+    const message = await Message.create(messageData);
 
     // Populate sender info
     await message.populate('senderId', 'displayName email photoURL');
