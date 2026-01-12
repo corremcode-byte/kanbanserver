@@ -2,82 +2,38 @@ import { Request, Response } from 'express';
 import { ChatGroup } from '../models/ChatGroup';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
-import { Project, ProjectPermission } from '../models';
-import { AuditLog } from '../models/AuditLog';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { io } from '../server';
 import mongoose from 'mongoose';
 
-// Create a new chat group (Admin only)
+// Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, description, memberIds = [], encryptionPublicKey, projectId } = req.body;
-
-    // Validate required fields
-    if (!name || !name.trim()) {
-      return res.status(400).json({ message: 'Group name is required' });
-    }
+    const { name, description, memberIds, encryptionPublicKey } = req.body;
 
     const userId = req.user?._id?.toString();
     if (!userId) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
+    // Check if user is admin
     const isAdmin = req.user?.role === 'admin';
-    let project: any = null;
-    let projectMembers = new Set<string>();
-    let hasPermission = false;
-
-    // If projectId is provided, validate project and permissions
-    if (projectId) {
-      if (!mongoose.Types.ObjectId.isValid(projectId)) {
-        return res.status(400).json({ message: 'Invalid projectId format' });
+    
+    // Check if user has createGroups permission
+    let hasCreateGroupsPermission = false;
+    if (!isAdmin) {
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.createGroups === true) {
+        hasCreateGroupsPermission = true;
       }
+    }
 
-      project = await Project.findById(projectId);
-      if (!project) {
-        return res.status(404).json({ message: 'Project not found' });
-      }
-
-      const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
-        ? (project.ownerId as any)._id.toString()
-        : project.ownerId.toString();
-
-      const ownerIds = new Set<string>([
-        ownerId,
-        ...(project.owners || []).map((o: any) => (typeof o === 'object' && o._id ? o._id.toString() : o.toString()))
-      ]);
-
-      projectMembers = new Set<string>([
-        ...ownerIds,
-        ...(project.managers || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString())),
-        ...(project.members || []).map((m: any) => (typeof m === 'object' && m._id ? m._id.toString() : m.toString()))
-      ]);
-
-      if (!projectMembers.has(userId)) {
-        return res.status(403).json({ message: 'You must be a member of the project to create a chat group' });
-      }
-
-      const isOwner = ownerIds.has(userId);
-      hasPermission = isAdmin || isOwner;
-      if (!hasPermission) {
-        const permission = await ProjectPermission.findOne({ projectId, userId });
-        hasPermission = !!permission?.permissions?.canCreateChatGroups;
-      }
-
-      if (!hasPermission) {
-        return res.status(403).json({ message: 'You do not have permission to create chat groups for this project' });
-      }
-    } else {
-      // No projectId - allow admins or any authenticated user to create groups
-      hasPermission = true;
+    if (!isAdmin && !hasCreateGroupsPermission) {
+      return res.status(403).json({ message: 'You do not have permission to create chat groups' });
     }
 
     // Ensure creator is included in members list
-    const allMemberIds = [...new Set([userId, ...(Array.isArray(memberIds) ? memberIds : [])].map(id => id.toString()))];
-
-    // Note: Removed validation that restricts members to project members
-    // Users can now add anyone to chat groups, regardless of project membership
+    const allMemberIds = [...new Set([req.user._id.toString(), ...memberIds])];
 
     // Validate members exist and are active
     const members = await User.find({
@@ -95,7 +51,6 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       description: description || '',
       createdBy: req.user._id,
       members: allMemberIds,
-      projectId,
       encryptionPublicKey,
       isActive: true
     });
@@ -109,36 +64,10 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       io.to(`user:${memberId}`).emit('chat:group:created', chatGroup);
     });
 
-    // Log audit entry for project context (if projectId is provided)
-    if (projectId) {
-      try {
-        await AuditLog.logAction({
-          projectId,
-          userId,
-          action: 'chat_group_created',
-          entityType: 'chat_group',
-          entityId: chatGroup._id.toString(),
-          metadata: {
-            groupName: name,
-            memberCount: allMemberIds.length,
-            projectName: project?.name || 'Unknown'
-          }
-        });
-      } catch (auditErr) {
-        console.error('Failed to log chat group creation audit event:', auditErr);
-      }
-    }
-
     return res.status(201).json(chatGroup);
   } catch (error) {
     console.error('Error creating chat group:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error details:', {
-      message: errorMessage,
-      stack: error instanceof Error ? error.stack : undefined,
-      body: req.body
-    });
-    return res.status(500).json({ message: 'Failed to create chat group', error: errorMessage });
+    return res.status(500).json({ message: 'Failed to create chat group' });
   }
 };
 
@@ -224,8 +153,13 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
 // Send a message to a group
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, encryptedContent, nonce, attachments, replyTo } = req.body;
+    const { groupId, encryptedContent, nonce, attachments } = req.body;
     const senderId = req.user?._id;
+    const userId = senderId?.toString();
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
 
     // Check if user is a member of the group
     const chatGroup = await ChatGroup.findOne({
@@ -238,12 +172,15 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ message: 'Not authorized to send messages to this group' });
     }
 
-    let replyToMessage: any = null;
-    if (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) {
-      replyToMessage = await Message.findById(replyTo);
-      // Ensure reply target belongs to the same group
-      if (!replyToMessage || replyToMessage.groupId.toString() !== groupId) {
-        replyToMessage = null;
+    // Check if user has sendMessages permission (admins and group creators can always send)
+    const isAdmin = req.user?.role === 'admin';
+    const isGroupCreator = chatGroup.createdBy.toString() === userId;
+    
+    if (!isAdmin && !isGroupCreator) {
+      const user = await User.findById(userId);
+      const hasSendMessagesPermission = user?.permissions?.modules?.chat?.sendMessages === true;
+      if (!hasSendMessagesPermission) {
+        return res.status(403).json({ message: 'You do not have permission to send messages' });
       }
     }
 
@@ -254,19 +191,11 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       encryptedContent,
       nonce,
       attachments: attachments || [],
-      replyTo: replyToMessage?._id,
       readBy: [{ userId: senderId, readAt: new Date() }]
     });
 
-    // Populate sender info and reply target
+    // Populate sender info
     await message.populate('senderId', 'displayName email photoURL');
-    if (message.replyTo) {
-      await message.populate({
-        path: 'replyTo',
-        select: 'senderId encryptedContent nonce attachments isDeleted createdAt',
-        populate: { path: 'senderId', select: 'displayName email photoURL' }
-      });
-    }
 
     // Update group's updatedAt timestamp
     chatGroup.updatedAt = new Date();
@@ -312,11 +241,6 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     })
       .populate('senderId', 'displayName email photoURL')
-      .populate({
-        path: 'replyTo',
-        select: 'senderId encryptedContent nonce attachments isDeleted createdAt',
-        populate: { path: 'senderId', select: 'displayName email photoURL' }
-      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -470,11 +394,16 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// Add members to a group (Admin or group creator only)
+// Add members to a group (Admin, group creator, or user with manageGroupMembers permission)
 export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
     const { memberIds } = req.body;
+
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
 
     const chatGroup = await ChatGroup.findById(groupId);
 
@@ -484,10 +413,19 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
 
     // Check if user is admin or the group creator
     const isAdmin = req.user?.role === 'admin';
-    const isCreator = chatGroup.createdBy.toString() === req.user?._id;
+    const isCreator = chatGroup.createdBy.toString() === userId;
 
+    // Check if user has manageGroupMembers permission
+    let hasManagePermission = false;
     if (!isAdmin && !isCreator) {
-      return res.status(403).json({ message: 'Only admins or group creator can add members' });
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
+        hasManagePermission = true;
+      }
+    }
+
+    if (!isAdmin && !isCreator && !hasManagePermission) {
+      return res.status(403).json({ message: 'You do not have permission to add members to this group' });
     }
 
     // Validate members exist and are active
@@ -528,10 +466,15 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// Remove member from group (Admin or group creator only)
+// Remove member from group (Admin, group creator, or user with manageGroupMembers permission)
 export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, userId } = req.params;
+    const { groupId, userId: memberToRemoveId } = req.params;
+
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
 
     const chatGroup = await ChatGroup.findById(groupId);
 
@@ -541,10 +484,19 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
 
     // Check if user is admin or the group creator
     const isAdmin = req.user?.role === 'admin';
-    const isCreator = chatGroup.createdBy.toString() === req.user?._id;
+    const isCreator = chatGroup.createdBy.toString() === userId;
 
+    // Check if user has manageGroupMembers permission
+    let hasManagePermission = false;
     if (!isAdmin && !isCreator) {
-      return res.status(403).json({ message: 'Only admins or group creator can remove members' });
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
+        hasManagePermission = true;
+      }
+    }
+
+    if (!isAdmin && !isCreator && !hasManagePermission) {
+      return res.status(403).json({ message: 'You do not have permission to remove members from this group' });
     }
 
     // Remove member
@@ -571,7 +523,7 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
-// Update a chat group (Admin or group creator only)
+// Update a chat group (Admin, group creator, or user with editGroups permission)
 export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
@@ -583,12 +535,26 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
     // Check if user is admin or the group creator
     const isAdmin = req.user?.role === 'admin';
-    const isCreator = chatGroup.createdBy.toString() === req.user?._id;
+    const isCreator = chatGroup.createdBy.toString() === userId;
 
+    // Check if user has editGroups permission
+    let hasEditGroupsPermission = false;
     if (!isAdmin && !isCreator) {
-      return res.status(403).json({ message: 'Only admins or group creator can update chat groups' });
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.editGroups === true) {
+        hasEditGroupsPermission = true;
+      }
+    }
+
+    if (!isAdmin && !isCreator && !hasEditGroupsPermission) {
+      return res.status(403).json({ message: 'You do not have permission to update chat groups' });
     }
 
     // Update fields
@@ -611,11 +577,15 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// Delete a chat group (Admin or group creator only)
+// Delete a chat group (Admin, group creator, or user with deleteGroups permission)
 export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
+
     const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
 
     const chatGroup = await ChatGroup.findById(groupId);
 
@@ -623,42 +593,21 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is admin or the group creator (with project-scoped permission)
+    // Check if user is admin or the group creator
     const isAdmin = req.user?.role === 'admin';
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    let project: any = null;
-    let canDelete = isAdmin;
-
-    if (chatGroup.projectId) {
-      project = await Project.findById(chatGroup.projectId);
-
-      if (project) {
-        const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
-          ? (project.ownerId as any)._id.toString()
-          : project.ownerId.toString();
-
-        const ownerIds = new Set<string>([
-          ownerId,
-          ...(project.owners || []).map((o: any) => (typeof o === 'object' && o._id ? o._id.toString() : o.toString()))
-        ]);
-
-        const isOwner = userId ? ownerIds.has(userId) : false;
-
-        if (isOwner) {
-          canDelete = true;
-        } else if (isCreator && userId) {
-          const permission = await ProjectPermission.findOne({ projectId: chatGroup.projectId, userId });
-          canDelete = !!permission?.permissions?.canDeleteChatGroups;
-        }
+    // Check if user has deleteGroups permission
+    let hasDeleteGroupsPermission = false;
+    if (!isAdmin && !isCreator) {
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.deleteGroups === true) {
+        hasDeleteGroupsPermission = true;
       }
-    } else if (isCreator) {
-      // Legacy groups without project association can still be deleted by creator
-      canDelete = true;
     }
 
-    if (!canDelete) {
-      return res.status(403).json({ message: 'You do not have permission to delete this chat group' });
+    if (!isAdmin && !isCreator && !hasDeleteGroupsPermission) {
+      return res.status(403).json({ message: 'You do not have permission to delete chat groups' });
     }
 
     // Soft delete
@@ -669,24 +618,6 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
     chatGroup.members.forEach((memberId) => {
       io.to(`user:${memberId.toString()}`).emit('chat:group:deleted', { groupId });
     });
-
-    if (chatGroup.projectId) {
-      try {
-        await AuditLog.logAction({
-          projectId: chatGroup.projectId.toString(),
-          userId: userId || '',
-          action: 'chat_group_deleted',
-          entityType: 'chat_group',
-          entityId: groupId,
-          metadata: {
-            groupName: chatGroup.name,
-            projectName: project?.name
-          }
-        });
-      } catch (auditErr) {
-        console.error('Failed to log chat group deletion audit event:', auditErr);
-      }
-    }
 
     return res.json({ message: 'Chat group deleted successfully' });
   } catch (error) {

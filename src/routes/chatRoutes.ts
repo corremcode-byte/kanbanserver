@@ -78,13 +78,13 @@ router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) =>
 });
 
 // Chat group routes
-router.post('/groups', checkPermission('canCreateChatGroups'), createChatGroup);
+router.post('/groups', createChatGroup);
 router.get('/groups', getUserChatGroups);
 router.get('/groups/:groupId', getChatGroup);
 router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
-router.delete('/groups/:groupId', checkPermission('canDeleteChatGroups'), deleteChatGroup);
+router.delete('/groups/:groupId', deleteChatGroup);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
