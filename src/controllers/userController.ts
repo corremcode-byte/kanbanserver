@@ -168,6 +168,66 @@ export const updateUserRole = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+export const getUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can view user permissions.', 403);
+    }
+
+    const { userId } = req.params;
+
+    const user = await User.findById(userId).select('permissions');
+
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    return successResponse(res, 'User permissions retrieved successfully', user.permissions || {});
+  } catch (error) {
+    logger.error('Error getting user permissions:', error);
+    return internalServerErrorResponse(res, 'Failed to get user permissions');
+  }
+};
+
+export const updateUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Only admins can update user permissions.', 403);
+    }
+
+    const { userId } = req.params;
+    const { permissions } = req.body;
+
+    // Validate input
+    if (!permissions || typeof permissions !== 'object') {
+      return errorResponse(res, 'permissions must be an object', 400);
+    }
+
+    // Prevent modifying own permissions
+    if (userId === req.user._id) {
+      return errorResponse(res, 'You cannot modify your own permissions.', 400);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Update permissions
+    user.permissions = permissions;
+    await user.save();
+
+    logger.info(`Admin ${req.user.email} updated permissions for user ${user.email}`);
+
+    return successResponse(res, 'User permissions updated successfully', { user });
+  } catch (error) {
+    logger.error('Error updating user permissions:', error);
+    return internalServerErrorResponse(res, 'Failed to update user permissions');
+  }
+};
+
 export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Check if user is admin

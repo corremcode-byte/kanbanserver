@@ -12,8 +12,7 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "migrate:displayname": "ts-node src/scripts/addUniqueDisplayNameIndex.ts",
-    "check:permissions": "ts-node src/scripts/checkPermissions.ts",
-    "fix:permissions": "ts-node src/scripts/fixPermissionFields.ts"
+    "check:permissions": "ts-node src/scripts/checkPermissions.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",

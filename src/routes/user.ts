@@ -14,9 +14,10 @@ router.get('/search', usersController.searchUsers);
 router.get('/all', usersController.getAllUsers);
 router.post('/', usersController.createUser);
 router.put('/bulk/permissions', usersController.updateBulkUserPermissions);
+router.get('/:userId/permissions', usersController.getUserPermissions);
+router.put('/:userId/permissions', usersController.updateUserPermissions);
 router.put('/:userId/toggle-active', usersController.toggleUserActiveStatus);
 router.put('/:userId/role', usersController.updateUserRole);
-router.put('/bulk/permissions', usersController.updateBulkUserPermissions);
 router.delete('/delete-all', usersController.deleteAllUsers); // Delete all users (admin only)
 router.delete('/:userId', usersController.deleteUser);
 
