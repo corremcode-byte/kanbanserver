@@ -7,6 +7,7 @@ import { logger } from '../utils/logger';
 import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
+import { createNotification } from './notificationController';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -357,24 +358,41 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       timestamp: new Date()
     });
 
-    // Send email notifications to assignees
+    // Send email notifications and create in-app notifications for assignees
     if (validatedAssignees.length > 0) {
       const assigneeEmails: string[] = [];
+      const projectName = typeof task.projectId === 'object' && (task.projectId as any).name
+        ? (task.projectId as any).name
+        : 'Unknown Project';
 
       // Get populated assignees
       if (task.assignees && Array.isArray(task.assignees)) {
         task.assignees.forEach((assignee: any) => {
           if (typeof assignee === 'object' && assignee.email && assignee._id.toString() !== req.user._id) {
             assigneeEmails.push(assignee.email);
+
+            // Create in-app notification for each assignee
+            createNotification({
+              userId: assignee._id.toString(),
+              type: 'task_assigned',
+              title: 'New Task Assigned',
+              message: `${req.user.displayName} assigned you a task "${task.title}" in ${projectName}`,
+              metadata: {
+                projectId: projectId.toString(),
+                projectName: projectName,
+                taskId: task._id.toString(),
+                taskTitle: task.title,
+                actionBy: req.user._id,
+                actionByName: req.user.displayName,
+              },
+            }).catch(error => {
+              logger.error('Failed to create notification:', error);
+            });
           }
         });
       }
 
       if (assigneeEmails.length > 0) {
-        const projectName = typeof task.projectId === 'object' && (task.projectId as any).name
-          ? (task.projectId as any).name
-          : 'Unknown Project';
-
         emailService.sendTaskAssignedNotification(assigneeEmails, {
           taskTitle: task.title,
           taskId: task._id.toString(),
@@ -801,6 +819,28 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         const users = await User.find({ _id: { $in: newlyAssignedUsers } }).select('email displayName settings');
 
         logger.info(`Found ${users.length} users to notify: ${users.map(u => u.email).join(', ')}`);
+
+        // Create in-app notifications for newly assigned users (excluding self)
+        users
+          .filter(user => user._id.toString() !== req.user._id)
+          .forEach(user => {
+            createNotification({
+              userId: user._id.toString(),
+              type: 'task_assigned',
+              title: 'New Task Assigned',
+              message: `${req.user.displayName} assigned you a task "${task.title}" in ${project.name}`,
+              metadata: {
+                projectId: project._id.toString(),
+                projectName: project.name,
+                taskId: task._id.toString(),
+                taskTitle: task.title,
+                actionBy: req.user._id,
+                actionByName: req.user.displayName,
+              },
+            }).catch(error => {
+              logger.error('Failed to create notification:', error);
+            });
+          });
 
         // Filter out the person who assigned themselves and collect email addresses
         // Also check if user has email notifications enabled for task assignments

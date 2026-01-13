@@ -666,6 +666,27 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       // Don't fail the member addition if email fails
     }
 
+    // Create in-app notification for the added member
+    try {
+      const { createNotification } = await import('./notificationController');
+      await createNotification({
+        userId: userId.toString(),
+        type: 'project_added',
+        title: 'Added to Project',
+        message: `${req.user.displayName} added you to "${project.name}"`,
+        metadata: {
+          projectId: id.toString(),
+          projectName: project.name,
+          actionBy: req.user._id,
+          actionByName: req.user.displayName,
+        },
+      });
+      logger.info(`In-app notification created for user ${userId} added to project ${project.name}`);
+    } catch (notificationError) {
+      logger.error('Error creating in-app notification:', notificationError);
+      // Don't fail the member addition if notification fails
+    }
+
     const updatedProject = await Project.findById(id)
       .populate('ownerId', 'name email avatar')
       .populate('owners', 'name email avatar')

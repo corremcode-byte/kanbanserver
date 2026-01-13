@@ -3,6 +3,7 @@ import { ProjectInvitation, Project, User, ProjectPermission, AuditLog } from '.
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
+import { createNotification } from './notificationController';
 import crypto from 'crypto';
 
 interface AuthenticatedRequest extends Request {
@@ -137,6 +138,28 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
         return internalServerErrorResponse(res, 'Failed to send invitation email');
       }
 
+      // Create notification for the invited user if they exist
+      if (existingUser) {
+        try {
+          await createNotification({
+            userId: existingUser._id.toString(),
+            type: 'project_invitation',
+            title: 'New Project Invitation',
+            message: `${req.user.displayName} invited you to join "${(invitation.projectId as any).name}"`,
+            metadata: {
+              projectId: project._id.toString(),
+              projectName: (invitation.projectId as any).name,
+              invitationId: invitation._id.toString(),
+              actionBy: req.user._id,
+              actionByName: req.user.displayName,
+            },
+          });
+        } catch (notifError) {
+          logger.error('Failed to create notification:', notifError);
+          // Continue even if notification creation fails
+        }
+      }
+
       logger.info(`Invitation sent to ${normalizedEmail} for project ${projectId} by ${req.user.email}`);
       return successResponse(res, 'Invitation sent successfully', {
         id: invitation._id,
@@ -202,7 +225,18 @@ export const getUserInvitations = async (req: AuthenticatedRequest, res: Respons
   try {
     const invitations = await ProjectInvitation.findPendingByEmail(req.user.email);
 
-    return successResponse(res, 'Invitations retrieved successfully', invitations);
+    // Include token in response for user's own invitations (needed for accept/reject)
+    const invitationsWithToken = invitations.map((inv: any) => {
+      const token = inv.token; // Get token BEFORE toObject() to avoid toJSON transform
+      const invObj = inv.toObject();
+      invObj.token = token; // Add it back
+      invObj.id = invObj._id;
+      delete invObj._id;
+      delete invObj.__v;
+      return invObj;
+    });
+
+    return successResponse(res, 'Invitations retrieved successfully', invitationsWithToken);
   } catch (error) {
     logger.error('Error getting user invitations:', error);
     return internalServerErrorResponse(res, 'Failed to retrieve invitations');
@@ -381,6 +415,22 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
     // Update invitation status to completed
     invitation.status = 'completed';
     await invitation.save();
+
+    // Create notification for the new member
+    try {
+      await createNotification({
+        userId: req.user._id,
+        type: 'project_added',
+        title: 'Added to Project',
+        message: `You have been added to the project "${project.name}"`,
+        metadata: {
+          projectId: project._id.toString(),
+          projectName: project.name,
+        },
+      });
+    } catch (notifError) {
+      logger.error('Failed to create notification for new member:', notifError);
+    }
 
     // Send notification to project owner
     try {
