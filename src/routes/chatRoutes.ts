@@ -12,7 +12,8 @@ import {
   removeMemberFromGroup,
   updateChatGroup,
   deleteChatGroup,
-  createOrGetPersonalChat
+  createOrGetPersonalChat,
+  getOrCreateSelfChatGroup
 } from '../controllers/chatController';
 import { uploadChatAttachment } from '../controllers/uploadController';
 import { authenticate } from '../middleware/auth';
@@ -82,6 +83,7 @@ router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) =>
 router.post('/groups', createChatGroup);
 router.post('/personal', createOrGetPersonalChat);
 router.get('/groups', getUserChatGroups);
+router.get('/self-chat', getOrCreateSelfChatGroup); // Get or create "Message Yourself" group
 router.get('/groups/:groupId', getChatGroup);
 router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);

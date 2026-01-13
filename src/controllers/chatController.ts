@@ -93,6 +93,54 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
+// Get or create "Message Yourself" group for current user
+export const getOrCreateSelfChatGroup = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    const userIdString = userId?.toString();
+
+    if (!userIdString) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Check if self-chat group already exists
+    let selfChatGroup = await ChatGroup.findOne({
+      createdBy: userId,
+      members: { $size: 1, $all: [userId] },
+      name: 'Message Yourself',
+      isActive: true
+    })
+      .populate('members', 'displayName email photoURL')
+      .populate('createdBy', 'displayName email');
+
+    // If doesn't exist, create it
+    if (!selfChatGroup) {
+      // Generate a simple encryption key for this group
+      const encryptionPublicKey = `self-chat-${userIdString}`;
+
+      selfChatGroup = await ChatGroup.create({
+        name: 'Message Yourself',
+        description: 'Your personal space for notes and reminders',
+        createdBy: userId,
+        members: [userId],
+        encryptionPublicKey,
+        isActive: true
+      });
+
+      await selfChatGroup.populate('members', 'displayName email photoURL');
+      await selfChatGroup.populate('createdBy', 'displayName email');
+
+      // Notify user via Socket.IO
+      io.to(`user:${userIdString}`).emit('chat:group:created', selfChatGroup);
+    }
+
+    return res.json(selfChatGroup);
+  } catch (error) {
+    console.error('Error getting/creating self-chat group:', error);
+    return res.status(500).json({ message: 'Failed to get self-chat group' });
+  }
+};
+
 // Get all chat groups for current user
 export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -125,10 +173,16 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           'readBy.userId': { $ne: userId }
         });
 
+        // Check if this is a self-chat group (only one member and it's the user)
+        const isSelfChat = group.members.length === 1 &&
+                          group.members[0]._id.toString() === userId?.toString() &&
+                          group.name === 'Message Yourself';
+
         return {
           ...group.toObject(),
           unreadCount,
-          lastMessage: lastMessage || null
+          lastMessage: lastMessage || null,
+          isSelfChat
         };
       })
     );
