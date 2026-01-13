@@ -250,9 +250,18 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
         type: Schema.Types.Mixed, 
         default: { view: false, edit: false } 
       },
-      userManagement: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } },
-      performance: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } },
-      auditLog: { view: { type: Boolean, default: false }, edit: { type: Boolean, default: false } }
+      userManagement: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      performance: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      },
+      auditLog: { 
+        type: Schema.Types.Mixed, 
+        default: { view: false, edit: false } 
+      }
     }
   },
   settings: {
