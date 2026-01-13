@@ -347,9 +347,39 @@ export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: 
 
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can create users.', 403);
+    const currentUserId = req.user?._id;
+    
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has editUsers permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+    
+    let hasEditUsersPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasEditUsersPerm = permsObj?.editUsers === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasEditUsersPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to create users.', 403);
     }
 
     const { username, email, password, displayName, role = 'member', permissions } = req.body;

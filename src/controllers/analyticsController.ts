@@ -293,12 +293,50 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
     const { projectId } = req.params;
     const { startDate, endDate } = req.query;
 
+    const currentUserId = req.user?._id;
+    
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const User = (await import('../models/User')).User;
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has view/viewReports permission for performance module
+    const isAdmin = currentUser.role === 'admin';
+    
+    let hasViewPerm = false;
+    let hasViewReportsPerm = false;
+    try {
+      const performanceModulePerms = currentUser.permissions?.modules?.performance;
+      if (performanceModulePerms && typeof performanceModulePerms === 'object' && performanceModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (performanceModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (performanceModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = performanceModulePerms as Record<string, unknown>;
+        }
+        hasViewPerm = permsObj?.view === true;
+        hasViewReportsPerm = permsObj?.viewReports === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking performance permissions:', permError);
+    }
+
     // Set date range (default to last 30 days)
     const end = endDate ? new Date(endDate as string) : new Date();
     const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    // Handle "all" projects case
+    // Handle "all" projects case - requires performance module permission
     if (projectId === 'all') {
+      // Check permission for viewing all members' performance
+      if (!isAdmin && !hasViewPerm && !hasViewReportsPerm) {
+        return errorResponse(res, 'Access denied. You don\'t have permission to view performance of all members.', 403);
+      }
       // Get all projects where user is owner, in owners list, or a member
       const allProjects = await Project.find({
         $or: [

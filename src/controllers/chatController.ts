@@ -671,3 +671,116 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
     return res.status(500).json({ message: 'Failed to delete chat group' });
   }
 };
+
+// Create or get a personal chat between two users
+export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId: otherUserId } = req.body;
+    const currentUserId = req.user?._id?.toString();
+
+    if (!currentUserId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (!otherUserId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    if (currentUserId === otherUserId) {
+      return res.status(400).json({ message: 'Cannot create a personal chat with yourself' });
+    }
+
+    // Check if current user has personalChat permission
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return res.status(404).json({ message: 'Current user not found' });
+    }
+
+    const isCurrentUserAdmin = currentUser.role === 'admin';
+    const hasPersonalChatPermission = currentUser.permissions?.modules?.chat?.personalChat === true;
+
+    if (!isCurrentUserAdmin && !hasPersonalChatPermission) {
+      return res.status(403).json({ 
+        message: 'You do not have permission to create personal chats' 
+      });
+    }
+
+    // Validate that the other user exists and is active
+    const otherUser = await User.findById(otherUserId);
+    if (!otherUser || !otherUser.isActive) {
+      return res.status(404).json({ message: 'User not found or inactive' });
+    }
+
+    // Check if other user has chat.view permission
+    const isOtherUserAdmin = otherUser.role === 'admin';
+    const hasChatViewPermission = otherUser.permissions?.modules?.chat?.view === true;
+    
+    if (!isOtherUserAdmin && !hasChatViewPermission) {
+      return res.status(400).json({ 
+        message: `Cannot create a personal chat because ${otherUser.displayName || otherUser.email} does not have access to chats` 
+      });
+    }
+
+    // Check if a personal chat (2-member group) already exists between these two users
+    const existingPersonalChat = await ChatGroup.findOne({
+      members: { $all: [currentUserId, otherUserId], $size: 2 },
+      isActive: true
+    })
+      .populate('members', 'displayName email photoURL')
+      .populate('createdBy', 'displayName email');
+
+    if (existingPersonalChat) {
+      // Get last message and unread count
+      const lastMessage = await Message.findOne({
+        groupId: existingPersonalChat._id,
+        isDeleted: false
+      })
+        .populate('senderId', 'displayName email photoURL')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const unreadCount = await Message.countDocuments({
+        groupId: existingPersonalChat._id,
+        isDeleted: false,
+        'readBy.userId': { $ne: currentUserId }
+      });
+
+      return res.json({
+        ...existingPersonalChat.toObject(),
+        unreadCount,
+        lastMessage: lastMessage || null
+      });
+    }
+
+    // Create a new personal chat
+    // Generate a deterministic name based on the other user's name
+    const chatName = otherUser.displayName || otherUser.email;
+    const encryptionPublicKey = req.body.encryptionPublicKey || '';
+
+    const personalChat = await ChatGroup.create({
+      name: chatName,
+      description: '',
+      createdBy: currentUserId,
+      members: [currentUserId, otherUserId],
+      encryptionPublicKey,
+      isActive: true
+    });
+
+    // Populate members
+    await personalChat.populate('members', 'displayName email photoURL');
+    await personalChat.populate('createdBy', 'displayName email');
+
+    // Notify both users via Socket.IO
+    io.to(`user:${currentUserId}`).emit('chat:group:created', personalChat);
+    io.to(`user:${otherUserId}`).emit('chat:group:created', personalChat);
+
+    return res.status(201).json({
+      ...personalChat.toObject(),
+      unreadCount: 0,
+      lastMessage: null
+    });
+  } catch (error) {
+    console.error('Error creating/getting personal chat:', error);
+    return res.status(500).json({ message: 'Failed to create/get personal chat' });
+  }
+};

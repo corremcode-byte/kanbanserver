@@ -26,22 +26,29 @@ export const login = async (req: Request, res: Response) => {
       return errorResponse(res, 'Username/Email and password are required', 400);
     }
 
-    // Find user by email only (username is optional, not required for login)
-    const normalizedEmail = email.toLowerCase().trim();
-    console.log('Searching for user with email:', normalizedEmail);
+    // Normalize the input
+    const normalizedInput = email.toLowerCase().trim();
     
-    // Only search by email - username is optional and not required for login
+    // Determine if input is email (contains @) or username
+    const isEmail = normalizedInput.includes('@');
+    
+    console.log('Searching for user with:', isEmail ? 'email' : 'username', normalizedInput);
+    
+    // Search by email or username
     const user = await User.findOne({
-      email: normalizedEmail,
+      $or: [
+        { email: normalizedInput },
+        { username: normalizedInput }
+      ],
       isActive: true
     }).select('+password');
 
     if (!user) {
-      console.log('User not found or inactive:', normalizedEmail);
+      console.log('User not found or inactive:', normalizedInput);
       return errorResponse(res, 'Invalid username/email or password', 401);
     }
 
-    console.log('User found:', user.email, 'Password field exists:', !!user.password);
+    console.log('User found:', user.email, 'Username:', user.username, 'Password field exists:', !!user.password);
 
     // Compare password
     const isPasswordValid = await user.comparePassword(password);
