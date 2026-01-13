@@ -45,6 +45,28 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(400).json({ message: 'One or more users not found or inactive' });
     }
 
+    // Check if all members have chat.view permission (excluding the creator who is creating the group)
+    const usersWithoutChatPermission: string[] = [];
+    members.forEach((member) => {
+      // Skip checking the creator's permission as they're creating the group
+      if (member._id.toString() === userId) {
+        return;
+      }
+      
+      const isMemberAdmin = member.role === 'admin';
+      const hasChatViewPermission = member.permissions?.modules?.chat?.view === true;
+      
+      if (!isMemberAdmin && !hasChatViewPermission) {
+        usersWithoutChatPermission.push(member.displayName || member.email);
+      }
+    });
+
+    if (usersWithoutChatPermission.length > 0) {
+      return res.status(400).json({ 
+        message: `Group cannot be created because some users do not have access to chats: ${usersWithoutChatPermission.join(', ')}` 
+      });
+    }
+
     // Create chat group with creator included in members
     const chatGroup = await ChatGroup.create({
       name,
@@ -443,6 +465,23 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
 
     if (members.length !== memberIds.length) {
       return res.status(400).json({ message: 'One or more users not found or inactive' });
+    }
+
+    // Check if all members have chat.view permission
+    const usersWithoutChatPermission: string[] = [];
+    members.forEach((member) => {
+      const isMemberAdmin = member.role === 'admin';
+      const hasChatViewPermission = member.permissions?.modules?.chat?.view === true;
+      
+      if (!isMemberAdmin && !hasChatViewPermission) {
+        usersWithoutChatPermission.push(member.displayName || member.email);
+      }
+    });
+
+    if (usersWithoutChatPermission.length > 0) {
+      return res.status(400).json({ 
+        message: `Cannot add user(s) to group because they do not have permission to view chats: ${usersWithoutChatPermission.join(', ')}` 
+      });
     }
 
     // Add new members (avoid duplicates)

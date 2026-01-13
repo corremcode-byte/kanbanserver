@@ -81,9 +81,41 @@ export const getUserById = async (req: Request, res: Response) => {
 
 export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can view all users.', 403);
+    const currentUserId = req.user?._id;
+    
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has viewUsers or view permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+    
+    let hasViewUsersPerm = false;
+    let hasViewPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasViewUsersPerm = permsObj?.viewUsers === true;
+        hasViewPerm = permsObj?.view === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasViewUsersPerm && !hasViewPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to view all users.', 403);
     }
 
     const users = await User.find()
@@ -628,16 +660,48 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
 // Update user profile (name, email, password)
 export const updateUserProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can update user profiles.', 403);
+    const currentUserId = req.user?._id;
+    
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has editUsers or managePermissions permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+    
+    let hasEditUsersPerm = false;
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasEditUsersPerm = permsObj?.editUsers === true;
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasEditUsersPerm && !hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to update user profiles.', 403);
     }
 
     const { userId } = req.params;
     const { displayName, email, currentPassword, password } = req.body;
 
     // Prevent updating self through this endpoint
-    if (userId === req.user._id) {
+    if (userId.toString() === currentUserId.toString()) {
       return errorResponse(res, 'You cannot update your own profile through this endpoint.', 400);
     }
 
@@ -679,9 +743,15 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
       user.password = password; // Will be hashed by pre-save hook
     }
 
-    await user.save();
+    try {
+      await user.save();
+    } catch (saveError) {
+      logger.error('Error saving user profile:', saveError);
+      const saveErrorMessage = saveError instanceof Error ? saveError.message : 'Unknown save error';
+      return errorResponse(res, `Failed to save user profile: ${saveErrorMessage}`, 500);
+    }
 
-    logger.info(`User profile updated for ${user.email} (${userId}) by admin ${req.user.email}`);
+    logger.info(`User profile updated for ${user.email} (${userId}) by ${currentUser.email}`);
 
     return successResponse(res, 'User profile updated successfully', {
       user: {
@@ -694,7 +764,9 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
     });
   } catch (error) {
     logger.error('Error updating user profile:', error);
-    return internalServerErrorResponse(res, 'Failed to update user profile');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Error details:', { errorMessage, stack: error instanceof Error ? error.stack : undefined });
+    return internalServerErrorResponse(res, `Failed to update user profile: ${errorMessage}`);
   }
 };
 
