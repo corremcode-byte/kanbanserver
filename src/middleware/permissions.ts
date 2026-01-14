@@ -84,7 +84,43 @@ export const checkPermission = (permission: Permission) => {
         return next();
       }
 
-      // Check user's permissions
+      // Check global permissions first (for users with manage all projects permission)
+      const User = (await import('../models/User')).User;
+      const user = await User.findById(userId);
+
+      console.log('🔍 checkPermission middleware:', {
+        permission,
+        userId,
+        projectId,
+        hasCanManageAllProjects: user?.permissions?.canManageAllProjects,
+        userPermissions: user?.permissions
+      });
+
+      // If user has global canManageAllProjects permission, allow all project operations
+      if (user?.permissions?.canManageAllProjects === true) {
+        console.log('✅ User has global canManageAllProjects permission - allowing', permission);
+        return next();
+      }
+
+      // Check specific global task permissions
+      if (permission === 'canCreateTasks' && user?.permissions?.canCreateTasks === true) {
+        console.log('✅ User has global canCreateTasks permission - allowing');
+        return next();
+      }
+      if (permission === 'canAssignTasks' && user?.permissions?.canAssignTasks === true) {
+        console.log('✅ User has global canAssignTasks permission - allowing');
+        return next();
+      }
+
+      // Check module-based project permissions
+      if (permission === 'canManageMembers' && 
+          user?.permissions?.modules?.projects?.manageMembers === true &&
+          user?.permissions?.modules?.projects?.edit === true) {
+        console.log('✅ User has manageMembers module permission in projects - allowing');
+        return next();
+      }
+
+      // Check user's project-level permissions
       const userPermission = await ProjectPermission.findOne({
         projectId,
         userId
@@ -145,6 +181,14 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
 
     // Owners can edit any task
     if (isOwner || isInOwners) {
+      return next();
+    }
+
+    // Check global permissions
+    const User = (await import('../models/User')).User;
+    const user = await User.findById(userId);
+    if (user?.permissions?.canEditTasks === true) {
+      console.log('✅ User has global canEditTasks permission - allowing');
       return next();
     }
 
@@ -240,6 +284,14 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
       return next();
     }
 
+    // Check global permissions
+    const User = (await import('../models/User')).User;
+    const user = await User.findById(userId);
+    if (user?.permissions?.canDeleteTasks === true) {
+      console.log('✅ User has global canDeleteTasks permission - allowing');
+      return next();
+    }
+
     // Check user's permissions
     const userPermission = await ProjectPermission.findOne({
       projectId,
@@ -277,6 +329,12 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
     const User = (await import('../models/User')).User;
     const user = await User.findById(userId);
 
+    // Handle different boolean representations (true, "true", 1, etc.)
+    const isPersonal = req.body.isPersonal === true || 
+                      req.body.isPersonal === 'true' || 
+                      req.body.isPersonal === 1 ||
+                      String(req.body.isPersonal).toLowerCase() === 'true';
+
     console.log('🔍 Create project - Global permission check:', {
       userId,
       userFound: !!user,
@@ -286,7 +344,10 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
       hasPermissionsField: !!user?.permissions,
       allPermissions: user?.permissions,
       canCreateProjects: user?.permissions?.canCreateProjects,
-      canCreateProjectsType: typeof user?.permissions?.canCreateProjects
+      canCreatePersonalProjects: user?.permissions?.canCreatePersonalProjects,
+      isPersonal,
+      reqBodyIsPersonal: req.body.isPersonal,
+      reqBodyKeys: Object.keys(req.body || {})
     });
 
     // Admins and managers can always create projects
@@ -295,9 +356,23 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
       return next();
     }
 
-    // Check if user has global permission to create projects
+    // If creating a personal project, check personal project permission FIRST
+    if (isPersonal) {
+      if (user && user.permissions && user.permissions.canCreatePersonalProjects === true) {
+        console.log('✅ User has canCreatePersonalProjects permission and creating personal project - allowing');
+        return next();
+      }
+      // If user has canCreateProjects, they can also create personal projects
+      if (user && user.permissions && user.permissions.canCreateProjects === true) {
+        console.log('✅ User has canCreateProjects permission and creating personal project - allowing');
+        return next();
+      }
+      console.log('❌ User does NOT have canCreatePersonalProjects permission for personal project - denying');
+      return errorResponse(res, 'You don\'t have permission to create personal projects', 403);
+    }
+
+    // For regular (non-personal) projects, check canCreateProjects permission
     if (user && user.permissions && user.permissions.canCreateProjects === true) {
-      // If explicitly set to true, allow
       console.log('✅ User has global canCreateProjects permission - allowing');
       return next();
     }

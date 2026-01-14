@@ -277,7 +277,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     // Permission check is handled by middleware (checkCanCreateProject)
     // No need to check again here
 
-    const { name, description, members = [], lists } = req.body;
+    const { name, description, members = [], lists, isPersonal = false } = req.body;
 
     if (!name?.trim()) {
       return errorResponse(res, 'Project name is required', 400);
@@ -291,8 +291,17 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       return errorResponse(res, 'Description must be less than 500 characters', 400);
     }
 
-    // Validate member IDs
-    if (members.length > 0) {
+    // Check if user is trying to create personal project
+    // Note: Permission check is already done by middleware, but we validate business rules here
+    if (isPersonal) {
+      // Personal projects cannot have members added
+      if (members.length > 0) {
+        return errorResponse(res, 'Personal projects cannot have members added', 400);
+      }
+    }
+
+    // Validate member IDs (only for non-personal projects)
+    if (!isPersonal && members.length > 0) {
       const validMembers = await User.find({
         _id: { $in: members },
         isActive: true
@@ -319,10 +328,11 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
 
     // Always add the creator as a member (and owner)
     const creatorId = req.user._id;
-    const uniqueMembers = Array.from(new Set([creatorId, ...members.filter((id: string) => id !== creatorId)]));
+    const uniqueMembers = isPersonal ? [creatorId] : Array.from(new Set([creatorId, ...members.filter((id: string) => id !== creatorId)]));
     const projectData: any = {
       name: name.trim(),
       description: description?.trim(),
+      isPersonal: isPersonal,
       ownerId: creatorId,
       owners: [creatorId], // Add creator as first owner
       members: uniqueMembers,
@@ -598,6 +608,11 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
     const project = await Project.findById(id);
     if (!project) {
       return notFoundResponse(res, 'Project not found');
+    }
+
+    // Check if this is a personal project
+    if (project.isPersonal === true) {
+      return errorResponse(res, 'Cannot add members to personal projects', 403);
     }
 
     // Permission check is handled by middleware (checkPermission('canManageMembers'))

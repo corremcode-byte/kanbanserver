@@ -27,6 +27,7 @@ export interface IUser extends Document {
     canDeleteProjects?: boolean;
     canManageAllProjects?: boolean;
     canViewAllProjects?: boolean;
+    canCreatePersonalProjects?: boolean;
     // Task permissions
     canCreateTasks?: boolean;
     canEditTasks?: boolean;

@@ -5,6 +5,7 @@ export interface IProject extends Document {
   description?: string;
   status: 'active' | 'on-hold' | 'completed' | 'archived';
   color?: string;
+  isPersonal?: boolean; // Personal projects cannot have members added
   ownerId: mongoose.Types.ObjectId; // Keep for backward compatibility
   owners: mongoose.Types.ObjectId[]; // Project owners (full access)
   members: mongoose.Types.ObjectId[]; // Regular members
@@ -25,12 +26,12 @@ interface IProjectModel extends Model<IProject> {
 }
 
 const ProjectSchema = new Schema<IProject>({
-  name: { 
-    type: String, 
+  name: {
+    type: String,
     required: true,
     trim: true
   },
-  description: { 
+  description: {
     type: String,
     trim: true
   },
@@ -39,9 +40,13 @@ const ProjectSchema = new Schema<IProject>({
     enum: ['active', 'on-hold', 'completed', 'archived'],
     default: 'active'
   },
-  color: { 
-    type: String, 
-    default: '#3B82F6' 
+  color: {
+    type: String,
+    default: '#3B82F6'
+  },
+  isPersonal: {
+    type: Boolean,
+    default: false
   },
   ownerId: {
     type: Schema.Types.ObjectId,

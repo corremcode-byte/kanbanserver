@@ -41,6 +41,11 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
       return notFoundResponse(res, 'Project not found');
     }
 
+    // Check if this is a personal project
+    if (project.isPersonal === true) {
+      return errorResponse(res, 'Cannot send invitations to personal projects', 403);
+    }
+
     // Check if user is project owner (only owners can invite)
     const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
       ? (project.ownerId as any)._id.toString()
@@ -52,8 +57,12 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
       return owId === req.user._id;
     });
 
-    if (!isOwner && !isInOwners) {
-      return errorResponse(res, 'Only project owners can send invitations', 403);
+    // Check if user has global permission to manage all projects
+    const user = await User.findById(req.user._id);
+    const hasGlobalManagePermission = user?.permissions?.canManageAllProjects === true;
+
+    if (!isOwner && !isInOwners && !hasGlobalManagePermission) {
+      return errorResponse(res, 'Only project owners or users with manage all projects permission can send invitations', 403);
     }
 
     // Check if user is already a member
@@ -205,8 +214,12 @@ export const getProjectInvitations = async (req: AuthenticatedRequest, res: Resp
       return owId === req.user._id;
     });
 
-    if (!isOwner && !isInOwners) {
-      return errorResponse(res, 'Only project owners can view invitations', 403);
+    // Check if user has global permission to manage all projects
+    const user = await User.findById(req.user._id);
+    const hasGlobalManagePermission = user?.permissions?.canManageAllProjects === true;
+
+    if (!isOwner && !isInOwners && !hasGlobalManagePermission) {
+      return errorResponse(res, 'Only project owners or users with manage all projects permission can view invitations', 403);
     }
 
     const invitations = await ProjectInvitation.find({ projectId })
@@ -520,8 +533,12 @@ export const cancelInvitation = async (req: AuthenticatedRequest, res: Response)
       return owId === req.user._id;
     });
 
-    if (!isOwner && !isInOwners) {
-      return errorResponse(res, 'Only project owners can cancel invitations', 403);
+    // Check if user has global permission to manage all projects
+    const user = await User.findById(req.user._id);
+    const hasGlobalManagePermission = user?.permissions?.canManageAllProjects === true;
+
+    if (!isOwner && !isInOwners && !hasGlobalManagePermission) {
+      return errorResponse(res, 'Only project owners or users with manage all projects permission can cancel invitations', 403);
     }
 
     // Delete the invitation
@@ -569,8 +586,12 @@ export const resendInvitation = async (req: AuthenticatedRequest, res: Response)
       return owId === req.user._id;
     });
 
-    if (!isOwner && !isInOwners) {
-      return errorResponse(res, 'Only project owners can resend invitations', 403);
+    // Check if user has global permission to manage all projects
+    const user = await User.findById(req.user._id);
+    const hasGlobalManagePermission = user?.permissions?.canManageAllProjects === true;
+
+    if (!isOwner && !isInOwners && !hasGlobalManagePermission) {
+      return errorResponse(res, 'Only project owners or users with manage all projects permission can resend invitations', 403);
     }
 
     // Extend expiration

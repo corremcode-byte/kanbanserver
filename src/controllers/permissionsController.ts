@@ -402,6 +402,13 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
       mergedPermissions.canViewAllTasks = true;
     }
 
+    // Map module permissions to project-level permissions
+    // If user has manageMembers in projects module AND edit access, grant canManageMembers
+    if (globalPermissions.modules?.projects?.manageMembers === true && 
+        globalPermissions.modules?.projects?.edit === true) {
+      mergedPermissions.canManageMembers = true;
+    }
+
     // Map module permissions to global permissions
     if (globalPermissions.canManageUsers === true) {
       // Global canManageUsers grants userManagement module permissions
