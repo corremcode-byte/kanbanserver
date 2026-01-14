@@ -13,13 +13,21 @@ import fs from 'fs';
  * Get the base URL for file serving
  */
 const getBaseUrl = (req: Request): string => {
-  // Use environment variable if set, otherwise construct from request
-  if (process.env.API_URL) {
-    return process.env.API_URL;
+  // Use environment variable if set (prefer FILE_SERVE_URL, fallback to API_URL)
+  if (process.env.FILE_SERVE_URL) {
+    return process.env.FILE_SERVE_URL;
   }
+  if (process.env.API_URL) {
+    // Remove port from API_URL if present
+    const apiUrl = process.env.API_URL.replace(/:\d+$/, '');
+    return apiUrl;
+  }
+  // Construct from request, but remove port number
   const protocol = req.protocol;
-  const host = req.get('host');
-  return `${protocol}://${host}`;
+  const host = req.get('host') || '';
+  // Remove port number (everything after ':')
+  const hostname = host.split(':')[0];
+  return `${protocol}://${hostname}`;
 };
 
 /**

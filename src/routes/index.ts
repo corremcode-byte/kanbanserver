@@ -14,6 +14,7 @@ import searchRoutes from './search';
 import devRoutes from './dev';
 import chatRoutes from './chatRoutes';
 import notificationsRoutes from './notifications';
+import notesRoutes from './notes';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use('/comments', commentsRoutes);
 router.use('/search', searchRoutes);
 router.use('/chat', chatRoutes);
 router.use('/notifications', notificationsRoutes);
+router.use('/notes', notesRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {

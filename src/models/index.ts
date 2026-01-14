@@ -6,5 +6,6 @@ export { default as TaskTimeLog, ITaskTimeLog } from './TaskTimeLog';
 export { default as ProjectPermission, IProjectPermission } from './ProjectPermission';
 export { default as AuditLog, IAuditLog } from './AuditLog';
 export { Notification, INotification } from './Notification';
+export { default as Note, INote } from './Note';
 
 export { Types, Document } from 'mongoose';
