@@ -96,7 +96,7 @@ export const login = async (req: Request, res: Response) => {
 // MongoDB-only authentication - Create user endpoint
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { email, password, displayName, role = 'member', permissions, settings } = req.body;
+    const { email, password, displayName, username, role = 'member', permissions, settings } = req.body;
 
     if (!email || !password) {
       return errorResponse(res, 'Email and password are required', 400);
@@ -122,10 +122,25 @@ export const createUser = async (req: Request, res: Response) => {
       logger.info(`DisplayName was taken, generated unique name: ${uniqueDisplayName}`);
     }
 
+    // Generate unique username if not provided
+    let uniqueUsername = username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    let existingUsername = await User.findOne({ username: uniqueUsername });
+
+    if (existingUsername) {
+      let counter = 1;
+      while (existingUsername) {
+        uniqueUsername = `${username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_')}_${counter}`;
+        existingUsername = await User.findOne({ username: uniqueUsername });
+        counter++;
+      }
+      logger.info(`Username was taken, generated unique name: ${uniqueUsername}`);
+    }
+
     // Create new user
     const user = new User({
       email: email.toLowerCase(),
       password,
+      username: uniqueUsername,
       displayName: uniqueDisplayName,
       role,
       permissions,
@@ -153,6 +168,14 @@ export const createUser = async (req: Request, res: Response) => {
       if (error.keyPattern?.displayName) {
         return errorResponse(res, 'This username is already taken', 400);
       }
+      if (error.keyPattern?.firebaseUid) {
+        logger.error('firebaseUid duplicate key error detected. The firebaseUid index needs to be dropped.');
+        logger.error('Run: npm run drop-firebase-index or ts-node src/scripts/dropFirebaseIndex.ts');
+        return errorResponse(res, 'Database configuration error. Please contact administrator.', 500);
+      }
+      // Generic duplicate key error
+      const duplicateField = error.keyPattern ? Object.keys(error.keyPattern)[0] : 'unknown field';
+      return errorResponse(res, `Duplicate value for ${duplicateField}`, 400);
     }
 
     return internalServerErrorResponse(res, 'Failed to create user');

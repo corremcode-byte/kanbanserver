@@ -651,21 +651,41 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
+    // Generate unique username if not provided
+    let finalUsername = username?.toLowerCase().trim();
+    if (!finalUsername) {
+      // Generate from email, sanitized to match schema regex
+      finalUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      // Ensure minimum length of 3 characters
+      if (finalUsername.length < 3) {
+        finalUsername = finalUsername + '_user';
+      }
+    }
+
+    // Check if generated username is already taken and make it unique
+    let existingUsernameCheck = await User.findOne({ username: finalUsername });
+    if (existingUsernameCheck) {
+      let counter = 1;
+      const baseUsername = finalUsername;
+      while (existingUsernameCheck) {
+        finalUsername = `${baseUsername}_${counter}`;
+        existingUsernameCheck = await User.findOne({ username: finalUsername });
+        counter++;
+      }
+      logger.info(`Username was taken, generated unique name: ${finalUsername}`);
+    }
+
     // Create user in database with password (will be hashed by pre-save middleware)
     const userData: any = {
       email: email.toLowerCase().trim(),
       password: password, // Will be hashed by pre-save middleware
+      username: finalUsername,
       displayName: displayName.trim(),
       role: role || 'member',
       isActive: true,
       lastLoginAt: new Date(),
       permissions: processedPermissions,
     };
-    
-    // Only add username if provided (it's optional)
-    if (username && username.trim()) {
-      userData.username = username.toLowerCase().trim();
-    }
     
     const user = new User(userData);
 
@@ -703,6 +723,27 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       code: error.code,
       errors: error.errors
     });
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      if (error.keyPattern?.email) {
+        return errorResponse(res, 'User with this email already exists', 400);
+      }
+      if (error.keyPattern?.username) {
+        return errorResponse(res, 'This username is already taken', 400);
+      }
+      if (error.keyPattern?.displayName) {
+        return errorResponse(res, 'This display name is already taken', 400);
+      }
+      if (error.keyPattern?.firebaseUid) {
+        logger.error('firebaseUid duplicate key error detected. The firebaseUid index needs to be dropped.');
+        logger.error('Run: npm run drop-firebase-index or ts-node src/scripts/dropFirebaseIndex.ts');
+        return errorResponse(res, 'Database configuration error. Please contact administrator.', 500);
+      }
+      // Generic duplicate key error
+      const duplicateField = error.keyPattern ? Object.keys(error.keyPattern)[0] : 'unknown field';
+      return errorResponse(res, `Duplicate value for ${duplicateField}`, 400);
+    }
 
     // Return more specific error message
     const errorMessage = error.message || 'Failed to create user';

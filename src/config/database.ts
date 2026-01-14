@@ -30,6 +30,41 @@ const connectDB = async (): Promise<void> => {
 
     logger.info('🚀 MongoDB connected successfully');
 
+    // Drop stale firebaseUid index if it exists (legacy from Firebase migration)
+    try {
+      const usersCollection = mongoose.connection.collection('users');
+      const indexes = await usersCollection.indexes();
+      
+      // Check for firebaseUid index by name or by key pattern (including compound indexes)
+      const firebaseUidIndexes = indexes.filter(idx => 
+        idx.name === 'firebaseUid_1' || 
+        idx.name?.includes('firebaseUid') ||
+        (idx.key && 'firebaseUid' in idx.key)
+      );
+      
+      if (firebaseUidIndexes.length > 0) {
+        // Drop all firebaseUid-related indexes
+        for (const firebaseUidIndex of firebaseUidIndexes) {
+          try {
+            // Try dropping by name first
+            await usersCollection.dropIndex(firebaseUidIndex.name!);
+            logger.info(`🧹 Dropped stale firebaseUid index (${firebaseUidIndex.name}) from users collection`);
+          } catch (dropError: any) {
+            if (dropError.code !== 27) { // 27 = IndexNotFound
+              logger.error(`Failed to drop firebaseUid index ${firebaseUidIndex.name}: ${dropError.message}`);
+              logger.warn(`⚠️  firebaseUid index ${firebaseUidIndex.name} still exists. Run the dropFirebaseIndex script to remove it manually.`);
+            }
+          }
+        }
+      } else {
+        logger.debug('No firebaseUid index found - already removed or never existed');
+      }
+    } catch (indexError: any) {
+      // Index check might fail, log but don't crash
+      logger.warn(`Error checking/dropping firebaseUid index: ${indexError.message}`);
+      logger.warn('⚠️  If you encounter E11000 duplicate key errors for firebaseUid, run the dropFirebaseIndex script');
+    }
+
     // Handle connection events
     mongoose.connection.on('error', (error) => {
       logger.error('MongoDB connection error:', error);

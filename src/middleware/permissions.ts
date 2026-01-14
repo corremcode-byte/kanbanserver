@@ -112,12 +112,18 @@ export const checkPermission = (permission: Permission) => {
         return next();
       }
 
-      // Check module-based project permissions
-      if (permission === 'canManageMembers' && 
-          user?.permissions?.modules?.projects?.manageMembers === true &&
-          user?.permissions?.modules?.projects?.edit === true) {
-        console.log('✅ User has manageMembers module permission in projects - allowing');
-        return next();
+      // Check module-based project permissions for canManageMembers
+      if (permission === 'canManageMembers') {
+        // If global manageMembers is explicitly FALSE, deny immediately
+        if (user?.permissions?.modules?.projects?.manageMembers === false) {
+          console.log('❌ User has manageMembers explicitly set to false in global permissions - denying');
+          return errorResponse(res, 'You don\'t have permission to manage members', 403);
+        }
+        // If global manageMembers is TRUE, allow
+        if (user?.permissions?.modules?.projects?.manageMembers === true) {
+          console.log('✅ User has manageMembers module permission in projects - allowing');
+          return next();
+        }
       }
 
       // Check user's project-level permissions

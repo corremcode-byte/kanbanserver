@@ -108,6 +108,14 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
     const { projectId, userId } = req.params;
     const { permissions, role } = req.body;
 
+    logger.info('🔐 [updateUserPermission] Received request:', {
+      projectId,
+      userId,
+      role,
+      canManageMembers: permissions?.canManageMembers,
+      permissionsKeys: permissions ? Object.keys(permissions) : []
+    });
+
     // Check if project exists
     const project = await Project.findById(projectId);
     if (!project) {
@@ -194,6 +202,12 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
     }
 
     await permission.save();
+
+    logger.info('🔐 [updateUserPermission] Permission saved:', {
+      userId,
+      projectId,
+      savedCanManageMembers: permission.permissions.canManageMembers
+    });
 
     // Grant global canManageUsers permission if user has userManagement.edit module permission
     if (permission.permissions.modules?.userManagement?.edit === true) {
@@ -403,10 +417,13 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
     }
 
     // Map module permissions to project-level permissions
-    // If user has manageMembers in projects module AND edit access, grant canManageMembers
-    if (globalPermissions.modules?.projects?.manageMembers === true && 
-        globalPermissions.modules?.projects?.edit === true) {
+    // If user has manageMembers in projects module, grant canManageMembers
+    if (globalPermissions.modules?.projects?.manageMembers === true) {
       mergedPermissions.canManageMembers = true;
+    }
+    // If manageMembers is explicitly false in global permissions, deny regardless of project-level
+    if (globalPermissions.modules?.projects?.manageMembers === false) {
+      mergedPermissions.canManageMembers = false;
     }
 
     // Map module permissions to global permissions
