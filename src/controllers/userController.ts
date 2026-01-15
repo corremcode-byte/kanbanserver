@@ -898,20 +898,13 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       logger.error('Error deleting time logs:', error);
     }
 
-    // 10. Keep audit logs for compliance but mark user as deleted
+    // 10. Delete audit logs for the deleted user
     try {
-      await AuditLog.updateMany(
-        { userId },
-        {
-          $set: {
-            userDeleted: true,
-            deletedUserEmail: user.email
-          }
-        }
-      );
-      logger.info(`Marked audit logs for deleted user`);
+      const deletedAuditLogs = await AuditLog.deleteMany({ userId });
+      deletionSummary.auditLogs = deletedAuditLogs.deletedCount;
+      logger.info(`Deleted ${deletedAuditLogs.deletedCount} audit logs for deleted user`);
     } catch (error) {
-      logger.error('Error updating audit logs:', error);
+      logger.error('Error deleting audit logs:', error);
     }
 
     // 11. Finally, delete the user from MongoDB database

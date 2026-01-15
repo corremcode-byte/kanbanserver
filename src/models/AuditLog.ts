@@ -52,6 +52,8 @@ interface IAuditLogModel extends Model<IAuditLog> {
     totalTimeLogged: number; // in minutes
     actionsCount: number;
   }>;
+
+  cleanupDeletedUsers(): Promise<{ deletedCount: number }>;
 }
 
 const AuditLogSchema = new Schema<IAuditLog>({
@@ -162,7 +164,7 @@ AuditLogSchema.statics.logAction = async function(data: {
 };
 
 // Static method to get project activity
-AuditLogSchema.statics.getProjectActivity = function(
+AuditLogSchema.statics.getProjectActivity = async function(
   projectId: string,
   options: {
     userId?: string;
@@ -192,10 +194,34 @@ AuditLogSchema.statics.getProjectActivity = function(
     }
   }
 
-  return this.find(query)
-    .populate('userId', 'displayName email photoURL')
+  // Find all logs first
+  const logs = await this.find(query)
+    .populate('userId', 'displayName email photoURL isActive')
     .sort({ createdAt: -1 })
-    .limit(options.limit || 100);
+    .limit(options.limit ? options.limit * 2 : 200); // Get more to filter out inactive users
+
+  // Filter out logs for deleted or inactive users
+  const User = mongoose.model('User');
+  const activeLogs: IAuditLog[] = [];
+  
+  for (const log of logs) {
+    if (log.userId) {
+      const userId = typeof log.userId === 'object' && (log.userId as any)._id 
+        ? (log.userId as any)._id.toString() 
+        : log.userId.toString();
+      
+      // Check if user exists and is active
+      const user = await User.findById(userId).select('isActive').lean() as { isActive?: boolean } | null;
+      if (user && user.isActive !== false) {
+        activeLogs.push(log);
+        if (options.limit && activeLogs.length >= options.limit) {
+          break;
+        }
+      }
+    }
+  }
+
+  return activeLogs;
 };
 
 // Static method to get user statistics
@@ -246,6 +272,29 @@ AuditLogSchema.statics.getUserStats = async function(
     totalTimeLogged,
     actionsCount: logs.length
   };
+};
+
+// Static method to cleanup audit logs for deleted or inactive users
+AuditLogSchema.statics.cleanupDeletedUsers = async function(): Promise<{ deletedCount: number }> {
+  const User = mongoose.model('User');
+  
+  // Get all unique user IDs from audit logs
+  const distinctUserIds = await this.distinct('userId');
+  
+  let deletedCount = 0;
+  
+  // Check each user and delete logs for non-existent or inactive users
+  for (const userId of distinctUserIds) {
+    const user = await User.findById(userId).select('isActive').lean() as { isActive?: boolean } | null;
+    
+    // If user doesn't exist or is inactive, delete their audit logs
+    if (!user || user.isActive === false) {
+      const result = await this.deleteMany({ userId });
+      deletedCount += result.deletedCount || 0;
+    }
+  }
+  
+  return { deletedCount };
 };
 
 export const AuditLog = mongoose.model<IAuditLog, IAuditLogModel>(

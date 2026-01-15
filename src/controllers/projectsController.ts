@@ -359,8 +359,8 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       .map(memberId => ({
         projectId: project._id,
         userId: memberId,
-        role: 'assignee', // Default role for new members
-        permissions: ProjectPermission.getDefaultPermissions('assignee')
+        role: 'member', // Default role for new members
+        permissions: ProjectPermission.getDefaultPermissions('member')
       }));
 
     if (memberPermissions.length > 0) {
@@ -647,8 +647,8 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
         await ProjectPermission.create({
           projectId: id,
           userId: userId,
-          role: 'assignee',
-          permissions: ProjectPermission.getDefaultPermissions('assignee')
+          role: 'member',
+          permissions: ProjectPermission.getDefaultPermissions('member')
         });
         logger.info(`Created permission record for user ${userId} in project ${id}`);
       }

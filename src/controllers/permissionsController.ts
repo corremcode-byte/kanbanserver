@@ -167,7 +167,7 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
 
     if (!permission) {
       // Create new permission
-      const defaultPerms = ProjectPermission.getDefaultPermissions(role || 'assignee');
+      const defaultPerms = ProjectPermission.getDefaultPermissions(role || 'member');
       const mergedPermissions = permissions ? { ...defaultPerms, ...permissions } : defaultPerms;
       
       // Ensure canManageMembers is false for personal projects
@@ -178,7 +178,7 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
       permission = new ProjectPermission({
         projectId,
         userId,
-        role: role || 'assignee',
+        role: role || 'member',
         permissions: mergedPermissions
       });
     } else {

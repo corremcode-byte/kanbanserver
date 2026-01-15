@@ -3,7 +3,7 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IProjectPermission extends Document {
   projectId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
-  role: 'owner' | 'manager' | 'assignee';
+  role: 'owner' | 'member';
   permissions: {
     // Legacy task permissions (keeping for backward compatibility)
     canCreateTasks: boolean;
@@ -60,7 +60,7 @@ export interface IProjectPermission extends Document {
 
 interface IProjectPermissionModel extends Model<IProjectPermission> {
   getPermissions(projectId: string, userId: string): Promise<IProjectPermission | null>;
-  getDefaultPermissions(role: 'owner' | 'manager' | 'assignee'): IProjectPermission['permissions'];
+  getDefaultPermissions(role: 'owner' | 'member'): IProjectPermission['permissions'];
 }
 
 const ProjectPermissionSchema = new Schema<IProjectPermission>({
@@ -78,7 +78,7 @@ const ProjectPermissionSchema = new Schema<IProjectPermission>({
   },
   role: {
     type: String,
-    enum: ['owner', 'manager', 'assignee'],
+    enum: ['owner', 'member'],
     required: true
   },
   permissions: {
@@ -157,7 +157,7 @@ ProjectPermissionSchema.statics.getPermissions = function(
 
 // Static method to get default permissions based on role
 ProjectPermissionSchema.statics.getDefaultPermissions = function(
-  role: 'owner' | 'manager' | 'assignee'
+  role: 'owner' | 'member'
 ): IProjectPermission['permissions'] {
   const defaults = {
     owner: {
@@ -182,29 +182,7 @@ ProjectPermissionSchema.statics.getDefaultPermissions = function(
         auditLog: { view: true, edit: true }
       }
     },
-    manager: {
-      canCreateTasks: true,
-      canEditTasks: true,
-      canDeleteTasks: true,
-      canAssignTasks: true,
-      canEditProject: false,
-      canManageMembers: false,
-      canViewAllTasks: true,
-      canManagePermissions: false,
-      canCreateChatGroups: false,
-      canDeleteChatGroups: false,
-      modules: {
-        dashboard: { view: true, edit: false },
-        myTasks: { view: true, edit: true },
-        projects: { view: true, edit: false },
-        chat: { view: true, edit: true },
-        profile: { view: true, edit: true },
-        userManagement: { view: false, edit: false },
-        performance: { view: false, edit: false },
-        auditLog: { view: false, edit: false }
-      }
-    },
-    assignee: {
+    member: {
       canCreateTasks: false,
       canEditTasks: true, // Can edit only own tasks (enforced in middleware)
       canDeleteTasks: false,

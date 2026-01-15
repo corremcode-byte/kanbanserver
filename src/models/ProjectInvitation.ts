@@ -4,7 +4,7 @@ export interface IProjectInvitation extends Document {
   projectId: mongoose.Types.ObjectId;
   invitedEmail: string;
   invitedBy: mongoose.Types.ObjectId;
-  role: 'assignee' | 'manager'; // Note: 'assignee' = regular member who can only see their tasks
+  role: 'member' | 'assignee' | 'manager'; // All invited users are members (old values allowed for backward compatibility)
   permissions?: {
     canCreateTasks?: boolean;
     canEditTasks?: boolean;
@@ -50,7 +50,8 @@ const ProjectInvitationSchema = new Schema<IProjectInvitation>({
   },
   role: {
     type: String,
-    enum: ['assignee', 'manager'],
+    enum: ['member', 'assignee', 'manager'], // Allow old values for backward compatibility
+    default: 'member',
     required: true
   },
   permissions: {

@@ -1095,16 +1095,37 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
     }
 
     // Fetch audit logs for this task
-    const history = await AuditLog.find({
+    const allHistory = await AuditLog.find({
       projectId: project._id,
       $or: [
         { entityId: id },
         { 'metadata.taskId': id }
       ]
     })
-      .populate('userId', 'displayName email photoURL')
+      .populate('userId', 'displayName email photoURL isActive')
       .sort({ createdAt: -1 })
-      .limit(100);
+      .limit(200); // Get more to filter out inactive users
+
+    // Filter out logs for deleted or inactive users
+    const { User } = require('../models');
+    const history: any[] = [];
+    
+    for (const log of allHistory) {
+      if (log.userId) {
+        const userId = typeof log.userId === 'object' && (log.userId as any)._id 
+          ? (log.userId as any)._id.toString() 
+          : log.userId.toString();
+        
+        // Check if user exists and is active
+        const user = await User.findById(userId).select('isActive').lean();
+        if (user && user.isActive !== false) {
+          history.push(log);
+          if (history.length >= 100) {
+            break;
+          }
+        }
+      }
+    }
 
     // Transform the history to a more readable format
     const formattedHistory = history.map((log: any) => ({

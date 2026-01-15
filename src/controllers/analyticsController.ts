@@ -932,12 +932,29 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           const assignmentHistory: any[] = [];
 
           // Get all audit logs related to this task (don't filter by date to get complete history)
-          const taskAudits = await AuditLog.find({
+          const allTaskAudits = await AuditLog.find({
             projectId,
             entityType: 'task',
             entityId: task._id.toString(),
             action: { $in: ['task_created', 'task_updated', 'task_completed'] }
-          }).populate('userId', 'displayName email').sort({ createdAt: 1 });
+          }).populate('userId', 'displayName email isActive').sort({ createdAt: 1 });
+
+          // Filter out logs for deleted or inactive users
+          const taskAudits: any[] = [];
+          
+          for (const audit of allTaskAudits) {
+            if (audit.userId) {
+              const userId = typeof audit.userId === 'object' && (audit.userId as any)._id 
+                ? (audit.userId as any)._id.toString() 
+                : audit.userId.toString();
+              
+              // Check if user exists and is active
+              const user = await User.findById(userId).select('isActive').lean();
+              if (user && user.isActive !== false) {
+                taskAudits.push(audit);
+              }
+            }
+          }
 
           // Track assignment changes - map of userId to their assignment start time
           const assignmentTimes = new Map<string, Date>();

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AuditLog } from '../models/AuditLog';
+import { User } from '../models/User';
 
 /**
  * Audit Controller
@@ -413,11 +414,33 @@ export const getAuditLogs = async (req: any, res: Response) => {
 
     // Fetch audit logs from database
     let auditLogs = await AuditLog.find(query)
-      .populate('userId', 'displayName email photoURL')
+      .populate('userId', 'displayName email photoURL isActive')
       .populate('projectId', 'name')
       .sort({ createdAt: -1 })
-      .limit(parsedLimit)
+      .limit(parsedLimit * 2) // Get more to filter out inactive users
       .lean();
+
+    // Filter out logs for deleted or inactive users
+    const activeLogs: any[] = [];
+    
+    for (const log of auditLogs) {
+      if (log.userId) {
+        const userId = typeof log.userId === 'object' && (log.userId as any)._id 
+          ? (log.userId as any)._id.toString() 
+          : log.userId.toString();
+        
+        // Check if user exists and is active
+        const user = await User.findById(userId).select('isActive').lean();
+        if (user && user.isActive !== false) {
+          activeLogs.push(log);
+          if (activeLogs.length >= parsedLimit) {
+            break;
+          }
+        }
+      }
+    }
+    
+    auditLogs = activeLogs;
 
     console.log('Found audit logs:', auditLogs.length);
 
@@ -521,6 +544,38 @@ export const deleteAllAuditLogs = async (req: any, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to delete audit logs',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/audit/cleanup
+ * Cleanup audit logs for deleted or inactive users
+ *
+ * Access: admin only (enforced by middleware)
+ */
+export const cleanupDeletedUsers = async (req: any, res: Response) => {
+  try {
+    console.log('Cleanup audit logs for deleted users endpoint called by user:', req.user?.email);
+
+    // Run cleanup
+    const result = await AuditLog.cleanupDeletedUsers();
+
+    console.log(`Cleaned up ${result.deletedCount} audit logs for deleted/inactive users`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully cleaned up ${result.deletedCount} audit logs for deleted or inactive users`,
+      data: {
+        deletedCount: result.deletedCount
+      }
+    });
+  } catch (error: any) {
+    console.error('Error cleaning up audit logs:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to cleanup audit logs',
       error: error.message,
     });
   }

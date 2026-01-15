@@ -25,8 +25,8 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'Project ID, email, and role are required', 400);
     }
 
-    if (!['assignee', 'manager'].includes(role)) {
-      return errorResponse(res, 'Role must be either "assignee" or "manager"', 400);
+    if (role !== 'member') {
+      return errorResponse(res, 'Role must be "member"', 400);
     }
 
     // Validate email format
@@ -134,7 +134,7 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
           projectName: (invitation.projectId as any).name,
           projectDescription: (invitation.projectId as any).description,
           inviterName: (invitation.invitedBy as any).displayName,
-          role: role === 'assignee' ? 'Team Member (Assignee)' : 'Manager',
+          role: 'Team Member',
           invitationUrl: `${process.env.CLIENT_URL || 'http://localhost:3000'}/invitations/${token}`,
           expiresAt: invitation.expiresAt
         }
@@ -370,13 +370,8 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
       return errorResponse(res, 'You are already a member of this project', 400);
     }
 
-    // Add user to project based on role
-    if (invitation.role === 'manager') {
-      if (!project.managers) {
-        project.managers = [];
-      }
-      project.managers.push(req.user._id as any);
-    }
+    // Add user to project as member (managers array is managed separately)
+    // All invited users are added as regular members
 
     // Always add to members array
     project.members.push(req.user._id as any);
@@ -390,15 +385,18 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
       });
 
       if (!existingPermission) {
+        // Convert old roles to 'member' for backward compatibility
+        const role = invitation.role === 'assignee' || invitation.role === 'manager' ? 'member' : invitation.role;
+        
         // Use custom permissions from invitation if provided, otherwise use defaults
         const permissions = invitation.permissions
           ? invitation.permissions
-          : ProjectPermission.getDefaultPermissions(invitation.role);
+          : ProjectPermission.getDefaultPermissions(role as 'owner' | 'member');
 
         await ProjectPermission.create({
           projectId: project._id,
           userId: req.user._id,
-          role: invitation.role,
+          role: role as 'owner' | 'member',
           permissions
         });
       }
@@ -455,7 +453,7 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
             projectName: project.name,
             memberName: req.user.displayName,
             memberEmail: req.user.email,
-            role: invitation.role === 'assignee' ? 'Team Member (Assignee)' : 'Manager'
+            role: 'Team Member'
           }
         );
       }
@@ -608,7 +606,7 @@ export const resendInvitation = async (req: AuthenticatedRequest, res: Response)
           projectName: (invitation.projectId as any).name,
           projectDescription: (invitation.projectId as any).description,
           inviterName: (invitation.invitedBy as any).displayName,
-          role: invitation.role === 'assignee' ? 'Team Member (Assignee)' : 'Manager',
+          role: 'Team Member',
           invitationUrl: `${process.env.CLIENT_URL || 'http://localhost:3000'}/invitations/${invitation.token}`,
           expiresAt: invitation.expiresAt
         }
