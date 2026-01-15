@@ -12,7 +12,6 @@ import routes from './routes';
 import { errorHandler } from './middleware';
 import { logger } from './utils/logger';
 import { cronService } from './services/cronService';
-import connectDB from './config/database';
 
 // Load environment variables
 dotenv.config();
@@ -59,14 +58,23 @@ app.use('/api', routes);
 // Error handler
 app.use(errorHandler);
 
-// MongoDB connection is handled by database config (includes index cleanup)
+// Connect to MongoDB
+const connectDB = async () => {
+  try {
+    const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/asana-clone';
+    await mongoose.connect(mongoURI);
+    logger.info('MongoDB connected successfully');
+  } catch (error) {
+    logger.error('MongoDB connection failed:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+};
 
 // Start server
 const PORT = process.env.PORT || 4001;
 
 const startServer = async () => {
   try {
-    // Connect to MongoDB (includes automatic firebaseUid index cleanup)
     await connectDB();
 
     // Start cron jobs
@@ -78,22 +86,6 @@ const startServer = async () => {
       logger.info(`API endpoint: http://localhost:${PORT}/api`);
       logger.info(`Socket.IO enabled: ws://localhost:${PORT}`);
       logger.info(`Cron jobs started`);
-    });
-
-    // Handle server listen errors
-    server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        logger.error(`Port ${PORT} is already in use.`);
-        logger.error(`Please either:`);
-        logger.error(`1. Kill the process using port ${PORT}:`);
-        logger.error(`   Windows: netstat -ano | findstr :${PORT} then taskkill /PID <PID> /F`);
-        logger.error(`   Mac/Linux: lsof -ti:${PORT} | xargs kill -9`);
-        logger.error(`2. Or set a different PORT in your .env file`);
-        process.exit(1);
-      } else {
-        logger.error('Server error:', error);
-        process.exit(1);
-      }
     });
   } catch (error) {
     logger.error('Failed to start server:', error);
