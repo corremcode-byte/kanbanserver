@@ -430,7 +430,7 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// Delete a message (sender or admin/group creator can delete)
+// Delete a message (sender with deleteMessages permission or admin/group creator can delete)
 export const deleteMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { messageId } = req.params;
@@ -442,17 +442,38 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ message: 'Message not found' });
     }
 
+    // Check if user is admin
+    const isAdmin = req.user?.role === 'admin';
+
     // Check if user is the sender of the message
-    // Users can only delete their own messages
     const isSender = message.senderId.toString() === userId?.toString();
 
-    if (!isSender) {
-      return res.status(403).json({ message: 'You can only delete your own messages' });
+    // Check if user has deleteMessages permission
+    let hasDeleteMessagesPermission = false;
+    if (!isAdmin) {
+      const user = await User.findById(userId);
+      if (user?.permissions?.modules?.chat?.deleteMessages === true) {
+        hasDeleteMessagesPermission = true;
+      }
     }
 
+    // Get chat group to check if user is the group creator
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (!chatGroup) {
       return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    const isGroupCreator = chatGroup.createdBy.toString() === userId?.toString();
+
+    // Users can delete if: (admin OR group creator OR (own message AND has deleteMessages permission))
+    const canDelete = isAdmin || isGroupCreator || (isSender && hasDeleteMessagesPermission);
+
+    if (!canDelete) {
+      return res.status(403).json({ message: 'You do not have permission to delete messages' });
+    }
+
+    if (!isSender && !isAdmin && !isGroupCreator) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
     }
 
     // Soft delete
