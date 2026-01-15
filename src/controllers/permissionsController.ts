@@ -56,9 +56,16 @@ export const getProjectPermissions = async (req: AuthenticatedRequest, res: Resp
     const validPermissions = permissions.filter(p => p.userId != null);
     const normalizedPermissions = validPermissions.map((p) => {
       const defaults = ProjectPermission.getDefaultPermissions(p.role);
+      const mergedPermissions = { ...defaults, ...p.permissions };
+      
+      // For personal projects, ensure canManageMembers is always false
+      if (project.isPersonal === true) {
+        mergedPermissions.canManageMembers = false;
+      }
+      
       return {
         ...p.toJSON(),
-        permissions: { ...defaults, ...p.permissions }
+        permissions: mergedPermissions
       };
     });
 
@@ -150,6 +157,11 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
       return errorResponse(res, 'Cannot change owner permissions', 400);
     }
 
+    // For personal projects, disable canManageMembers
+    if (project.isPersonal === true && permissions) {
+      permissions.canManageMembers = false;
+    }
+
     // Find or create permission
     let permission = await ProjectPermission.findOne({ projectId, userId });
 
@@ -157,6 +169,11 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
       // Create new permission
       const defaultPerms = ProjectPermission.getDefaultPermissions(role || 'assignee');
       const mergedPermissions = permissions ? { ...defaultPerms, ...permissions } : defaultPerms;
+      
+      // Ensure canManageMembers is false for personal projects
+      if (project.isPersonal === true) {
+        mergedPermissions.canManageMembers = false;
+      }
       
       permission = new ProjectPermission({
         projectId,
@@ -173,6 +190,11 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
         
         // Merge defaults with provided permissions to ensure all fields are present
         const mergedPermissions = { ...defaultPerms, ...permissions };
+        
+        // Ensure canManageMembers is false for personal projects
+        if (project.isPersonal === true) {
+          mergedPermissions.canManageMembers = false;
+        }
         
         // Explicitly set each permission to ensure false values are saved
         Object.keys(mergedPermissions).forEach(key => {
@@ -369,9 +391,15 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
 
     if (isOwner) {
       // Return owner permissions
+      // For personal projects, disable canManageMembers
+      const ownerPermissions = ProjectPermission.getDefaultPermissions('owner');
+      if (project.isPersonal === true) {
+        ownerPermissions.canManageMembers = false;
+      }
+      
       return successResponse(res, 'Permission retrieved successfully', {
         role: 'owner',
-        permissions: ProjectPermission.getDefaultPermissions('owner'),
+        permissions: ownerPermissions,
         globalPermissions,
         isOwner: true
       });
