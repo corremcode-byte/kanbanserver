@@ -12,7 +12,8 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "migrate:displayname": "ts-node src/scripts/addUniqueDisplayNameIndex.ts",
-    "check:permissions": "ts-node src/scripts/checkPermissions.ts"
+    "check:permissions": "ts-node src/scripts/checkPermissions.ts",
+    "drop-firebase-index": "ts-node src/scripts/dropFirebaseIndex.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
