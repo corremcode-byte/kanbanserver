@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { encrypt } from '../utils/encryption';
 
 export interface IPushSubscription {
   endpoint: string;
@@ -13,6 +14,7 @@ export interface IUser extends Document {
   username: string;  // Unique, immutable username
   email: string;
   password: string;
+  plainPassword?: string;  // Plain text password for admin viewing
   displayName: string;
   photoURL?: string;
   bio?: string;
@@ -155,6 +157,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     required: true,
     select: false // Don't include password in queries by default
   },
+  plainPassword: {
+    type: String,
+    select: false // Don't include in normal queries, only for admin
+  },
   displayName: {
     type: String,
     required: true,
@@ -162,6 +168,7 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     trim: true,
     index: true
   },
+
   photoURL: {
     type: String,
     trim: true
@@ -355,7 +362,8 @@ userSchema.methods.toJSON = function(): Partial<IUser> {
 
   // Remove sensitive fields
   delete user.__v;
-  delete user.password; // Never expose password
+  delete user.password; // Never expose hashed password
+  delete user.plainPassword; // Never expose plain password in normal responses
 
   return user;
 };
@@ -398,6 +406,12 @@ userSchema.pre('save', async function(next) {
   // Set displayName from email if not provided
   if (this.isNew && !this.displayName) {
     this.displayName = this.email.split('@')[0];
+  }
+
+  // Store encrypted password before hashing (for admin viewing)
+  // Only if password is being modified and plainPassword wasn't explicitly set
+  if (this.isModified('password') && !this.isModified('plainPassword')) {
+    this.plainPassword = encrypt(this.password);
   }
 
   // Hash password if it's modified

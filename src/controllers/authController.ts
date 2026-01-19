@@ -4,6 +4,7 @@ import { successResponse, errorResponse, internalServerErrorResponse, notFoundRe
 import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
+import { decrypt } from '../utils/encryption';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -137,6 +138,7 @@ export const createUser = async (req: Request, res: Response) => {
     }
 
     // Create new user
+    // Note: plainPassword is automatically saved by pre-save middleware
     const user = new User({
       email: email.toLowerCase(),
       password,
@@ -219,10 +221,55 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
     const users = await User.find({ isActive: true })
       .select('-password') // Remove password field if it exists
       .sort({ createdAt: -1 });
-    
+
     return successResponse(res, 'Users retrieved successfully', users);
   } catch (error) {
     logger.error('Error getting all users:', error);
+    return internalServerErrorResponse(res, 'Failed to get users');
+  }
+};
+
+// Admin-only endpoint to get users with plain passwords
+export const getAllUsersWithPasswords = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Verify the requesting user is an admin
+    const requestingUser = await User.findById(req.user._id);
+    if (!requestingUser || requestingUser.role !== 'admin') {
+      return errorResponse(res, 'Access denied. Admin privileges required.', 403);
+    }
+
+    // Fetch users with plainPassword field included
+    const users = await User.find({ isActive: true })
+      .select('+plainPassword') // Include plainPassword field
+      .sort({ createdAt: -1 });
+
+    // Map users to include decrypted plainPassword in response
+    const usersWithPasswords = users.map(user => {
+      const userObj = user.toObject();
+      let decryptedPassword = 'N/A';
+
+      if (user.plainPassword) {
+        try {
+          decryptedPassword = decrypt(user.plainPassword);
+        } catch (error) {
+          logger.error(`Failed to decrypt password for user ${user.email}:`, error);
+          decryptedPassword = 'Decryption failed';
+        }
+      }
+
+      return {
+        ...userObj,
+        plainPassword: decryptedPassword
+      };
+    });
+
+    return successResponse(res, 'Users with passwords retrieved successfully', usersWithPasswords);
+  } catch (error) {
+    logger.error('Error getting users with passwords:', error);
     return internalServerErrorResponse(res, 'Failed to get users');
   }
 };
@@ -756,31 +803,25 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    const { currentPassword, newPassword } = req.body;
+    const { newPassword } = req.body;
 
-    if (!currentPassword || !newPassword) {
-      return errorResponse(res, 'Current password and new password are required', 400);
+    if (!newPassword) {
+      return errorResponse(res, 'New password is required', 400);
     }
 
     if (newPassword.length < 6) {
       return errorResponse(res, 'New password must be at least 6 characters long', 400);
     }
 
-    // Find user with password field
-    const user = await User.findById(req.user._id).select('+password');
+    // Find user
+    const user = await User.findById(req.user._id);
 
     if (!user) {
       return notFoundResponse(res, 'User not found');
     }
 
-    // Verify current password
-    const isPasswordValid = await user.comparePassword(currentPassword);
-
-    if (!isPasswordValid) {
-      return errorResponse(res, 'Current password is incorrect', 401);
-    }
-
     // Update password (will be hashed by pre-save middleware)
+    // Note: plainPassword is automatically updated by pre-save middleware
     user.password = newPassword;
     await user.save();
 
@@ -947,6 +988,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     }
 
     // Update password (will be hashed by pre-save middleware)
+    // Note: plainPassword is automatically updated by pre-save middleware
     user.password = newPassword;
     await user.save();
 

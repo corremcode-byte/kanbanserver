@@ -5,6 +5,7 @@ import {
   resetPassword,
   getCurrentUser,
   getAllUsers,
+  getAllUsersWithPasswords,
   getProfile,
   updateProfile,
   getSettings,
@@ -70,6 +71,9 @@ router.get('/dashboard', getDashboardData);
 // User management routes
 router.get('/users', getAllUsers);
 router.get('/users/search', searchUsers);
+
+// Admin only routes
+router.get('/users/with-passwords', requireAdmin, getAllUsersWithPasswords);
 
 // Admin/Manager only routes
 router.put('/users/:userId/role', requireManagerOrAdmin, updateUserRole);
