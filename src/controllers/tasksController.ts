@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Task, Project } from '../models';
-import { AuditLog } from '../models/AuditLog';
+import { AuditLog, IAuditLog } from '../models/AuditLog';
 import { ProjectPermission } from '../models/ProjectPermission';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
@@ -569,16 +569,43 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
     // Log audit action
     try {
-      const action = isNowCompleted && !wasCompleted ? 'task_completed' : 'task_updated';
+      // Determine the primary action for this update
+      const listChanged = updates.listId && updates.listId !== existingTask.listId;
+      const statusChanged = (updates.status || updates.listId) && task.status !== existingTask.status;
+
+      let action: IAuditLog['action'];
+      if (isNowCompleted && !wasCompleted) {
+        action = 'task_completed';
+      } else if (listChanged || statusChanged) {
+        action = 'task_status_changed';
+      } else {
+        action = 'task_updated';
+      }
+
       const metadata: any = {
         taskTitle: task.title,
         taskId: task._id.toString(),
       };
 
-      // Track status changes
-      if (updates.status || updates.listId) {
+      // Track list/status changes
+      if (listChanged || statusChanged) {
         metadata.oldStatus = existingTask.status;
         metadata.newStatus = task.status;
+        metadata.oldListId = existingTask.listId;
+        metadata.newListId = task.listId;
+
+        // Get list titles for better readability
+        try {
+          const projectWithColumns = await Project.findById(existingTask.projectId);
+          if (projectWithColumns && projectWithColumns.columns) {
+            const oldColumn = projectWithColumns.columns.find((col: any) => col.id === existingTask.listId);
+            const newColumn = projectWithColumns.columns.find((col: any) => col.id === task.listId);
+            if (oldColumn) metadata.oldListTitle = oldColumn.title;
+            if (newColumn) metadata.newListTitle = newColumn.title;
+          }
+        } catch (columnError) {
+          logger.error('Failed to get column titles for audit log:', columnError);
+        }
       }
 
       // Track assignee changes
