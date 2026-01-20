@@ -327,6 +327,232 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
       }
     });
 
+    // ==================== VIDEO/VOICE CALL HANDLERS ====================
+
+    // Store active calls - Map<callId, callData>
+    const activeCalls = new Map<string, {
+      callId: string;
+      callType: 'video' | 'voice';
+      callerId: string;
+      callerName: string;
+      callerPhotoURL?: string;
+      receiverId: string;
+      receiverName?: string;
+      groupId: string;
+      groupName?: string;
+      status: 'calling' | 'ringing' | 'connected' | 'ended';
+      startedAt: Date;
+    }>();
+
+    // Initiate a call
+    socket.on('call:initiate', (data: {
+      callId: string;
+      callType: 'video' | 'voice';
+      receiverId: string;
+      receiverName?: string;
+      groupId: string;
+      groupName?: string;
+      callerName: string;
+      callerPhotoURL?: string;
+      offer: any; // WebRTC SDP offer
+    }) => {
+      try {
+        const { callId, callType, receiverId, receiverName, groupId, groupName, callerName, callerPhotoURL, offer } = data;
+
+        if (!callId || !receiverId || !groupId) {
+          socket.emit('error', { message: 'Invalid call data' });
+          return;
+        }
+
+        logger.info(`🔵 Call initiated: ${callId} from ${userId} to ${receiverId} (${callType}) in group ${groupId}`);
+
+        // Store call data
+        activeCalls.set(callId, {
+          callId,
+          callType,
+          callerId: userId,
+          callerName,
+          callerPhotoURL,
+          receiverId,
+          receiverName,
+          groupId,
+          groupName,
+          status: 'calling',
+          startedAt: new Date()
+        });
+
+        const receiverRoom = `user:${receiverId}`;
+        logger.info(`🔵 Emitting call:incoming to room: ${receiverRoom}`);
+
+        // Send incoming call notification to receiver (including offer for peer connection setup)
+        io.to(receiverRoom).emit('call:incoming', {
+          callId,
+          callType,
+          callerId: userId,
+          callerName,
+          callerPhotoURL,
+          receiverId,
+          receiverName,
+          groupId,
+          groupName,
+          status: 'ringing',
+          startedAt: new Date(),
+          offer // Include offer so receiver can setup peer connection immediately
+        });
+
+        logger.info(`🔵 Call notification with offer sent to ${receiverRoom}`);
+
+      } catch (error) {
+        logger.error('Error initiating call:', error);
+        socket.emit('error', { message: 'Failed to initiate call' });
+      }
+    });
+
+    // Accept a call
+    socket.on('call:accept', (data: {
+      callId: string;
+      callerId: string;
+      answer: any; // WebRTC SDP answer
+    }) => {
+      try {
+        const { callId, callerId, answer } = data;
+
+        if (!callId || !callerId) {
+          socket.emit('error', { message: 'Invalid call accept data' });
+          return;
+        }
+
+        logger.info(`Call accepted: ${callId} by ${userId}`);
+
+        // Update call status
+        const callData = activeCalls.get(callId);
+        if (callData) {
+          callData.status = 'connected';
+        }
+
+        // Send answer to caller
+        io.to(`user:${callerId}`).emit('call:accepted', {
+          callId,
+          answer
+        });
+
+      } catch (error) {
+        logger.error('Error accepting call:', error);
+        socket.emit('error', { message: 'Failed to accept call' });
+      }
+    });
+
+    // Reject a call
+    socket.on('call:reject', (data: {
+      callId: string;
+      callerId: string;
+      reason?: string;
+    }) => {
+      try {
+        const { callId, callerId, reason } = data;
+
+        if (!callId || !callerId) {
+          socket.emit('error', { message: 'Invalid call reject data' });
+          return;
+        }
+
+        logger.info(`Call rejected: ${callId} by ${userId}, reason: ${reason}`);
+
+        // Remove call from active calls
+        activeCalls.delete(callId);
+
+        // Notify caller
+        io.to(`user:${callerId}`).emit('call:rejected', {
+          callId,
+          reason: reason || 'Call rejected'
+        });
+
+      } catch (error) {
+        logger.error('Error rejecting call:', error);
+      }
+    });
+
+    // End a call
+    socket.on('call:end', (data: {
+      callId: string;
+      receiverId: string;
+      reason?: string;
+    }) => {
+      try {
+        const { callId, receiverId, reason } = data;
+
+        if (!callId || !receiverId) {
+          socket.emit('error', { message: 'Invalid call end data' });
+          return;
+        }
+
+        logger.info(`Call ended: ${callId} by ${userId}, reason: ${reason}`);
+
+        // Remove call from active calls
+        activeCalls.delete(callId);
+
+        // Notify the other party
+        io.to(`user:${receiverId}`).emit('call:ended', {
+          callId,
+          reason: reason || 'Call ended'
+        });
+
+      } catch (error) {
+        logger.error('Error ending call:', error);
+      }
+    });
+
+    // ICE candidate exchange
+    socket.on('call:ice-candidate', (data: {
+      callId: string;
+      receiverId: string;
+      candidate: any; // WebRTC ICE candidate
+    }) => {
+      try {
+        const { callId, receiverId, candidate } = data;
+
+        if (!callId || !receiverId || !candidate) {
+          return;
+        }
+
+        // Forward ICE candidate to the other party
+        io.to(`user:${receiverId}`).emit('call:ice-candidate', {
+          callId,
+          candidate
+        });
+
+      } catch (error) {
+        logger.error('Error handling ICE candidate:', error);
+      }
+    });
+
+    // User is busy (already in a call)
+    socket.on('call:busy', (data: {
+      callId: string;
+      callerId: string;
+    }) => {
+      try {
+        const { callId, callerId } = data;
+
+        if (!callId || !callerId) {
+          return;
+        }
+
+        logger.info(`User ${userId} is busy, rejecting call ${callId}`);
+
+        // Remove call from active calls
+        activeCalls.delete(callId);
+
+        // Notify caller
+        io.to(`user:${callerId}`).emit('call:busy', {
+          callId
+        });
+
+      } catch (error) {
+        logger.error('Error handling busy status:', error);
+      }
+    });
+
     // Handle disconnection
     socket.on('disconnect', (reason) => {
       const disconnectionInfo = {

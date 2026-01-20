@@ -205,20 +205,7 @@ export const updateUserPermission = async (req: AuthenticatedRequest, res: Respo
       }
       if (role && role !== permission.role) {
         permission.role = role;
-        // Update role in project arrays
-        if (role === 'manager') {
-          if (!project.managers) {
-            project.managers = [];
-          }
-          if (!project.managers.some(m => m.toString() === userId)) {
-            project.managers.push(userId as any);
-          }
-        } else {
-          // Remove from managers if downgraded to assignee
-          if (project.managers) {
-            project.managers = project.managers.filter(m => m.toString() !== userId);
-          }
-        }
+        // Note: 'member' role doesn't require special project array handling
         await project.save();
       }
     }

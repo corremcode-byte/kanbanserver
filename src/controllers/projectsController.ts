@@ -813,8 +813,8 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
     const { id, userId } = req.params;
     const { role } = req.body;
     
-    if (!['member', 'manager'].includes(role)) {
-      return errorResponse(res, 'Invalid role', 400);
+    if (role !== 'member') {
+      return errorResponse(res, 'Invalid role. Only "member" is allowed', 400);
     }
     
     const project = await Project.findById(id);
@@ -834,7 +834,7 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
     });
 
     if (!isInMembers && !isInManagers) {
-      return errorResponse(res, 'User is not a member or manager of this project', 400);
+      return errorResponse(res, 'User is not a member of this project', 400);
     }
 
     // Permission check is handled by middleware (checkPermission('canManageMembers'))
@@ -855,28 +855,18 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
       return errorResponse(res, 'Only the original project owner can change roles of additional owners', 403);
     }
 
-    // Switch role between members and managers arrays
-    if (role === 'manager') {
-      // Remove from members, add to managers
-      if (isInMembers) {
-        project.members = project.members.filter(member => {
-          const memberId = typeof member === 'object' && member._id ? member._id.toString() : member.toString();
-          return memberId !== userId;
-        });
-        project.managers.push(new Types.ObjectId(userId));
-      }
-      // If already in managers, no action needed
-    } else if (role === 'member') {
+    // Ensure user is in members array (move from managers if needed)
+    if (isInManagers) {
       // Remove from managers, add to members
-      if (isInManagers) {
-        project.managers = project.managers.filter(manager => {
-          const managerId = typeof manager === 'object' && manager._id ? manager._id.toString() : manager.toString();
-          return managerId !== userId;
-        });
+      project.managers = project.managers.filter(manager => {
+        const managerId = typeof manager === 'object' && manager._id ? manager._id.toString() : manager.toString();
+        return managerId !== userId;
+      });
+      if (!isInMembers) {
         project.members.push(new Types.ObjectId(userId));
       }
-      // If already in members, no action needed
     }
+    // If already in members, no action needed
 
     await project.save();
 

@@ -556,13 +556,13 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Invalid role. Must be admin, member, or manager', 400);
     }
 
-    // Validate username format only if provided (username is optional)
-    if (username && username.trim()) {
+    // Validate username format only if provided and not empty (username is optional)
+    if (username && username.trim().length > 0) {
       const usernameRegex = /^[a-z0-9_-]{3,20}$/;
       if (!usernameRegex.test(username.trim().toLowerCase())) {
         return errorResponse(res, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores', 400);
       }
-      
+
       // Check if username is already taken
       const existingUsername = await User.findOne({ username: username.toLowerCase().trim() });
       if (existingUsername) {
@@ -651,9 +651,9 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    // Generate unique username if not provided
+    // Generate unique username if not provided or empty
     let finalUsername = username?.toLowerCase().trim();
-    if (!finalUsername) {
+    if (!finalUsername || finalUsername.length === 0) {
       // Generate from email, sanitized to match schema regex
       finalUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
       // Ensure minimum length of 3 characters
