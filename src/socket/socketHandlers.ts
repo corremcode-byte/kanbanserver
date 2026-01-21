@@ -6,6 +6,20 @@ import { logger } from '../utils/logger';
 const activeConnections = new Map<string, Set<string>>(); // userId -> Set of socketIds
 const socketRooms = new Map<string, Set<string>>(); // socketId -> Set of rooms
 
+// Store active group calls - MUST be outside connection handler to be shared across all connections
+const activeGroupCalls = new Map<string, {
+  callId: string;
+  callType: 'video' | 'voice';
+  groupId: string;
+  groupName: string;
+  initiatorId: string;
+  initiatorName: string;
+  initiatorPhotoURL?: string;
+  participants: Map<string, { oderId: string; displayName: string; photoURL?: string }>;
+  status: 'calling' | 'connected' | 'ended';
+  startedAt: Date;
+}>();
+
 // Helper to track user connections
 const addUserConnection = (userId: string, socketId: string) => {
   if (!activeConnections.has(userId)) {
@@ -550,6 +564,323 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
 
       } catch (error) {
         logger.error('Error handling busy status:', error);
+      }
+    });
+
+    // ==================== GROUP VIDEO/VOICE CALL HANDLERS ====================
+
+    // Initiate a group call
+    socket.on('group-call:initiate', (data: {
+      callId: string;
+      callType: 'video' | 'voice';
+      groupId: string;
+      groupName: string;
+      memberIds: string[];
+      initiatorName: string;
+      initiatorPhotoURL?: string;
+    }) => {
+      try {
+        const { callId, callType, groupId, groupName, memberIds, initiatorName, initiatorPhotoURL } = data;
+
+        if (!callId || !groupId || !memberIds || memberIds.length === 0) {
+          socket.emit('error', { message: 'Invalid group call data' });
+          return;
+        }
+
+        logger.info(`🔵 Group call initiated: ${callId} by ${userId} in group ${groupId} (${callType})`);
+        logger.info(`🔵 Inviting members: ${memberIds.join(', ')}`);
+
+        // Create participants map with initiator
+        const participants = new Map<string, { oderId: string; displayName: string; photoURL?: string }>();
+        participants.set(userId, {
+          oderId: userId,
+          displayName: initiatorName,
+          photoURL: initiatorPhotoURL
+        });
+
+        // Store group call data
+        activeGroupCalls.set(callId, {
+          callId,
+          callType,
+          groupId,
+          groupName,
+          initiatorId: userId,
+          initiatorName,
+          initiatorPhotoURL,
+          participants,
+          status: 'calling',
+          startedAt: new Date()
+        });
+
+        // Send incoming call notification to all group members
+        memberIds.forEach(memberId => {
+          const memberRoom = `user:${memberId}`;
+          logger.info(`🔵 Sending group call notification to: ${memberRoom}`);
+
+          io.to(memberRoom).emit('group-call:incoming', {
+            callId,
+            callType,
+            groupId,
+            groupName,
+            initiatorId: userId,
+            initiatorName,
+            initiatorPhotoURL,
+            participants: [userId] // List of users already in the call
+          });
+        });
+
+        logger.info(`🔵 Group call notifications sent to ${memberIds.length} members`);
+
+      } catch (error) {
+        logger.error('Error initiating group call:', error);
+        socket.emit('error', { message: 'Failed to initiate group call' });
+      }
+    });
+
+    // Join a group call
+    socket.on('group-call:join', (data: {
+      callId: string;
+      displayName: string;
+      photoURL?: string;
+    }) => {
+      try {
+        const { callId, displayName, photoURL } = data;
+
+        if (!callId) {
+          socket.emit('error', { message: 'Invalid call ID' });
+          return;
+        }
+
+        const groupCall = activeGroupCalls.get(callId);
+        if (!groupCall) {
+          logger.warn(`❌ Group call not found: ${callId}. Active calls: ${Array.from(activeGroupCalls.keys()).join(', ') || 'none'}`);
+          socket.emit('error', { message: 'Call not found' });
+          return;
+        }
+
+        logger.info(`👤 User ${userId} (${displayName}) joining group call ${callId}`);
+
+        // Add user to participants
+        groupCall.participants.set(userId, {
+          oderId: userId,
+          displayName,
+          photoURL
+        });
+
+        // Update call status if this is the first person to join
+        if (groupCall.status === 'calling') {
+          groupCall.status = 'connected';
+        }
+
+        // Notify all other participants about the new joiner
+        groupCall.participants.forEach((participant, participantId) => {
+          if (participantId !== userId) {
+            io.to(`user:${participantId}`).emit('group-call:user-joined', {
+              callId,
+              userId: userId,
+              displayName,
+              photoURL
+            });
+          }
+        });
+
+        // Send the current participant list to the new joiner
+        const participantList: { oderId: string; displayName: string; photoURL?: string }[] = [];
+        groupCall.participants.forEach((p, participantId) => {
+          if (participantId !== userId) {
+            participantList.push({ oderId: participantId, displayName: p.displayName, photoURL: p.photoURL });
+          }
+        });
+
+        socket.emit('group-call:participants', {
+          callId,
+          participants: participantList
+        });
+
+        logger.info(`👤 User ${userId} joined group call. Total participants: ${groupCall.participants.size}`);
+
+      } catch (error) {
+        logger.error('Error joining group call:', error);
+        socket.emit('error', { message: 'Failed to join group call' });
+      }
+    });
+
+    // Leave a group call
+    socket.on('group-call:leave', (data: {
+      callId: string;
+      reason?: string;
+    }) => {
+      try {
+        const { callId, reason } = data;
+
+        if (!callId) {
+          return;
+        }
+
+        const groupCall = activeGroupCalls.get(callId);
+        if (!groupCall) {
+          return;
+        }
+
+        logger.info(`👋 User ${userId} leaving group call ${callId}: ${reason}`);
+
+        // Remove user from participants
+        groupCall.participants.delete(userId);
+
+        // Notify other participants
+        groupCall.participants.forEach((participant, participantId) => {
+          io.to(`user:${participantId}`).emit('group-call:user-left', {
+            callId,
+            userId: userId
+          });
+        });
+
+        // If no participants left, end the call
+        if (groupCall.participants.size === 0) {
+          logger.info(`🔴 Group call ${callId} ended - no participants left`);
+          activeGroupCalls.delete(callId);
+        }
+
+      } catch (error) {
+        logger.error('Error leaving group call:', error);
+      }
+    });
+
+    // Reject a group call
+    socket.on('group-call:reject', (data: {
+      callId: string;
+      reason?: string;
+    }) => {
+      try {
+        const { callId, reason } = data;
+
+        if (!callId) {
+          return;
+        }
+
+        logger.info(`❌ User ${userId} rejected group call ${callId}: ${reason}`);
+
+        // User rejected - just don't add them to the call
+        // No need to notify others unless they were already in
+
+      } catch (error) {
+        logger.error('Error rejecting group call:', error);
+      }
+    });
+
+    // Forward WebRTC offer to specific user in group call
+    socket.on('group-call:offer', (data: {
+      callId: string;
+      toUserId: string;
+      offer: any;
+    }) => {
+      try {
+        const { callId, toUserId, offer } = data;
+
+        if (!callId || !toUserId || !offer) {
+          return;
+        }
+
+        // Forward offer to the target user
+        io.to(`user:${toUserId}`).emit('group-call:offer', {
+          callId,
+          fromUserId: userId,
+          offer
+        });
+
+      } catch (error) {
+        logger.error('Error forwarding group call offer:', error);
+      }
+    });
+
+    // Forward WebRTC answer to specific user in group call
+    socket.on('group-call:answer', (data: {
+      callId: string;
+      toUserId: string;
+      answer: any;
+    }) => {
+      try {
+        const { callId, toUserId, answer } = data;
+
+        if (!callId || !toUserId || !answer) {
+          return;
+        }
+
+        // Forward answer to the target user
+        io.to(`user:${toUserId}`).emit('group-call:answer', {
+          callId,
+          fromUserId: userId,
+          answer
+        });
+
+      } catch (error) {
+        logger.error('Error forwarding group call answer:', error);
+      }
+    });
+
+    // Forward ICE candidate to specific user in group call
+    socket.on('group-call:ice-candidate', (data: {
+      callId: string;
+      toUserId: string;
+      candidate: any;
+    }) => {
+      try {
+        const { callId, toUserId, candidate } = data;
+
+        if (!callId || !toUserId || !candidate) {
+          return;
+        }
+
+        // Forward ICE candidate to the target user
+        io.to(`user:${toUserId}`).emit('group-call:ice-candidate', {
+          callId,
+          fromUserId: userId,
+          candidate
+        });
+
+      } catch (error) {
+        logger.error('Error forwarding group call ICE candidate:', error);
+      }
+    });
+
+    // End entire group call (only initiator can do this)
+    socket.on('group-call:end-all', (data: {
+      callId: string;
+      reason?: string;
+    }) => {
+      try {
+        const { callId, reason } = data;
+
+        if (!callId) {
+          return;
+        }
+
+        const groupCall = activeGroupCalls.get(callId);
+        if (!groupCall) {
+          return;
+        }
+
+        // Only allow initiator to end the entire call
+        if (groupCall.initiatorId !== userId) {
+          socket.emit('error', { message: 'Only the call initiator can end the call for everyone' });
+          return;
+        }
+
+        logger.info(`🔴 Group call ${callId} ended by initiator: ${reason}`);
+
+        // Notify all participants
+        groupCall.participants.forEach((participant, participantId) => {
+          io.to(`user:${participantId}`).emit('group-call:ended', {
+            callId,
+            reason: reason || 'Call ended by host'
+          });
+        });
+
+        // Remove call from active calls
+        activeGroupCalls.delete(callId);
+
+      } catch (error) {
+        logger.error('Error ending group call:', error);
       }
     });
 

@@ -89,8 +89,8 @@ export interface IUser extends Document {
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
-      auditLog?: { 
-        view?: boolean; 
+      auditLog?: {
+        view?: boolean;
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
@@ -265,9 +265,9 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
         type: Schema.Types.Mixed, 
         default: { view: false, edit: false } 
       },
-      auditLog: { 
-        type: Schema.Types.Mixed, 
-        default: { view: false, edit: false } 
+      auditLog: {
+        type: Schema.Types.Mixed,
+        default: { view: false, edit: false }
       }
     }
   },

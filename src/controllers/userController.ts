@@ -138,16 +138,46 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
 
 export const toggleUserActiveStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can modify user status.', 403);
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has deactivateActivateUsers permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+
+    let hasDeactivateActivatePerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasDeactivateActivatePerm = permsObj?.deactivateActivateUsers === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasDeactivateActivatePerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to modify user status.', 403);
     }
 
     const { userId } = req.params;
     const { isActive } = req.body;
 
     // Prevent deactivating self
-    if (userId === req.user._id) {
+    if (userId === req.user?._id) {
       return errorResponse(res, 'You cannot modify your own account status.', 400);
     }
 
@@ -202,9 +232,39 @@ export const updateUserRole = async (req: AuthenticatedRequest, res: Response) =
 
 export const getUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can view user permissions.', 403);
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has managePermissions permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to view user permissions.', 403);
     }
 
     const { userId } = req.params;
@@ -224,9 +284,39 @@ export const getUserPermissions = async (req: AuthenticatedRequest, res: Respons
 
 export const updateUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can update user permissions.', 403);
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has managePermissions permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to update user permissions.', 403);
     }
 
     const { userId } = req.params;
@@ -513,10 +603,10 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has editUsers permission for userManagement module
+    // Check if user is admin OR has addUsers permission for userManagement module
     const isAdmin = currentUser.role === 'admin';
-    
-    let hasEditUsersPerm = false;
+
+    let hasAddUsersPerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
       if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
@@ -526,13 +616,13 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
         } else {
           permsObj = userModulePerms as Record<string, unknown>;
         }
-        hasEditUsersPerm = permsObj?.editUsers === true;
+        hasAddUsersPerm = permsObj?.addUsers === true;
       }
     } catch (permError) {
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasEditUsersPerm) {
+    if (!isAdmin && !hasAddUsersPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to create users.', 403);
     }
 
@@ -757,9 +847,39 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
 export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can delete users.', 403);
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user is admin OR has deleteUsers permission for userManagement module
+    const isAdmin = currentUser.role === 'admin';
+
+    let hasDeleteUsersPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasDeleteUsersPerm = permsObj?.deleteUsers === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!isAdmin && !hasDeleteUsersPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to delete users.', 403);
     }
 
     const { userId } = req.params;
