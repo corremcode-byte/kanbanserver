@@ -622,7 +622,7 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
 
     // Remove member
     chatGroup.members = chatGroup.members.filter(
-      (m) => m.toString() !== userId
+      (m) => m.toString() !== memberToRemoveId
     );
     await chatGroup.save();
 
@@ -630,7 +630,7 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
     await chatGroup.populate('createdBy', 'displayName email photoURL');
 
     // Notify removed member
-    io.to(`user:${userId}`).emit('chat:group:removed', { groupId });
+    io.to(`user:${memberToRemoveId}`).emit('chat:group:removed', { groupId });
 
     // Notify remaining members
     chatGroup.members.forEach((memberId) => {
