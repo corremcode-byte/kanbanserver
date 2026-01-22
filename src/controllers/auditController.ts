@@ -22,7 +22,9 @@ const actionToEventMap: Record<string, string> = {
   'time_logged': 'time.logged',
   'comment_added': 'comment.added',
   'chat_group_created': 'chat_group.created',
-  'chat_group_deleted': 'chat_group.deleted'
+  'chat_group_deleted': 'chat_group.deleted',
+  'user_login': 'user.login',
+  'user_created': 'user.created'
 };
 
 // Generate user-friendly details from audit log entry
@@ -64,6 +66,12 @@ const generateDetails = (log: any): string => {
       return `Created chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` in project "${metadata.projectName}"` : ''}`;
     case 'chat_group_deleted':
       return `Deleted chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` from project "${metadata.projectName}"` : ''}`;
+    case 'user_login':
+      const ipInfo = metadata.ipAddress ? ` from ${metadata.ipAddress}` : '';
+      return `User logged in${ipInfo}`;
+    case 'user_created':
+      const createdByInfo = metadata.createdBy ? ` by ${metadata.createdBy}` : '';
+      return `Created user "${metadata.userName || metadata.userEmail || 'user'}"${createdByInfo}`;
     default:
       return `Performed action: ${log.action}`;
   }
@@ -383,9 +391,12 @@ export const getAuditLogs = async (req: any, res: Response) => {
     const query: any = {};
 
     // Filter by project if specified
+    // If projectId is specified, only show logs for that project
+    // If not specified, show all logs (including system-level logs like login/user_created which have no projectId)
     if (projectId) {
       query.projectId = projectId;
     }
+    // When projectId is not specified, we don't filter by it, so all logs (with or without projectId) will be included
 
     // Filter by user if specified
     if (userId) {
@@ -458,7 +469,7 @@ export const getAuditLogs = async (req: any, res: Response) => {
           email: user.email || 'unknown@email.com',
         },
         event: actionToEventMap[log.action] || log.action,
-        resource: log.metadata?.taskTitle || project.name || log.entityType || 'Unknown Resource',
+        resource: log.metadata?.taskTitle || project?.name || log.metadata?.userName || log.metadata?.userEmail || log.entityType || 'System',
         details: generateDetails(log),
         source: 'Web App', // Default to Web App for now
         metadata: {

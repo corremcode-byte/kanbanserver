@@ -834,6 +834,24 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
     await user.save();
 
+    // Log user creation event to audit logs
+    try {
+      const { AuditLog } = require('../models/AuditLog');
+      await AuditLog.logSystemEvent({
+        userId: currentUserId.toString(), // The user who created this account
+        action: 'user_created',
+        metadata: {
+          userName: user.displayName,
+          userEmail: user.email,
+          role: user.role,
+          createdBy: currentUser.displayName || currentUser.email
+        }
+      });
+    } catch (auditError) {
+      // Don't fail user creation if audit logging fails
+      logger.error('Failed to log user creation event:', auditError);
+    }
+
     logger.info(`User created successfully: ${user.username} / ${user.email} (${user._id})`);
     return successResponse(res, 'User created successfully', {
       _id: user._id,

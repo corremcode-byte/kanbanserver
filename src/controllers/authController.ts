@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { User, Task, Project } from '../models';
+import { AuditLog } from '../models/AuditLog';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
@@ -79,6 +80,24 @@ export const login = async (req: Request, res: Response) => {
     user.lastLoginAt = new Date();
     await user.save();
 
+    // Log login event to audit logs
+    try {
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_login',
+        metadata: {
+          ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
+          userAgent: userAgent
+        }
+      });
+    } catch (auditError) {
+      // Don't fail login if audit logging fails
+      logger.error('Failed to log login event:', auditError);
+    }
+
     // Remove password from response
     const userResponse = user.toJSON();
 
@@ -152,6 +171,22 @@ export const createUser = async (req: Request, res: Response) => {
     });
 
     await user.save();
+
+    // Log user creation event to audit logs
+    try {
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_created',
+        metadata: {
+          userName: user.displayName,
+          userEmail: user.email,
+          role: user.role
+        }
+      });
+    } catch (auditError) {
+      // Don't fail user creation if audit logging fails
+      logger.error('Failed to log user creation event:', auditError);
+    }
 
     // Remove password from response
     const userResponse = user.toJSON();

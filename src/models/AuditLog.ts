@@ -1,13 +1,14 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IAuditLog extends Document {
-  projectId: mongoose.Types.ObjectId;
+  projectId?: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' |
           'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' |
           'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' |
-          'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted';
-  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group';
+          'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted' |
+          'user_login' | 'user_created';
+  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user';
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
     taskId?: string;
@@ -19,6 +20,10 @@ export interface IAuditLog extends Document {
     assigneeId?: string;
     assigneeName?: string;
     duration?: number; // For time logs (in minutes)
+    ipAddress?: string;
+    userAgent?: string;
+    userName?: string;
+    userEmail?: string;
     [key: string]: any;
   };
   createdAt: Date;
@@ -26,11 +31,17 @@ export interface IAuditLog extends Document {
 
 interface IAuditLogModel extends Model<IAuditLog> {
   logAction(data: {
-    projectId: string;
+    projectId?: string;
     userId: string;
     action: IAuditLog['action'];
     entityType: IAuditLog['entityType'];
     entityId?: string;
+    metadata?: IAuditLog['metadata'];
+  }): Promise<IAuditLog>;
+
+  logSystemEvent(data: {
+    userId: string;
+    action: 'user_login' | 'user_created';
     metadata?: IAuditLog['metadata'];
   }): Promise<IAuditLog>;
 
@@ -60,7 +71,7 @@ const AuditLogSchema = new Schema<IAuditLog>({
   projectId: {
     type: Schema.Types.ObjectId,
     ref: 'Project',
-    required: true,
+    required: false,
     index: true
   },
   userId: {
@@ -87,14 +98,16 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'comment_updated',
       'comment_deleted',
       'chat_group_created',
-      'chat_group_deleted'
+      'chat_group_deleted',
+      'user_login',
+      'user_created'
     ],
     required: true,
     index: true
   },
   entityType: {
     type: String,
-    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group'],
+    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group', 'user'],
     required: true
   },
   entityId: {
@@ -124,7 +137,7 @@ AuditLogSchema.index({ projectId: 1, action: 1, createdAt: -1 });
 
 // Static method to log an action
 AuditLogSchema.statics.logAction = async function(data: {
-  projectId: string;
+  projectId?: string;
   userId: string;
   action: IAuditLog['action'];
   entityType: IAuditLog['entityType'];
@@ -144,7 +157,44 @@ AuditLogSchema.statics.logAction = async function(data: {
 
   // Populate user and project info for real-time broadcast
   await savedLog.populate('userId', 'displayName email photoURL');
-  await savedLog.populate('projectId', 'name');
+  if (data.projectId) {
+    await savedLog.populate('projectId', 'name');
+  }
+
+  // Emit Socket.IO event for real-time updates
+  try {
+    const { getIO } = require('../socket');
+    const io = getIO();
+
+    // Broadcast to all connected clients
+    io.emit('audit:new', {
+      log: savedLog,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    console.error('Failed to emit audit log event:', error);
+  }
+
+  return savedLog;
+};
+
+// Static method to log system-level events (login, user creation, etc.)
+AuditLogSchema.statics.logSystemEvent = async function(data: {
+  userId: string;
+  action: 'user_login' | 'user_created';
+  metadata?: IAuditLog['metadata'];
+}): Promise<IAuditLog> {
+  const log = new this({
+    userId: data.userId,
+    action: data.action,
+    entityType: 'user',
+    metadata: data.metadata || {}
+  });
+
+  const savedLog = await log.save();
+
+  // Populate user info for real-time broadcast
+  await savedLog.populate('userId', 'displayName email photoURL');
 
   // Emit Socket.IO event for real-time updates
   try {
