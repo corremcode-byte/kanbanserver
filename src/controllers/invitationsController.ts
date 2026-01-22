@@ -288,11 +288,33 @@ export const acceptInvitation = async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
 
-    // Find pending invitation by token
-    const invitation = await ProjectInvitation.findByToken(token);
+    // First try to find pending invitation by token
+    let invitation = await ProjectInvitation.findByToken(token);
+
+    // If not found as pending, check if it's already accepted
+    if (!invitation) {
+      invitation = await ProjectInvitation.findOne({
+        token,
+        status: { $in: ['accepted', 'pending'] },
+        expiresAt: { $gt: new Date() }
+      })
+        .populate('projectId', 'name description color')
+        .populate('invitedBy', 'displayName email');
+    }
 
     if (!invitation) {
       return notFoundResponse(res, 'Invitation not found or expired');
+    }
+
+    // If invitation is already accepted, return success (idempotent operation)
+    if (invitation.status === 'accepted') {
+      logger.info(`Invitation ${invitation._id} already accepted (token)`);
+      return successResponse(res, 'Invitation already accepted', {
+        id: invitation._id,
+        projectId: invitation.projectId,
+        role: invitation.role,
+        expiresAt: invitation.expiresAt
+      });
     }
 
     // If client provided an Authorization header, ensure it matches the token

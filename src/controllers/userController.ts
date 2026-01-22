@@ -355,15 +355,44 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Update permissions
-    user.permissions = permissions;
+    // Update permissions - merge with existing to preserve structure
+    if (!user.permissions) {
+      user.permissions = {};
+    }
+    
+    // Store modules structure BEFORE updating other permissions
+    const existingModules = user.permissions.modules || {};
+    
+    // Update other permissions (but preserve modules separately)
+    const { modules, ...otherPermissions } = permissions;
+    Object.assign(user.permissions, otherPermissions);
+    
+    // Now handle modules separately to ensure they're properly stored
+    if (modules) {
+      // Merge with existing modules to preserve other module permissions
+      if (!user.permissions.modules) {
+        user.permissions.modules = {};
+      }
+      // Deep merge modules to preserve nested structures
+      // Use type assertion to handle dynamic module keys
+      const modulesObj = user.permissions.modules as Record<string, any>;
+      const incomingModules = modules as Record<string, any>;
+      Object.keys(incomingModules).forEach(moduleKey => {
+        if (!modulesObj[moduleKey]) {
+          modulesObj[moduleKey] = {};
+        }
+        Object.assign(modulesObj[moduleKey], incomingModules[moduleKey]);
+      });
+      // Update the modules reference
+      user.permissions.modules = modulesObj as typeof user.permissions.modules;
+    }
 
     // Map module-based permissions to global User permissions
     // This ensures middleware checks work correctly
-    if (permissions.modules) {
+    if (user.permissions.modules) {
       // Project permissions
-      if (permissions.modules.projects) {
-        const projectPerms = permissions.modules.projects;
+      if (user.permissions.modules.projects) {
+        const projectPerms = user.permissions.modules.projects;
         console.log('🔧 Mapping project permissions from modules (single user):', projectPerms);
 
         if (projectPerms.createProjects !== undefined) {
@@ -394,8 +423,8 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
       }
 
       // My Tasks permissions
-      if (permissions.modules.myTasks) {
-        const taskPerms = permissions.modules.myTasks;
+      if (user.permissions.modules.myTasks) {
+        const taskPerms = user.permissions.modules.myTasks;
         console.log('🔧 Mapping task permissions from modules (single user):', taskPerms);
 
         if (taskPerms.createTasks !== undefined) {
@@ -424,8 +453,23 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
     user.markModified('permissions.canManageAllProjects');
     user.markModified('permissions.canViewAllProjects');
     user.markModified('permissions.canCreatePersonalProjects');
+    if (user.permissions.modules) {
+      user.markModified('permissions.modules');
+      if (user.permissions.modules.projects) {
+        user.markModified('permissions.modules.projects');
+      }
+    }
 
     await user.save();
+    
+    // Verify what was saved
+    const savedUser = await User.findById(userId);
+    console.log('✅ User permissions saved. Verification:', {
+      userId,
+      canCreatePersonalProjects: savedUser?.permissions?.canCreatePersonalProjects,
+      modulesProjects: savedUser?.permissions?.modules?.projects,
+      personalProjectsModule: savedUser?.permissions?.modules?.projects?.personalProjects
+    });
 
     logger.info(`Admin ${req.user.email} updated permissions for user ${user.email}`);
 

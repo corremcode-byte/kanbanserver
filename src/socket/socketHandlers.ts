@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket, getSocketUserId, canJoinRoom } from './socketAuth';
 import { logger } from '../utils/logger';
+import { User } from '../models';
 
 // Store active connections
 const activeConnections = new Map<string, Set<string>>(); // userId -> Set of socketIds
@@ -638,13 +639,13 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     });
 
     // Join a group call
-    socket.on('group-call:join', (data: {
+    socket.on('group-call:join', async (data: {
       callId: string;
       displayName: string;
       photoURL?: string;
     }) => {
       try {
-        const { callId, displayName, photoURL } = data;
+        const { callId } = data;
 
         if (!callId) {
           socket.emit('error', { message: 'Invalid call ID' });
@@ -658,9 +659,23 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
           return;
         }
 
+        // Get user's actual displayName and photoURL from database
+        let displayName = data.displayName || 'User';
+        let photoURL = data.photoURL;
+        
+        try {
+          const user = await User.findById(userId).select('displayName photoURL email');
+          if (user) {
+            displayName = user.displayName || user.email || displayName;
+            photoURL = user.photoURL || photoURL;
+          }
+        } catch (error) {
+          logger.warn(`Failed to fetch user info for ${userId}, using provided values:`, error);
+        }
+
         logger.info(`👤 User ${userId} (${displayName}) joining group call ${callId}`);
 
-        // Add user to participants
+        // Add user to participants with actual displayName from database
         groupCall.participants.set(userId, {
           oderId: userId,
           displayName,

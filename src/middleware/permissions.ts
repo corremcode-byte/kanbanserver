@@ -124,6 +124,10 @@ export const checkPermission = (permission: Permission) => {
           console.log('✅ User has manageMembers module permission in projects - allowing');
           return next();
         }
+        // If global manageMembers is undefined (not set), deny access
+        // User must have explicit global permission to manage members
+        console.log('❌ User does not have manageMembers global permission - denying');
+        return errorResponse(res, 'You don\'t have permission to manage members. This permission must be granted in your user permissions.', 403);
       }
 
       // Check user's project-level permissions
@@ -351,6 +355,9 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
       allPermissions: user?.permissions,
       canCreateProjects: user?.permissions?.canCreateProjects,
       canCreatePersonalProjects: user?.permissions?.canCreatePersonalProjects,
+      hasModules: !!user?.permissions?.modules,
+      modulesProjects: user?.permissions?.modules?.projects,
+      personalProjectsModule: user?.permissions?.modules?.projects?.personalProjects,
       isPersonal,
       reqBodyIsPersonal: req.body.isPersonal,
       reqBodyKeys: Object.keys(req.body || {})
@@ -361,17 +368,28 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
 
     // If creating a personal project, check personal project permission FIRST
     if (isPersonal) {
+      // Check global canCreatePersonalProjects permission
       if (user && user.permissions && user.permissions.canCreatePersonalProjects === true) {
         console.log('✅ User has canCreatePersonalProjects permission and creating personal project - allowing');
         return next();
       }
-      // If user has canCreateProjects, they can also create personal projects
-      if (user && user.permissions && user.permissions.canCreateProjects === true) {
-        console.log('✅ User has canCreateProjects permission and creating personal project - allowing');
+      
+      // Check module-level personalProjects permission
+      const hasModulePersonalProjects = user?.permissions?.modules?.projects?.personalProjects === true;
+      if (hasModulePersonalProjects) {
+        console.log('✅ User has personalProjects module permission and creating personal project - allowing');
         return next();
       }
-      console.log('❌ User does NOT have canCreatePersonalProjects permission for personal project - denying');
-      return errorResponse(res, 'You don\'t have permission to create personal projects', 403);
+      
+      // Do NOT allow canCreateProjects to create personal projects
+      // Personal projects require explicit personalProjects permission
+      console.log('❌ User does NOT have personalProjects permission for personal project - denying');
+      console.log('❌ User permissions:', {
+        canCreatePersonalProjects: user?.permissions?.canCreatePersonalProjects,
+        modulePersonalProjects: user?.permissions?.modules?.projects?.personalProjects,
+        canCreateProjects: user?.permissions?.canCreateProjects
+      });
+      return errorResponse(res, 'You don\'t have permission to create personal projects. This permission must be explicitly granted.', 403);
     }
 
     // For regular (non-personal) projects, check canCreateProjects permission
