@@ -93,9 +93,8 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has viewUsers or view permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-    
+    // Check if user has viewUsers or view permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasViewUsersPerm = false;
     let hasViewPerm = false;
     try {
@@ -114,7 +113,7 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasViewUsersPerm && !hasViewPerm) {
+    if (!hasViewUsersPerm && !hasViewPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to view all users.', 403);
     }
 
@@ -150,9 +149,8 @@ export const toggleUserActiveStatus = async (req: AuthenticatedRequest, res: Res
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has deactivateActivateUsers permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-
+    // Check if user has deactivateActivateUsers permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasDeactivateActivatePerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
@@ -169,7 +167,7 @@ export const toggleUserActiveStatus = async (req: AuthenticatedRequest, res: Res
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasDeactivateActivatePerm) {
+    if (!hasDeactivateActivatePerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to modify user status.', 403);
     }
 
@@ -198,16 +196,38 @@ export const toggleUserActiveStatus = async (req: AuthenticatedRequest, res: Res
 
 export const updateUserRole = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can modify user roles.', 403);
+    // Check if user has managePermissions permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
+    const currentUser = await User.findById(req.user?._id);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to modify user roles.', 403);
     }
 
     const { userId } = req.params;
     const { role } = req.body;
 
-    if (!['admin', 'member'].includes(role)) {
-      return errorResponse(res, 'Invalid role. Must be admin or member.', 400);
+    if (!['admin', 'member', 'manager'].includes(role)) {
+      return errorResponse(res, 'Invalid role. Must be admin, member, or manager.', 400);
     }
 
     // Prevent modifying self
@@ -244,9 +264,8 @@ export const getUserPermissions = async (req: AuthenticatedRequest, res: Respons
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has managePermissions permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-
+    // Check if user has managePermissions permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasManagePermissionsPerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
@@ -263,7 +282,7 @@ export const getUserPermissions = async (req: AuthenticatedRequest, res: Respons
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasManagePermissionsPerm) {
+    if (!hasManagePermissionsPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to view user permissions.', 403);
     }
 
@@ -296,9 +315,8 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has managePermissions permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-
+    // Check if user has managePermissions permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasManagePermissionsPerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
@@ -315,7 +333,7 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasManagePermissionsPerm) {
+    if (!hasManagePermissionsPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to update user permissions.', 403);
     }
 
@@ -420,9 +438,31 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
 
 export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Check if user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Access denied. Only admins can update user permissions.', 403);
+    // Check if user has managePermissions permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
+    const currentUser = await User.findById(req.user?._id);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to update user permissions.', 403);
     }
 
     const { userIds, permissions } = req.body;
@@ -603,9 +643,8 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has addUsers permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-
+    // Check if user has addUsers permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasAddUsersPerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
@@ -622,7 +661,7 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasAddUsersPerm) {
+    if (!hasAddUsersPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to create users.', 403);
     }
 
@@ -859,9 +898,8 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has deleteUsers permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-
+    // Check if user has deleteUsers permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasDeleteUsersPerm = false;
     try {
       const userModulePerms = currentUser.permissions?.modules?.userManagement;
@@ -878,7 +916,7 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasDeleteUsersPerm) {
+    if (!hasDeleteUsersPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to delete users.', 403);
     }
 
@@ -1058,9 +1096,8 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has editUsers or managePermissions permission for userManagement module
-    const isAdmin = currentUser.role === 'admin';
-    
+    // Check if user has editUsers or managePermissions permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
     let hasEditUsersPerm = false;
     let hasManagePermissionsPerm = false;
     try {
@@ -1079,7 +1116,7 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
       logger.error('Error checking permissions:', permError);
     }
 
-    if (!isAdmin && !hasEditUsersPerm && !hasManagePermissionsPerm) {
+    if (!hasEditUsersPerm && !hasManagePermissionsPerm) {
       return errorResponse(res, 'Access denied. You don\'t have permission to update user profiles.', 403);
     }
 
@@ -1188,7 +1225,7 @@ export const deleteUserAuth = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// Delete all users (admin only, excludes current user)
+// Delete all users (requires deleteUsers permission, excludes current user)
 export const deleteAllUsers = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const currentUserId = req.user?._id;
@@ -1197,9 +1234,31 @@ export const deleteAllUsers = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    // Check if current user is admin
-    if (req.user?.role !== 'admin') {
-      return errorResponse(res, 'Only admins can delete all users', 403);
+    // Check if user has deleteUsers permission for userManagement module
+    // Note: Admin role no longer bypasses permission checks
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    let hasDeleteUsersPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasDeleteUsersPerm = permsObj?.deleteUsers === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!hasDeleteUsersPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to delete users.', 403);
     }
 
     // Delete all users except the current user
@@ -1237,8 +1296,9 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     let updated = false;
 
     // Update display name (requires canEditDisplayName permission)
+    // Note: Admin role no longer bypasses permission checks
     if (displayName !== undefined && displayName !== user.displayName) {
-      if (!user.permissions?.canEditDisplayName && user.role !== 'admin') {
+      if (!user.permissions?.canEditDisplayName) {
         return errorResponse(res, 'You do not have permission to edit your display name', 403);
       }
 
@@ -1256,8 +1316,9 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     // Update email (requires canEditEmail permission)
+    // Note: Admin role no longer bypasses permission checks
     if (email !== undefined && email !== user.email) {
-      if (!user.permissions?.canEditEmail && user.role !== 'admin') {
+      if (!user.permissions?.canEditEmail) {
         return errorResponse(res, 'You do not have permission to edit your email', 403);
       }
 
@@ -1281,8 +1342,9 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     // Update password (requires canEditPassword permission)
+    // Note: Admin role no longer bypasses permission checks
     if (password !== undefined) {
-      if (!user.permissions?.canEditPassword && user.role !== 'admin') {
+      if (!user.permissions?.canEditPassword) {
         return errorResponse(res, 'You do not have permission to edit your password', 403);
       }
 

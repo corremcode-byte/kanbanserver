@@ -16,19 +16,12 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Check if user is admin
-    const isAdmin = req.user?.role === 'admin';
-    
     // Check if user has createGroups permission
-    let hasCreateGroupsPermission = false;
-    if (!isAdmin) {
-      const user = await User.findById(userId);
-      if (user?.permissions?.modules?.chat?.createGroups === true) {
-        hasCreateGroupsPermission = true;
-      }
-    }
+    // Note: Admin role no longer bypasses permission checks
+    const user = await User.findById(userId);
+    const hasCreateGroupsPermission = user?.permissions?.modules?.chat?.createGroups === true;
 
-    if (!isAdmin && !hasCreateGroupsPermission) {
+    if (!hasCreateGroupsPermission) {
       return res.status(403).json({ message: 'You do not have permission to create chat groups' });
     }
 
@@ -53,10 +46,10 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
         return;
       }
       
-      const isMemberAdmin = member.role === 'admin';
+      // Note: Admin role no longer bypasses permission checks
       const hasChatViewPermission = member.permissions?.modules?.chat?.view === true;
-      
-      if (!isMemberAdmin && !hasChatViewPermission) {
+
+      if (!hasChatViewPermission) {
         usersWithoutChatPermission.push(member.displayName || member.email);
       }
     });
@@ -248,11 +241,11 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ message: 'Not authorized to send messages to this group' });
     }
 
-    // Check if user has sendMessages permission (admins and group creators can always send)
-    const isAdmin = req.user?.role === 'admin';
+    // Check if user has sendMessages permission (group creators can always send)
+    // Note: Admin role no longer bypasses permission checks
     const isGroupCreator = chatGroup.createdBy.toString() === userId;
-    
-    if (!isAdmin && !isGroupCreator) {
+
+    if (!isGroupCreator) {
       const user = await User.findById(userId);
       const hasSendMessagesPermission = user?.permissions?.modules?.chat?.sendMessages === true;
       if (!hasSendMessagesPermission) {
@@ -442,20 +435,13 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ message: 'Message not found' });
     }
 
-    // Check if user is admin
-    const isAdmin = req.user?.role === 'admin';
-
     // Check if user is the sender of the message
     const isSender = message.senderId.toString() === userId?.toString();
 
     // Check if user has deleteMessages permission
-    let hasDeleteMessagesPermission = false;
-    if (!isAdmin) {
-      const user = await User.findById(userId);
-      if (user?.permissions?.modules?.chat?.deleteMessages === true) {
-        hasDeleteMessagesPermission = true;
-      }
-    }
+    // Note: Admin role no longer bypasses permission checks
+    const user = await User.findById(userId);
+    const hasDeleteMessagesPermission = user?.permissions?.modules?.chat?.deleteMessages === true;
 
     // Get chat group to check if user is the group creator
     const chatGroup = await ChatGroup.findById(message.groupId);
@@ -465,14 +451,14 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
 
     const isGroupCreator = chatGroup.createdBy.toString() === userId?.toString();
 
-    // Users can delete if: (admin OR group creator OR (own message AND has deleteMessages permission))
-    const canDelete = isAdmin || isGroupCreator || (isSender && hasDeleteMessagesPermission);
+    // Users can delete if: (group creator OR (own message AND has deleteMessages permission))
+    const canDelete = isGroupCreator || (isSender && hasDeleteMessagesPermission);
 
     if (!canDelete) {
       return res.status(403).json({ message: 'You do not have permission to delete messages' });
     }
 
-    if (!isSender && !isAdmin && !isGroupCreator) {
+    if (!isSender && !isGroupCreator) {
       return res.status(403).json({ message: 'You can only delete your own messages' });
     }
 
@@ -515,20 +501,19 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is admin or the group creator
-    const isAdmin = req.user?.role === 'admin';
+    // Check if user is the group creator or has manageGroupMembers permission
+    // Note: Admin role no longer bypasses permission checks
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    // Check if user has manageGroupMembers permission
     let hasManagePermission = false;
-    if (!isAdmin && !isCreator) {
+    if (!isCreator) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
         hasManagePermission = true;
       }
     }
 
-    if (!isAdmin && !isCreator && !hasManagePermission) {
+    if (!isCreator && !hasManagePermission) {
       return res.status(403).json({ message: 'You do not have permission to add members to this group' });
     }
 
@@ -545,10 +530,10 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
     // Check if all members have chat.view permission
     const usersWithoutChatPermission: string[] = [];
     members.forEach((member) => {
-      const isMemberAdmin = member.role === 'admin';
+      // Note: Admin role no longer bypasses permission checks
       const hasChatViewPermission = member.permissions?.modules?.chat?.view === true;
-      
-      if (!isMemberAdmin && !hasChatViewPermission) {
+
+      if (!hasChatViewPermission) {
         usersWithoutChatPermission.push(member.displayName || member.email);
       }
     });
@@ -603,20 +588,19 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is admin or the group creator
-    const isAdmin = req.user?.role === 'admin';
+    // Check if user is the group creator or has manageGroupMembers permission
+    // Note: Admin role no longer bypasses permission checks
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    // Check if user has manageGroupMembers permission
     let hasManagePermission = false;
-    if (!isAdmin && !isCreator) {
+    if (!isCreator) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
         hasManagePermission = true;
       }
     }
 
-    if (!isAdmin && !isCreator && !hasManagePermission) {
+    if (!isCreator && !hasManagePermission) {
       return res.status(403).json({ message: 'You do not have permission to remove members from this group' });
     }
 
@@ -661,20 +645,19 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Check if user is admin or the group creator
-    const isAdmin = req.user?.role === 'admin';
+    // Check if user is the group creator or has editGroups permission
+    // Note: Admin role no longer bypasses permission checks
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    // Check if user has editGroups permission
     let hasEditGroupsPermission = false;
-    if (!isAdmin && !isCreator) {
+    if (!isCreator) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.editGroups === true) {
         hasEditGroupsPermission = true;
       }
     }
 
-    if (!isAdmin && !isCreator && !hasEditGroupsPermission) {
+    if (!isCreator && !hasEditGroupsPermission) {
       return res.status(403).json({ message: 'You do not have permission to update chat groups' });
     }
 
@@ -714,20 +697,19 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is admin or the group creator
-    const isAdmin = req.user?.role === 'admin';
+    // Check if user is the group creator or has deleteGroups permission
+    // Note: Admin role no longer bypasses permission checks
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    // Check if user has deleteGroups permission
     let hasDeleteGroupsPermission = false;
-    if (!isAdmin && !isCreator) {
+    if (!isCreator) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.deleteGroups === true) {
         hasDeleteGroupsPermission = true;
       }
     }
 
-    if (!isAdmin && !isCreator && !hasDeleteGroupsPermission) {
+    if (!isCreator && !hasDeleteGroupsPermission) {
       return res.status(403).json({ message: 'You do not have permission to delete chat groups' });
     }
 
@@ -771,12 +753,12 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
       return res.status(404).json({ message: 'Current user not found' });
     }
 
-    const isCurrentUserAdmin = currentUser.role === 'admin';
+    // Note: Admin role no longer bypasses permission checks
     const hasPersonalChatPermission = currentUser.permissions?.modules?.chat?.personalChat === true;
 
-    if (!isCurrentUserAdmin && !hasPersonalChatPermission) {
-      return res.status(403).json({ 
-        message: 'You do not have permission to create personal chats' 
+    if (!hasPersonalChatPermission) {
+      return res.status(403).json({
+        message: 'You do not have permission to create personal chats'
       });
     }
 
@@ -787,12 +769,12 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
     }
 
     // Check if other user has chat.view permission
-    const isOtherUserAdmin = otherUser.role === 'admin';
+    // Note: Admin role no longer bypasses permission checks
     const hasChatViewPermission = otherUser.permissions?.modules?.chat?.view === true;
-    
-    if (!isOtherUserAdmin && !hasChatViewPermission) {
-      return res.status(400).json({ 
-        message: `Cannot create a personal chat because ${otherUser.displayName || otherUser.email} does not have access to chats` 
+
+    if (!hasChatViewPermission) {
+      return res.status(400).json({
+        message: `Cannot create a personal chat because ${otherUser.displayName || otherUser.email} does not have access to chats`
       });
     }
 

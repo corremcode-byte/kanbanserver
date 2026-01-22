@@ -245,9 +245,10 @@ export const requireOwnershipOrAdmin = (resourceUserId: string) => {
     }
 
     const userId = req.user._id.toString();
-    const isAdmin = req.user.role === 'admin';
-    
-    if (userId !== resourceUserId && !isAdmin) {
+    // Note: Admin role no longer bypasses ownership check.
+    // All users must own the resource to access it.
+
+    if (userId !== resourceUserId) {
       errorResponse(res, 'Access denied', 403);
       return;
     }

@@ -216,14 +216,14 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     // Check permissions: owner, manager, or comment creator can delete
+    // Note: Admin role no longer bypasses permission checks
     const userId = req.user!._id.toString();
     const isOwner = project.ownerId.toString() === userId;
     const isManager = project.managers?.some((m: any) => m.toString() === userId);
     const isCommentCreator = comment.createdBy.toString() === userId;
-    const isAdmin = req.user!.role === 'admin';
 
-    if (!isOwner && !isManager && !isCommentCreator && !isAdmin) {
-      return errorResponse(res, 'Only project owner, admin, manager, or comment creator can delete comments', 403);
+    if (!isOwner && !isManager && !isCommentCreator) {
+      return errorResponse(res, 'Only project owner, manager, or comment creator can delete comments', 403);
     }
 
     // Remove comment

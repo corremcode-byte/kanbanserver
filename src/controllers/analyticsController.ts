@@ -306,9 +306,8 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
       return errorResponse(res, 'User not found', 404);
     }
 
-    // Check if user is admin OR has view/viewReports permission for performance module
-    const isAdmin = currentUser.role === 'admin';
-    
+    // Check if user has view/viewReports permission for performance module
+    // Note: Admin role no longer bypasses permission checks
     let hasViewPerm = false;
     let hasViewReportsPerm = false;
     try {
@@ -334,7 +333,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
     // Handle "all" projects case - requires performance module permission
     if (projectId === 'all') {
       // Check permission for viewing all members' performance
-      if (!isAdmin && !hasViewPerm && !hasViewReportsPerm) {
+      if (!hasViewPerm && !hasViewReportsPerm) {
         return errorResponse(res, 'Access denied. You don\'t have permission to view performance of all members.', 403);
       }
       // Get all projects where user is owner, in owners list, or a member

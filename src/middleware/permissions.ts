@@ -356,11 +356,8 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
       reqBodyKeys: Object.keys(req.body || {})
     });
 
-    // Admins and managers can always create projects
-    if (req.user?.role === 'admin' || req.user?.role === 'manager') {
-      console.log('✅ User is admin or manager - allowing project creation');
-      return next();
-    }
+    // Note: Admin/manager role no longer bypasses permission checks.
+    // All users must have explicit permissions granted.
 
     // If creating a personal project, check personal project permission FIRST
     if (isPersonal) {
