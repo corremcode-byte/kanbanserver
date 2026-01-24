@@ -20,6 +20,8 @@ router.put('/:userId/permissions', usersController.updateUserPermissions);
 router.put('/:userId/toggle-active', usersController.toggleUserActiveStatus);
 router.put('/:userId/role', usersController.updateUserRole);
 router.put('/:userId/profile', usersController.updateUserProfile);
+router.get('/:userId/passkey', usersController.getUserPasskey);
+router.put('/:userId/passkey', usersController.updateUserPasskey);
 router.delete('/delete-all', usersController.deleteAllUsers); // Delete all users (admin only)
 router.delete('/:userId', usersController.deleteUser);
 

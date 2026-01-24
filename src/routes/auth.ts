@@ -17,7 +17,11 @@ import {
   getDashboardData,
   deactivateAccount,
   searchUsers,
-  requestPasswordReset
+  requestPasswordReset,
+  setPasskey,
+  verifyPasskey,
+  changePasskey,
+  checkPasskeyStatus
 } from '../controllers/authController';
 import {
   authenticate,
@@ -61,6 +65,12 @@ router.put('/settings', updateSettings);
 // Password and account management
 router.put('/password', updatePassword);
 router.delete('/account', deleteAccount);
+
+// Passkey routes
+router.get('/passkey/status', checkPasskeyStatus);
+router.post('/passkey/set', setPasskey);
+router.post('/passkey/verify', verifyPasskey);
+router.put('/passkey/change', changePasskey);
 
 // Avatar upload
 router.post('/avatar', uploadAvatar);

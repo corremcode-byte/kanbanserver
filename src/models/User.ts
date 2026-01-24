@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
-import { encrypt } from '../utils/encryption';
+import { encrypt, decrypt } from '../utils/encryption';
 
 export interface IPushSubscription {
   endpoint: string;
@@ -15,6 +15,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   plainPassword?: string;  // Plain text password for admin viewing
+  passkey?: string;  // Encrypted passkey for app access (like payment app PIN)
   displayName: string;
   photoURL?: string;
   bio?: string;
@@ -23,6 +24,8 @@ export interface IUser extends Document {
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
   comparePassword(candidatePassword: string): Promise<boolean>;
+  comparePasskey(candidatePasskey: string): Promise<boolean>;
+  hasPasskey(): boolean;
   permissions?: {
     // Project permissions
     canCreateProjects?: boolean;
@@ -160,6 +163,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   plainPassword: {
     type: String,
     select: false // Don't include in normal queries, only for admin
+  },
+  passkey: {
+    type: String,
+    select: false // Encrypted passkey for app access, don't include in normal queries
   },
   displayName: {
     type: String,
@@ -375,6 +382,22 @@ userSchema.methods.comparePassword = async function(candidatePassword: string): 
   } catch (error) {
     return false;
   }
+};
+
+// Compare passkey method (decrypts stored passkey and compares)
+userSchema.methods.comparePasskey = async function(candidatePasskey: string): Promise<boolean> {
+  try {
+    if (!this.passkey) return false;
+    const decryptedPasskey = decrypt(this.passkey);
+    return decryptedPasskey === candidatePasskey;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Check if user has set a passkey
+userSchema.methods.hasPasskey = function(): boolean {
+  return !!this.passkey;
 };
 
 // Search users static method

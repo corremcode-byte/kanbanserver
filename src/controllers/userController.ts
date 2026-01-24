@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { User } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
+import { decrypt, encrypt } from '../utils/encryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -1448,6 +1449,139 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     logger.error('Error updating profile:', error);
     return internalServerErrorResponse(res, 'Failed to update profile');
+  }
+};
+
+// Get user's decrypted passkey (Admin only - for user management)
+export const getUserPasskey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user has managePermissions permission for userManagement module
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to view user passkeys.', 403);
+    }
+
+    const { userId } = req.params;
+
+    const user = await User.findById(userId).select('+passkey');
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    let decryptedPasskey: string | null = null;
+    if (user.passkey) {
+      try {
+        decryptedPasskey = decrypt(user.passkey);
+      } catch (error) {
+        logger.error(`Failed to decrypt passkey for user ${user.email}:`, error);
+        decryptedPasskey = null;
+      }
+    }
+
+    return successResponse(res, 'User passkey retrieved successfully', {
+      hasPasskey: !!user.passkey,
+      passkey: decryptedPasskey
+    });
+  } catch (error) {
+    logger.error('Error getting user passkey:', error);
+    return internalServerErrorResponse(res, 'Failed to get user passkey');
+  }
+};
+
+// Update user's passkey (Admin only - for user management)
+export const updateUserPasskey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?._id;
+
+    if (!currentUserId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    // Get the current user to check permissions
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user has managePermissions permission for userManagement module
+    let hasManagePermissionsPerm = false;
+    try {
+      const userModulePerms = currentUser.permissions?.modules?.userManagement;
+      if (userModulePerms && typeof userModulePerms === 'object' && userModulePerms !== null) {
+        let permsObj: Record<string, unknown>;
+        if (typeof (userModulePerms as unknown as { toObject?: () => unknown }).toObject === 'function') {
+          permsObj = (userModulePerms as unknown as { toObject: () => Record<string, unknown> }).toObject();
+        } else {
+          permsObj = userModulePerms as Record<string, unknown>;
+        }
+        hasManagePermissionsPerm = permsObj?.managePermissions === true;
+      }
+    } catch (permError) {
+      logger.error('Error checking permissions:', permError);
+    }
+
+    if (!hasManagePermissionsPerm) {
+      return errorResponse(res, 'Access denied. You don\'t have permission to update user passkeys.', 403);
+    }
+
+    const { userId } = req.params;
+    const { newPasskey } = req.body;
+
+    // Validate new passkey format
+    if (!newPasskey || typeof newPasskey !== 'string') {
+      return errorResponse(res, 'New passkey is required', 400);
+    }
+
+    if (newPasskey.length !== 6) {
+      return errorResponse(res, 'Passkey must be exactly 6 digits', 400);
+    }
+
+    if (!/^\d{6}$/.test(newPasskey)) {
+      return errorResponse(res, 'Passkey must contain only digits', 400);
+    }
+
+    const user = await User.findById(userId).select('+passkey');
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Admin can change passkey without knowing the current one
+    // Encrypt and save new passkey
+    user.passkey = encrypt(newPasskey);
+    await user.save();
+
+    logger.info(`Passkey updated for user ${user.email} by admin ${currentUser.email}`);
+    return successResponse(res, 'Passkey updated successfully');
+  } catch (error) {
+    logger.error('Error updating user passkey:', error);
+    return internalServerErrorResponse(res, 'Failed to update user passkey');
   }
 };
 

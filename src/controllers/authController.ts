@@ -5,7 +5,7 @@ import { successResponse, errorResponse, internalServerErrorResponse, notFoundRe
 import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
-import { decrypt } from '../utils/encryption';
+import { decrypt, encrypt } from '../utils/encryption';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -984,6 +984,143 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error requesting password reset:', error);
     return internalServerErrorResponse(res, 'Failed to process password reset request');
+  }
+};
+
+// Set passkey for user (first time setup)
+export const setPasskey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const { passkey } = req.body;
+
+    if (!passkey || typeof passkey !== 'string') {
+      return errorResponse(res, 'Passkey is required', 400);
+    }
+
+    if (passkey.length !== 6) {
+      return errorResponse(res, 'Passkey must be exactly 6 digits', 400);
+    }
+
+    if (!/^\d{6}$/.test(passkey)) {
+      return errorResponse(res, 'Passkey must contain only digits', 400);
+    }
+
+    // Check if user already has a passkey
+    const user = await User.findById(req.user._id).select('+passkey');
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    if (user.passkey) {
+      return errorResponse(res, 'Passkey already set. Use change passkey to update it.', 400);
+    }
+
+    // Encrypt and save passkey
+    user.passkey = encrypt(passkey);
+    await user.save();
+
+    logger.info(`Passkey set for user: ${user.email}`);
+    return successResponse(res, 'Passkey set successfully');
+  } catch (error) {
+    logger.error('Error setting passkey:', error);
+    return internalServerErrorResponse(res, 'Failed to set passkey');
+  }
+};
+
+// Verify passkey
+export const verifyPasskey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const { passkey } = req.body;
+
+    if (!passkey || typeof passkey !== 'string') {
+      return errorResponse(res, 'Passkey is required', 400);
+    }
+
+    const user = await User.findById(req.user._id).select('+passkey');
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    if (!user.passkey) {
+      return errorResponse(res, 'Passkey not set', 400);
+    }
+
+    const isValid = await user.comparePasskey(passkey);
+    if (!isValid) {
+      return errorResponse(res, 'Invalid passkey', 401);
+    }
+
+    logger.info(`Passkey verified for user: ${user.email}`);
+    return successResponse(res, 'Passkey verified successfully', { verified: true });
+  } catch (error) {
+    logger.error('Error verifying passkey:', error);
+    return internalServerErrorResponse(res, 'Failed to verify passkey');
+  }
+};
+
+// Change passkey (no current passkey required)
+export const changePasskey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const { newPasskey } = req.body;
+
+    if (!newPasskey) {
+      return errorResponse(res, 'New passkey is required', 400);
+    }
+
+    if (newPasskey.length !== 6) {
+      return errorResponse(res, 'New passkey must be exactly 6 digits', 400);
+    }
+
+    if (!/^\d{6}$/.test(newPasskey)) {
+      return errorResponse(res, 'New passkey must contain only digits', 400);
+    }
+
+    const user = await User.findById(req.user._id).select('+passkey');
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    // Update passkey (works for both setting new and changing existing)
+    user.passkey = encrypt(newPasskey);
+    await user.save();
+
+    logger.info(`Passkey changed for user: ${user.email}`);
+    return successResponse(res, 'Passkey changed successfully');
+  } catch (error) {
+    logger.error('Error changing passkey:', error);
+    return internalServerErrorResponse(res, 'Failed to change passkey');
+  }
+};
+
+// Check if user has passkey set
+export const checkPasskeyStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const user = await User.findById(req.user._id).select('+passkey');
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    return successResponse(res, 'Passkey status retrieved', {
+      hasPasskey: !!user.passkey
+    });
+  } catch (error) {
+    logger.error('Error checking passkey status:', error);
+    return internalServerErrorResponse(res, 'Failed to check passkey status');
   }
 };
 
