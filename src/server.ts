@@ -1,8 +1,11 @@
+// Load environment variables FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -12,9 +15,6 @@ import routes from './routes';
 import { errorHandler } from './middleware';
 import { logger } from './utils/logger';
 import { cronService } from './services/cronService';
-
-// Load environment variables
-dotenv.config();
 
 // Create Express app
 const app = express();

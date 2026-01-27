@@ -5,6 +5,8 @@ import { User } from '../models/User';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { io } from '../server';
 import mongoose from 'mongoose';
+import { pushNotificationService } from '../services/pushNotificationService';
+import { createNotification } from './notificationController';
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
@@ -77,6 +79,29 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
     // Notify all members via Socket.IO (including creator)
     allMemberIds.forEach((memberId: string) => {
       io.to(`user:${memberId}`).emit('chat:group:created', chatGroup);
+    });
+
+    // Send push notifications to new members (excluding creator)
+    const creatorName = req.user.displayName || req.user.email || 'Someone';
+    const otherMemberIds = allMemberIds.filter((id: string) => id !== userId);
+
+    otherMemberIds.forEach(async (memberId: string) => {
+      try {
+        await createNotification({
+          userId: memberId,
+          type: 'group_added',
+          title: 'Added to Chat Group',
+          message: `${creatorName} added you to the group "${chatGroup.name}"`,
+          metadata: {
+            groupId: chatGroup._id as mongoose.Types.ObjectId,
+            groupName: chatGroup.name,
+            actionBy: userId as unknown as mongoose.Types.ObjectId,
+            actionByName: creatorName,
+          },
+        });
+      } catch (error) {
+        console.error(`Failed to create notification for user ${memberId}:`, error);
+      }
     });
 
     return res.status(201).json(chatGroup);
@@ -283,6 +308,36 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
         groupId,
         message
       });
+    });
+
+    // Send push notifications to members who are not the sender
+    // Get sender's display name for the notification
+    const sender = await User.findById(senderId);
+    const senderName = sender?.displayName || sender?.email || 'Someone';
+
+    // Send push notifications to all other members
+    const otherMembers = chatGroup.members.filter(
+      (memberId) => memberId.toString() !== userId
+    );
+
+    // Send push notifications in background (don't await)
+    otherMembers.forEach(async (memberId) => {
+      try {
+        await pushNotificationService.sendToUser(memberId.toString(), {
+          title: `New message from ${senderName}`,
+          body: `You have a new message in ${chatGroup.name}`,
+          icon: '/kanban-icon.svg',
+          badge: '/kanban-icon.svg',
+          data: {
+            url: `/chat?groupId=${groupId}`,
+            type: 'chat_message',
+            groupId: groupId,
+          },
+          tag: `chat-${groupId}`,
+        });
+      } catch (error) {
+        console.error(`Failed to send push notification to user ${memberId}:`, error);
+      }
     });
 
     return res.status(201).json(message);
@@ -563,6 +618,29 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
     // Notify existing members
     chatGroup.members.forEach((memberId) => {
       io.to(`user:${memberId.toString()}`).emit('chat:group:updated', chatGroup);
+    });
+
+    // Send push notifications to new members
+    const currentUser = await User.findById(userId);
+    const adderName = currentUser?.displayName || currentUser?.email || 'Someone';
+
+    newMemberIds.forEach(async (memberId: string) => {
+      try {
+        await createNotification({
+          userId: memberId,
+          type: 'group_added',
+          title: 'Added to Chat Group',
+          message: `${adderName} added you to the group "${chatGroup.name}"`,
+          metadata: {
+            groupId: chatGroup._id as mongoose.Types.ObjectId,
+            groupName: chatGroup.name,
+            actionBy: userId as unknown as mongoose.Types.ObjectId,
+            actionByName: adderName,
+          },
+        });
+      } catch (error) {
+        console.error(`Failed to create notification for user ${memberId}:`, error);
+      }
     });
 
     return res.json(chatGroup);

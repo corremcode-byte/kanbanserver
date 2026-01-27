@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added';
   title: string;
   message: string;
   read: boolean;
@@ -14,6 +14,8 @@ export interface INotification extends Document {
     invitationId?: mongoose.Types.ObjectId;
     actionBy?: mongoose.Types.ObjectId;
     actionByName?: string;
+    groupId?: mongoose.Types.ObjectId;
+    groupName?: string;
   };
   createdAt: Date;
   readAt?: Date;
@@ -29,7 +31,7 @@ const NotificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update'],
+      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update', 'chat_message', 'group_added'],
       required: true,
     },
     title: {
@@ -53,6 +55,8 @@ const NotificationSchema = new Schema<INotification>(
       invitationId: { type: Schema.Types.ObjectId, ref: 'ProjectInvitation' },
       actionBy: { type: Schema.Types.ObjectId, ref: 'User' },
       actionByName: String,
+      groupId: { type: Schema.Types.ObjectId, ref: 'ChatGroup' },
+      groupName: String,
     },
     readAt: Date,
   },

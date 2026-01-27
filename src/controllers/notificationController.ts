@@ -3,6 +3,7 @@ import { Notification } from '../models/Notification';
 import { successResponse, errorResponse, internalServerErrorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
+import { pushNotificationService } from '../services/pushNotificationService';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -134,7 +135,7 @@ export const deleteNotification = async (req: AuthenticatedRequest, res: Respons
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added';
   title: string;
   message: string;
   metadata?: {
@@ -145,6 +146,8 @@ export const createNotification = async (data: {
     invitationId?: string | mongoose.Types.ObjectId;
     actionBy?: string | mongoose.Types.ObjectId;
     actionByName?: string;
+    groupId?: string | mongoose.Types.ObjectId;
+    groupName?: string;
   };
 }) => {
   try {
@@ -159,6 +162,41 @@ export const createNotification = async (data: {
 
     await notification.save();
     logger.info(`Notification created for user ${data.userId}: ${data.title}`);
+
+    // Send push notification
+    try {
+      const userId = typeof data.userId === 'string' ? data.userId : data.userId.toString();
+
+      // Determine the URL based on notification type
+      let url = '/dashboard';
+      if (data.metadata?.groupId) {
+        url = `/chat?groupId=${data.metadata.groupId}`;
+      } else if (data.metadata?.projectId) {
+        url = `/projects/${data.metadata.projectId}`;
+      }
+
+      await pushNotificationService.sendToUser(userId, {
+        title: data.title,
+        body: data.message,
+        icon: '/kanban-icon.svg',
+        badge: '/kanban-icon.svg',
+        data: {
+          url,
+          type: data.type,
+          projectId: data.metadata?.projectId?.toString(),
+          taskId: data.metadata?.taskId?.toString(),
+          groupId: data.metadata?.groupId?.toString(),
+        },
+        tag: `${data.type}-${notification._id}`,
+        requireInteraction: ['project_invitation', 'task_assigned', 'chat_message'].includes(data.type),
+      });
+
+      logger.info(`Push notification sent for user ${data.userId}: ${data.title}`);
+    } catch (pushError) {
+      // Don't fail the main notification creation if push fails
+      logger.warn(`Failed to send push notification for user ${data.userId}:`, pushError);
+    }
+
     return notification;
   } catch (error) {
     logger.error('Error creating notification:', error);
