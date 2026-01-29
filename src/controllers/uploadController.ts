@@ -18,16 +18,12 @@ const getBaseUrl = (req: Request): string => {
     return process.env.FILE_SERVE_URL;
   }
   if (process.env.API_URL) {
-    // Remove port from API_URL if present
-    const apiUrl = process.env.API_URL.replace(/:\d+$/, '');
-    return apiUrl;
+    return process.env.API_URL;
   }
-  // Construct from request, but remove port number
+  // Construct from request - keep the port for local development
   const protocol = req.protocol;
-  const host = req.get('host') || '';
-  // Remove port number (everything after ':')
-  const hostname = host.split(':')[0];
-  return `${protocol}://${hostname}`;
+  const host = req.get('host') || 'localhost:3001';
+  return `${protocol}://${host}`;
 };
 
 /**

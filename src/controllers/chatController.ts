@@ -276,6 +276,23 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       if (!hasSendMessagesPermission) {
         return res.status(403).json({ message: 'You do not have permission to send messages' });
       }
+
+      // Check for voice recording permission if message contains audio attachments
+      const hasAudioAttachment = attachments && attachments.some((att: { fileType?: string; fileName?: string }) =>
+        att.fileType?.startsWith('audio/') ||
+        att.fileName?.endsWith('.webm') ||
+        att.fileName?.endsWith('.mp3') ||
+        att.fileName?.endsWith('.ogg') ||
+        att.fileName?.endsWith('.wav') ||
+        att.fileName?.startsWith('voice_message_')
+      );
+
+      if (hasAudioAttachment) {
+        const hasVoiceRecordingPermission = user?.permissions?.modules?.chat?.voiceRecording === true;
+        if (!hasVoiceRecordingPermission) {
+          return res.status(403).json({ message: 'You do not have permission to send voice messages' });
+        }
+      }
     }
 
     // Create message
