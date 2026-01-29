@@ -327,33 +327,34 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       });
     });
 
-    // Send push notifications to members who are not the sender
+    // Send notifications to members who are not the sender
     // Get sender's display name for the notification
     const sender = await User.findById(senderId);
     const senderName = sender?.displayName || sender?.email || 'Someone';
 
-    // Send push notifications to all other members
+    // Send notifications to all other members
     const otherMembers = chatGroup.members.filter(
       (memberId) => memberId.toString() !== userId
     );
 
-    // Send push notifications in background (don't await)
+    // Create in-app notifications and send push notifications
     otherMembers.forEach(async (memberId) => {
       try {
-        await pushNotificationService.sendToUser(memberId.toString(), {
+        // Create in-app notification (this also sends push notification automatically)
+        await createNotification({
+          userId: memberId.toString(),
+          type: 'chat_message',
           title: `New message from ${senderName}`,
-          body: `You have a new message in ${chatGroup.name}`,
-          icon: '/kanban-icon.svg',
-          badge: '/kanban-icon.svg',
-          data: {
-            url: `/chat?groupId=${groupId}`,
-            type: 'chat_message',
-            groupId: groupId,
+          message: `You have a new message in ${chatGroup.name}`,
+          metadata: {
+            groupId: chatGroup._id as mongoose.Types.ObjectId,
+            groupName: chatGroup.name,
+            actionBy: userId as unknown as mongoose.Types.ObjectId,
+            actionByName: senderName,
           },
-          tag: `chat-${groupId}`,
         });
       } catch (error) {
-        console.error(`Failed to send push notification to user ${memberId}:`, error);
+        console.error(`Failed to create notification for user ${memberId}:`, error);
       }
     });
 
