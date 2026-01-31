@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket, getSocketUserId, canJoinRoom } from './socketAuth';
 import { logger } from '../utils/logger';
 import { User } from '../models';
+import { pushNotificationService } from '../services/pushNotificationService';
 
 // Store active connections
 const activeConnections = new Map<string, Set<string>>(); // userId -> Set of socketIds
@@ -44,6 +45,12 @@ const addSocketRoom = (socketId: string, room: string) => {
     socketRooms.set(socketId, new Set());
   }
   socketRooms.get(socketId)!.add(room);
+};
+
+// Helper to check if user is online
+const isUserOnline = (userId: string): boolean => {
+  const userSockets = activeConnections.get(userId);
+  return userSockets !== undefined && userSockets.size > 0;
 };
 
 const removeSocketRoom = (socketId: string, room: string) => {
@@ -416,6 +423,34 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
         });
 
         logger.info(`🔵 Call notification with offer sent to ${receiverRoom}`);
+
+        // If receiver is offline and it's a VOICE call, send push notification
+        // (User requested this for voice calls only, not video calls)
+        if (!isUserOnline(receiverId) && callType === 'voice') {
+          logger.info(`📱 Receiver ${receiverId} is offline, sending push notification for voice call`);
+
+          // Send push notification in background (don't await)
+          pushNotificationService.sendToUser(receiverId, {
+            title: `Incoming Voice Call`,
+            body: `${callerName} is calling you`,
+            icon: callerPhotoURL || '/kanban-icon.svg',
+            badge: '/kanban-icon.svg',
+            tag: `incoming-call-${callId}`,
+            requireInteraction: true, // Keep notification visible until user interacts
+            data: {
+              type: 'incoming_voice_call',
+              callId,
+              callerId: userId,
+              callerName,
+              callerPhotoURL,
+              groupId,
+              groupName,
+              url: '/' // Will be handled by service worker to open call UI
+            }
+          }).catch(error => {
+            logger.error('Failed to send push notification for incoming call:', error);
+          });
+        }
 
       } catch (error) {
         logger.error('Error initiating call:', error);
