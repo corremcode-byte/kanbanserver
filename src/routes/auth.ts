@@ -12,7 +12,7 @@ import {
   updateSettings,
   updatePassword,
   deleteAccount,
-  uploadAvatar,
+  uploadAvatar as uploadAvatarController,
   updateUserRole,
   getDashboardData,
   deactivateAccount,
@@ -29,6 +29,7 @@ import {
   requireAdmin
 } from '../middleware/auth';
 import { successResponse } from '../utils/responses';
+import { uploadAvatar as uploadAvatarMiddleware } from '../middleware/upload';
 
 const router = Router();
 
@@ -72,8 +73,8 @@ router.post('/passkey/set', setPasskey);
 router.post('/passkey/verify', verifyPasskey);
 router.put('/passkey/change', changePasskey);
 
-// Avatar upload
-router.post('/avatar', uploadAvatar);
+// Avatar upload (requires authentication and multer middleware)
+router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);
 
 // Dashboard
 router.get('/dashboard', getDashboardData);

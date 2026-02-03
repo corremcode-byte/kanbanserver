@@ -10,6 +10,7 @@ import mongoose from 'mongoose';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import { initializeSocket } from './socket';
 import routes from './routes';
 import { errorHandler } from './middleware';
@@ -41,11 +42,23 @@ app.use(cors({
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   maxAge: 600
 }));
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(compression());
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from uploads directory with no-cache headers
+app.use('/uploads', (req, res, next) => {
+  // Set cache-control headers to prevent browser caching
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+}, express.static(path.join(__dirname, '../uploads')));
 
 // Health check
 app.get('/health', (req, res) => {

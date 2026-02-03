@@ -7,6 +7,7 @@ import { io } from '../server';
 import mongoose from 'mongoose';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { createNotification } from './notificationController';
+import { convertPhotoURLsToAbsolute } from '../utils/urlHelper';
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
@@ -212,7 +213,10 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
 
-    return res.json(groupsWithMetadata);
+    // Convert all photoURLs to absolute URLs
+    const groupsWithAbsoluteUrls = convertPhotoURLsToAbsolute(groupsWithMetadata, req);
+
+    return res.json(groupsWithAbsoluteUrls);
   } catch (error) {
     console.error('Error fetching chat groups:', error);
     return res.status(500).json({ message: 'Failed to fetch chat groups' });
@@ -237,7 +241,10 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(404).json({ message: 'Chat group not found or access denied' });
     }
 
-    return res.json(chatGroup);
+    // Convert photoURLs to absolute URLs
+    const groupWithAbsoluteUrls = convertPhotoURLsToAbsolute(chatGroup.toObject(), req);
+
+    return res.json(groupWithAbsoluteUrls);
   } catch (error) {
     console.error('Error fetching chat group:', error);
     return res.status(500).json({ message: 'Failed to fetch chat group' });
@@ -319,11 +326,12 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     chatGroup.updatedAt = new Date();
     await chatGroup.save();
 
-    // Emit to all group members via Socket.IO
+    // Emit to all group members via Socket.IO with absolute photoURLs
+    const messageWithAbsoluteUrls = convertPhotoURLsToAbsolute(message.toObject(), req);
     chatGroup.members.forEach((memberId) => {
       io.to(`user:${memberId.toString()}`).emit('chat:message:new', {
         groupId,
-        message
+        message: messageWithAbsoluteUrls
       });
     });
 
@@ -400,8 +408,14 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     });
 
+    // Convert photoURLs to absolute URLs
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(
+      messages.map(m => m.toObject()),
+      req
+    );
+
     return res.json({
-      messages: messages.reverse(), // Reverse to get chronological order
+      messages: messagesWithAbsoluteUrls.reverse(), // Reverse to get chronological order
       totalCount,
       hasMore: skip + limit < totalCount
     });

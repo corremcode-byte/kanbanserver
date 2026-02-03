@@ -243,7 +243,14 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
       permissions: user.permissions
     });
 
-    return successResponse(res, 'User retrieved successfully', user);
+    // Convert photoURL to absolute URL for client consumption
+    const userData = user.toObject();
+    if (userData.photoURL && !userData.photoURL.startsWith('http')) {
+      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 4001}`;
+      userData.photoURL = `${baseUrl.replace(/\/+$/, '')}${userData.photoURL}`;
+    }
+
+    return successResponse(res, 'User retrieved successfully', userData);
   } catch (error) {
     logger.error('Error getting current user:', error);
     return internalServerErrorResponse(res, 'Failed to get user');
@@ -257,7 +264,17 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
       .select('-password') // Remove password field if it exists
       .sort({ createdAt: -1 });
 
-    return successResponse(res, 'Users retrieved successfully', users);
+    // Convert photoURLs to absolute URLs for all users
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 4001}`;
+    const usersWithAbsoluteUrls = users.map(user => {
+      const userObj = user.toObject();
+      if (userObj.photoURL && !userObj.photoURL.startsWith('http')) {
+        userObj.photoURL = `${baseUrl.replace(/\/+$/, '')}${userObj.photoURL}`;
+      }
+      return userObj;
+    });
+
+    return successResponse(res, 'Users retrieved successfully', usersWithAbsoluteUrls);
   } catch (error) {
     logger.error('Error getting all users:', error);
     return internalServerErrorResponse(res, 'Failed to get users');
@@ -905,18 +922,36 @@ export const uploadAvatar = async (req: AuthenticatedRequest, res: Response) => 
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    // For now, we'll return an error indicating that file upload needs to be configured
-    // In production, you would:
-    // 1. Use multer to handle file uploads
-    // 2. Upload to Firebase Storage or AWS S3
-    // 3. Get the public URL
-    // 4. Update user's photoURL
+    // Check if file was uploaded
+    if (!req.file) {
+      return errorResponse(res, 'No file uploaded', 400);
+    }
 
-    return errorResponse(
-      res,
-      'Avatar upload requires file storage configuration (Firebase Storage or AWS S3). Please configure file storage first.',
-      501
-    );
+    // Construct the avatar URL
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+    // Update user's photoURL in database
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { photoURL: avatarUrl },
+      { new: true }
+    ).select('-password');
+
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    logger.info(`Avatar uploaded successfully for user ${req.user._id}`);
+
+    return successResponse(res, 'Avatar uploaded successfully', {
+      avatar: avatarUrl,
+      user: {
+        _id: user._id,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+      }
+    });
   } catch (error) {
     logger.error('Error uploading avatar:', error);
     return internalServerErrorResponse(res, 'Failed to upload avatar');

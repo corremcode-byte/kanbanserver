@@ -1,146 +1,99 @@
 import multer from 'multer';
-import { Request } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
 
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(process.cwd(), 'uploads');
-const taskAttachmentsDir = path.join(uploadsDir, 'task-attachments');
-const chatAttachmentsDir = path.join(uploadsDir, 'chat-attachments');
+// Create uploads directories if they don't exist
+const avatarsDir = path.join(__dirname, '../../uploads/avatars');
+const attachmentsDir = path.join(__dirname, '../../uploads/attachments');
 
-// Ensure directories exist
-[uploadsDir, taskAttachmentsDir, chatAttachmentsDir].forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-});
+if (!fs.existsSync(avatarsDir)) {
+  fs.mkdirSync(avatarsDir, { recursive: true });
+}
 
-// Configure multer for disk storage (files stored on VPS)
-const storage = multer.diskStorage({
+if (!fs.existsSync(attachmentsDir)) {
+  fs.mkdirSync(attachmentsDir, { recursive: true });
+}
+
+// Configure storage for avatars
+const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine destination based on route
-    // Log the request details for debugging
-    console.log('📂 Upload destination check:', {
-      baseUrl: req.baseUrl,
-      path: req.path,
-      url: req.url,
-      originalUrl: req.originalUrl
-    });
-
-    let dest = uploadsDir;
-    const fullPath = req.originalUrl || req.url;
-
-    if (req.baseUrl.includes('/task') || req.path.includes('/task') || fullPath.includes('/task')) {
-      dest = taskAttachmentsDir;
-      console.log('✅ Destination: task-attachments');
-    } else if (req.baseUrl.includes('/chat') || req.path.includes('/chat') || fullPath.includes('/chat')) {
-      dest = chatAttachmentsDir;
-      console.log('✅ Destination: chat-attachments');
-    } else {
-      console.log('⚠️ Destination: root uploads (no match)');
-    }
-
-    cb(null, dest);
+    cb(null, avatarsDir);
   },
   filename: (req, file, cb) => {
-    // Generate unique filename with UUID and timestamp
-    const uniqueId = uuidv4();
+    // Generate unique filename: userId-timestamp-originalname
+    const userId = (req as any).user?._id || 'unknown';
     const timestamp = Date.now();
     const ext = path.extname(file.originalname);
-    const baseName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9]/g, '_');
-    const fileName = `${timestamp}-${uniqueId}-${baseName}${ext}`;
-    cb(null, fileName);
+    const filename = `${userId}-${timestamp}${ext}`;
+    cb(null, filename);
   }
 });
 
-// File filter to restrict file types
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  // Allow common document and image types
-  const allowedTypes = [
-    // Images
+// Configure storage for general attachments (tasks, chat)
+const attachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, attachmentsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename: timestamp-originalname
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    const filename = `${timestamp}-${basename}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// File filter - only allow images (for avatars)
+const imageFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+
+  if (allowedMimes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.'));
+  }
+};
+
+// File filter - allow common file types (for attachments)
+const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMimes = [
     'image/jpeg',
     'image/jpg',
     'image/png',
     'image/gif',
     'image/webp',
-    'image/svg+xml',
-    'image/bmp',
-    'image/tiff',
-    'image/x-icon',
-    // Documents - PDF
     'application/pdf',
-    // Documents - Microsoft Word
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    // Documents - Microsoft Excel
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    // Documents - Microsoft PowerPoint
-    'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    // Documents - OpenOffice/LibreOffice
-    'application/vnd.oasis.opendocument.text',
-    'application/vnd.oasis.opendocument.spreadsheet',
-    'application/vnd.oasis.opendocument.presentation',
-    // Documents - Rich Text Format
-    'application/rtf',
-    'text/rtf',
-    // Text files
     'text/plain',
     'text/csv',
-    'text/markdown',
-    'text/x-markdown',
-    // Archives
-    'application/zip',
-    'application/x-zip-compressed',
-    'application/x-rar-compressed',
-    'application/x-7z-compressed',
-    'application/x-tar',
-    'application/gzip',
-    // Code files
-    'text/javascript',
-    'application/javascript',
-    'application/json',
-    'text/html',
-    'text/css',
-    'application/xml',
-    'text/xml',
-    // Programming languages
-    'text/x-python',
-    'text/x-java',
-    'text/x-c',
-    'text/x-c++',
-    'text/x-typescript',
-    // Video files (common formats)
-    'video/mp4',
-    'video/mpeg',
-    'video/quicktime',
-    'video/x-msvideo',
-    'video/webm',
-    // Audio files
-    'audio/mpeg',
-    'audio/mp3',
-    'audio/wav',
-    'audio/ogg',
-    'audio/webm',
-    // Other
-    'application/octet-stream' // Generic binary
   ];
 
-  if (allowedTypes.includes(file.mimetype)) {
+  if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`File type ${file.mimetype} is not allowed`));
+    cb(new Error('Invalid file type. Please upload images, PDFs, or common document formats.'));
   }
 };
 
-// Configure multer
-const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+// Create multer upload instance for avatars
+export const uploadAvatar = multer({
+  storage: avatarStorage,
+  fileFilter: imageFileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size (increased to support larger documents and media)
+    fileSize: 5 * 1024 * 1024, // 5MB max file size
+  }
+});
+
+// Create multer upload instance for general attachments (default export)
+const upload = multer({
+  storage: attachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max file size
   }
 });
 

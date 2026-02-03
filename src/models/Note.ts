@@ -1,9 +1,18 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
+export interface ISharedWith {
+  userId: mongoose.Types.ObjectId;
+  permission: 'view' | 'edit';
+  sharedAt: Date;
+}
+
 export interface INote extends Document {
   title: string;
-  description: string;
+  description: string; // Kept for backward compatibility
+  content?: string; // HTML content (primary field going forward)
+  contentType: 'plain' | 'html'; // Content format type
   userId: mongoose.Types.ObjectId;
+  sharedWith?: ISharedWith[]; // Users with access to this note
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,16 +27,41 @@ const NoteSchema = new Schema<INote>(
     },
     description: {
       type: String,
-      required: true,
+      required: false, // No longer required (backward compatibility)
       trim: true,
       maxlength: 10000
+    },
+    content: {
+      type: String,
+      required: false, // Either content or description must be present
+      maxlength: 50000 // HTML is more verbose
+    },
+    contentType: {
+      type: String,
+      enum: ['plain', 'html'],
+      default: 'plain'
     },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
       index: true
-    }
+    },
+    sharedWith: [{
+      userId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      permission: {
+        type: String,
+        enum: ['view', 'edit'],
+        default: 'view'
+      },
+      sharedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }]
   },
   {
     timestamps: true
