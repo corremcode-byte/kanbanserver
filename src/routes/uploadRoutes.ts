@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import upload from '../middleware/upload';
+import upload, { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware } from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,
@@ -47,7 +47,7 @@ const handleMulterError = (err: any, req: Request, res: Response, next: NextFunc
  * @desc    Upload attachment to task
  * @access  Private (project members/managers/owners)
  */
-router.post('/task/:taskId', upload.single('file'), handleMulterError, uploadTaskAttachment);
+router.post('/task/:taskId', uploadTaskMiddleware.single('file'), handleMulterError, uploadTaskAttachment);
 
 /**
  * @route   GET /api/upload/task/:taskId/attachments
@@ -68,6 +68,6 @@ router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
  * @desc    Upload attachment for chat message
  * @access  Private (chat group members only)
  */
-router.post('/chat/:groupId', upload.single('file'), handleMulterError, uploadChatAttachment);
+router.post('/chat/:groupId', uploadChatMiddleware.single('file'), handleMulterError, uploadChatAttachment);
 
 export default router;

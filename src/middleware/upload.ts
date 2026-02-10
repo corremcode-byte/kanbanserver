@@ -5,6 +5,8 @@ import fs from 'fs';
 // Create uploads directories if they don't exist
 const avatarsDir = path.join(__dirname, '../../uploads/avatars');
 const attachmentsDir = path.join(__dirname, '../../uploads/attachments');
+const taskAttachmentsDir = path.join(__dirname, '../../uploads/task-attachments');
+const chatAttachmentsDir = path.join(__dirname, '../../uploads/chat-attachments');
 
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir, { recursive: true });
@@ -12,6 +14,14 @@ if (!fs.existsSync(avatarsDir)) {
 
 if (!fs.existsSync(attachmentsDir)) {
   fs.mkdirSync(attachmentsDir, { recursive: true });
+}
+
+if (!fs.existsSync(taskAttachmentsDir)) {
+  fs.mkdirSync(taskAttachmentsDir, { recursive: true });
+}
+
+if (!fs.existsSync(chatAttachmentsDir)) {
+  fs.mkdirSync(chatAttachmentsDir, { recursive: true });
 }
 
 // Configure storage for avatars
@@ -40,6 +50,38 @@ const attachmentStorage = multer.diskStorage({
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext);
     const filename = `${timestamp}-${basename}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// Configure storage for task attachments
+const taskAttachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, taskAttachmentsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with UUID: timestamp-uuid-originalname
+    const timestamp = Date.now();
+    const uuid = require('uuid').v4();
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    const filename = `${timestamp}-${uuid}-${basename}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// Configure storage for chat attachments
+const chatAttachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, chatAttachmentsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with UUID: timestamp-uuid-originalname
+    const timestamp = Date.now();
+    const uuid = require('uuid').v4();
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    const filename = `${timestamp}-${uuid}-${basename}${ext}`;
     cb(null, filename);
   }
 });
@@ -94,6 +136,24 @@ const upload = multer({
   fileFilter: attachmentFileFilter,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB max file size
+  }
+});
+
+// Create multer upload instance for task attachments
+export const uploadTaskAttachment = multer({
+  storage: taskAttachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max file size for tasks
+  }
+});
+
+// Create multer upload instance for chat attachments
+export const uploadChatAttachment = multer({
+  storage: chatAttachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max file size for chat
   }
 });
 
