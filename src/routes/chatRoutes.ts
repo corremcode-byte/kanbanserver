@@ -18,7 +18,7 @@ import {
 import { uploadChatAttachment } from '../controllers/uploadController';
 import { authenticate } from '../middleware/auth';
 import { checkPermission } from '../middleware/permissions';
-import upload from '../middleware/upload';
+import upload, { uploadChatAttachment as uploadChatMiddleware } from '../middleware/upload';
 import { bucket } from '../config/firebase';
 
 const router = Router();
@@ -92,7 +92,7 @@ router.delete('/groups/:groupId', deleteChatGroup);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
-  const handler = upload.single('file');
+  const handler = uploadChatMiddleware.single('file');
   handler(req, res, (err: any) => {
     if (err) {
       console.error('🚨 Multer error:', err);
