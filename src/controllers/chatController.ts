@@ -319,8 +319,14 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
 
     const message = await Message.create(messageData);
 
-    // Populate sender info
+    // Populate sender info and replyTo
     await message.populate('senderId', 'displayName email photoURL');
+    if (replyTo) {
+      await message.populate({
+        path: 'replyTo',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      });
+    }
 
     // Update group's updatedAt timestamp
     chatGroup.updatedAt = new Date();
@@ -398,6 +404,10 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     })
       .populate('senderId', 'displayName email photoURL')
+      .populate({
+        path: 'replyTo',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
