@@ -581,6 +581,138 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
+// Toggle emoji reaction on a message
+export const toggleReaction = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+    const userId = req.user?._id;
+
+    if (!emoji) {
+      return res.status(400).json({ message: 'Emoji is required' });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Check if user already reacted with this emoji
+    const existingReactionIndex = message.reactions.findIndex(
+      (r) => r.userId.toString() === userId?.toString() && r.emoji === emoji
+    );
+
+    if (existingReactionIndex > -1) {
+      // Remove the reaction (toggle off)
+      message.reactions.splice(existingReactionIndex, 1);
+    } else {
+      // Remove any existing reaction from this user (one reaction per user)
+      const userReactionIndex = message.reactions.findIndex(
+        (r) => r.userId.toString() === userId?.toString()
+      );
+      if (userReactionIndex > -1) {
+        message.reactions.splice(userReactionIndex, 1);
+      }
+      // Add the new reaction
+      message.reactions.push({
+        userId: userId as any,
+        emoji,
+        createdAt: new Date()
+      });
+    }
+
+    await message.save();
+    await message.populate('senderId', 'displayName email photoURL');
+    await message.populate('reactions.userId', 'displayName email photoURL');
+
+    // Notify all group members via Socket.IO
+    const chatGroup = await ChatGroup.findById(message.groupId);
+    if (chatGroup) {
+      chatGroup.members.forEach((memberId) => {
+        io.to(`user:${memberId.toString()}`).emit('chat:message:reacted', {
+          groupId: message.groupId,
+          message
+        });
+      });
+    }
+
+    return res.json({ success: true, message });
+  } catch (error) {
+    console.error('Error toggling reaction:', error);
+    return res.status(500).json({ message: 'Failed to toggle reaction' });
+  }
+};
+
+// Toggle pin on a message
+export const togglePin = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user?._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    message.isPinned = !message.isPinned;
+    message.pinnedBy = message.isPinned ? (userId as any) : undefined;
+    await message.save();
+
+    await message.populate('senderId', 'displayName email photoURL');
+
+    // Notify all group members via Socket.IO
+    const chatGroup = await ChatGroup.findById(message.groupId);
+    if (chatGroup) {
+      chatGroup.members.forEach((memberId) => {
+        io.to(`user:${memberId.toString()}`).emit('chat:message:pinned', {
+          groupId: message.groupId,
+          message
+        });
+      });
+    }
+
+    return res.json({ success: true, message });
+  } catch (error) {
+    console.error('Error toggling pin:', error);
+    return res.status(500).json({ message: 'Failed to toggle pin' });
+  }
+};
+
+// Toggle star on a message (per-user)
+export const toggleStar = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user?._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    const starIndex = message.starredBy.findIndex(
+      (id) => id.toString() === userId?.toString()
+    );
+
+    if (starIndex > -1) {
+      message.starredBy.splice(starIndex, 1);
+    } else {
+      message.starredBy.push(userId as any);
+    }
+
+    await message.save();
+    await message.populate('senderId', 'displayName email photoURL');
+
+    return res.json({
+      success: true,
+      message,
+      isStarred: starIndex === -1
+    });
+  } catch (error) {
+    console.error('Error toggling star:', error);
+    return res.status(500).json({ message: 'Failed to toggle star' });
+  }
+};
+
 // Add members to a group (Admin, group creator, or user with manageGroupMembers permission)
 export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {

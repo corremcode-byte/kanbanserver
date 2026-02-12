@@ -8,6 +8,9 @@ import {
   markMessageAsRead,
   editMessage,
   deleteMessage,
+  toggleReaction,
+  togglePin,
+  toggleStar,
   addMembersToGroup,
   removeMemberFromGroup,
   updateChatGroup,
@@ -112,5 +115,10 @@ router.get('/groups/:groupId/messages', getGroupMessages);
 router.put('/messages/:messageId/read', markMessageAsRead);
 router.put('/messages/:messageId', editMessage);
 router.delete('/messages/:messageId', deleteMessage);
+
+// Reaction, Pin, Star routes
+router.post('/messages/:messageId/reaction', toggleReaction);
+router.put('/messages/:messageId/pin', togglePin);
+router.put('/messages/:messageId/star', toggleStar);
 
 export default router;
