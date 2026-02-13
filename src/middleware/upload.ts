@@ -100,24 +100,44 @@ const imageFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFil
 // File filter - allow common file types (for attachments)
 const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const allowedMimes = [
+    // Images
     'image/jpeg',
     'image/jpg',
     'image/png',
     'image/gif',
     'image/webp',
+    'image/bmp',
+    'image/svg+xml',
+    // Documents
     'application/pdf',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'text/plain',
     'text/csv',
+    // Videos
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'video/x-msvideo',
+    'video/x-matroska',
+    'video/mpeg',
+    // Audio
+    'audio/webm',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/ogg',
+    'audio/wav',
+    'audio/x-wav',
   ];
 
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Please upload images, PDFs, or common document formats.'));
+    cb(new Error('Invalid file type. Please upload images, videos, audio, PDFs, or common document formats.'));
   }
 };
 
@@ -153,7 +173,7 @@ export const uploadChatAttachment = multer({
   storage: chatAttachmentStorage,
   fileFilter: attachmentFileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size for chat
+    fileSize: 100 * 1024 * 1024, // 100MB max file size for chat (to support videos)
   }
 });
 
