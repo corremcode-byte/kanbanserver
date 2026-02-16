@@ -405,6 +405,7 @@ userSchema.statics.searchUsers = function(query: string, limit: number = 10): Pr
   return this.find({
     $and: [
       { isActive: true },
+      { role: { $ne: 'superadmin' } },
       {
         $or: [
           { username: { $regex: query, $options: 'i' } },

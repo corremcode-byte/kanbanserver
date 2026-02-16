@@ -431,18 +431,18 @@ export const getAuditLogs = async (req: any, res: Response) => {
       .limit(parsedLimit * 2) // Get more to filter out inactive users
       .lean();
 
-    // Filter out logs for deleted or inactive users
+    // Filter out logs for deleted, inactive, or superadmin users
     const activeLogs: any[] = [];
-    
+
     for (const log of auditLogs) {
       if (log.userId) {
-        const userId = typeof log.userId === 'object' && (log.userId as any)._id 
-          ? (log.userId as any)._id.toString() 
+        const userId = typeof log.userId === 'object' && (log.userId as any)._id
+          ? (log.userId as any)._id.toString()
           : log.userId.toString();
-        
-        // Check if user exists and is active
-        const user = await User.findById(userId).select('isActive').lean();
-        if (user && user.isActive !== false) {
+
+        // Check if user exists, is active, and is not a superadmin
+        const user = await User.findById(userId).select('isActive role').lean();
+        if (user && user.isActive !== false && user.role !== 'superadmin') {
           activeLogs.push(log);
           if (activeLogs.length >= parsedLimit) {
             break;

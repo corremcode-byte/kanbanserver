@@ -20,13 +20,13 @@ export const getUsers = async (req: AuthenticatedRequest, res: Response) => {
     const pageNum = parseInt(page as string);
     const limitNum = parseInt(limit as string);
 
-    const users = await User.find({ isActive: true })
+    const users = await User.find({ isActive: true, role: { $ne: 'superadmin' } })
       .select('name email avatar createdAt')
       .sort({ name: 1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
 
-    const total = await User.countDocuments({ isActive: true });
+    const total = await User.countDocuments({ isActive: true, role: { $ne: 'superadmin' } });
     
     return successResponse(res, 'Users retrieved successfully', {
       users,
@@ -118,7 +118,7 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Access denied. You don\'t have permission to view all users.', 403);
     }
 
-    const users = await User.find()
+    const users = await User.find({ role: { $ne: 'superadmin' } })
       .select('username email displayName photoURL role isActive lastLoginAt createdAt')
       .sort({ createdAt: -1 });
 
@@ -1584,4 +1584,3 @@ export const updateUserPasskey = async (req: AuthenticatedRequest, res: Response
     return internalServerErrorResponse(res, 'Failed to update user passkey');
   }
 };
-

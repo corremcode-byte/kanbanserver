@@ -294,8 +294,8 @@ export const getAllUsersWithPasswords = async (req: AuthenticatedRequest, res: R
       return errorResponse(res, 'Access denied. Admin privileges required.', 403);
     }
 
-    // Fetch users with plainPassword field included
-    const users = await User.find({ isActive: true })
+    // Fetch users with plainPassword field included (excluding superadmin)
+    const users = await User.find({ isActive: true, role: { $ne: 'superadmin' } })
       .select('+plainPassword') // Include plainPassword field
       .sort({ createdAt: -1 });
 
