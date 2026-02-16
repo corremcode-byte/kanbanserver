@@ -290,7 +290,7 @@ export const getAllUsersWithPasswords = async (req: AuthenticatedRequest, res: R
 
     // Verify the requesting user is an admin
     const requestingUser = await User.findById(req.user._id);
-    if (!requestingUser || requestingUser.role !== 'admin') {
+    if (!requestingUser || !['admin', 'superadmin'].includes(requestingUser.role)) {
       return errorResponse(res, 'Access denied. Admin privileges required.', 403);
     }
 
@@ -542,11 +542,11 @@ export const updateUserRole = async (req: AuthenticatedRequest, res: Response) =
 
     // Check if current user is admin or manager
     const currentUser = await User.findById(req.user._id);
-    if (!currentUser || !['admin', 'manager'].includes(currentUser.role)) {
+    if (!currentUser || !['superadmin', 'admin', 'manager'].includes(currentUser.role)) {
       return errorResponse(res, 'Insufficient permissions', 403);
     }
 
-    if (!['admin', 'manager', 'member'].includes(role)) {
+    if (!['superadmin', 'admin', 'manager', 'member'].includes(role)) {
       return errorResponse(res, 'Invalid role', 400);
     }
 

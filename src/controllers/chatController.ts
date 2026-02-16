@@ -981,6 +981,156 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
+// ==========================================
+// SUPER ADMIN ENDPOINTS
+// ==========================================
+
+// Super Admin: Get all users for chat surveillance
+export const superAdminGetAllUsers = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const users = await User.find({ isActive: true })
+      .select('_id displayName email photoURL username role')
+      .sort({ displayName: 1 });
+
+    // Convert photoURLs to absolute URLs
+    const usersWithAbsoluteUrls = convertPhotoURLsToAbsolute(
+      users.map(u => u.toObject()),
+      req
+    );
+
+    return res.json(usersWithAbsoluteUrls);
+  } catch (error) {
+    console.error('Error fetching users for super admin:', error);
+    return res.status(500).json({ message: 'Failed to fetch users' });
+  }
+};
+
+// Super Admin: Get all chat groups for a specific user
+export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    // Validate user exists
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Get ALL chat groups where this user is a member (including inactive for full visibility)
+    const chatGroups = await ChatGroup.find({
+      members: userId,
+      isActive: true
+    })
+      .populate('members', 'displayName email photoURL')
+      .populate('createdBy', 'displayName email')
+      .sort({ updatedAt: -1 });
+
+    // For each group, get last message and total message count
+    const groupsWithMetadata = await Promise.all(
+      chatGroups.map(async (group) => {
+        const lastMessage = await Message.findOne({
+          groupId: group._id,
+          isDeleted: false
+        })
+          .populate('senderId', 'displayName email photoURL')
+          .sort({ createdAt: -1 })
+          .lean();
+
+        const totalMessages = await Message.countDocuments({
+          groupId: group._id
+        });
+
+        const deletedMessages = await Message.countDocuments({
+          groupId: group._id,
+          isDeleted: true
+        });
+
+        const isSelfChat = group.members.length === 1 &&
+          group.members[0]._id.toString() === userId &&
+          group.name === 'Message Yourself';
+
+        return {
+          ...group.toObject(),
+          lastMessage: lastMessage || null,
+          totalMessages,
+          deletedMessages,
+          isSelfChat
+        };
+      })
+    );
+
+    // Sort by last message timestamp
+    groupsWithMetadata.sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt || a.updatedAt;
+      const bTime = b.lastMessage?.createdAt || b.updatedAt;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+
+    const groupsWithAbsoluteUrls = convertPhotoURLsToAbsolute(groupsWithMetadata, req);
+
+    return res.json({
+      user: {
+        _id: targetUser._id,
+        displayName: targetUser.displayName,
+        email: targetUser.email,
+        username: targetUser.username
+      },
+      groups: groupsWithAbsoluteUrls
+    });
+  } catch (error) {
+    console.error('Error fetching user chat groups for super admin:', error);
+    return res.status(500).json({ message: 'Failed to fetch user chat groups' });
+  }
+};
+
+// Super Admin: Get all messages for a group (INCLUDING deleted messages)
+export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const skip = parseInt(req.query.skip as string) || 0;
+
+    // Validate group exists
+    const chatGroup = await ChatGroup.findById(groupId);
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    // Get ALL messages INCLUDING deleted ones (no isDeleted filter)
+    const messages = await Message.find({ groupId })
+      .populate('senderId', 'displayName email photoURL')
+      .populate({
+        path: 'replyTo',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Get total count (including deleted)
+    const totalCount = await Message.countDocuments({ groupId });
+
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(
+      messages.map(m => m.toObject()),
+      req
+    );
+
+    // Get group details with members
+    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('createdBy', 'displayName email');
+
+    return res.json({
+      group: convertPhotoURLsToAbsolute(chatGroup.toObject(), req),
+      messages: messagesWithAbsoluteUrls.reverse(),
+      totalCount,
+      hasMore: skip + limit < totalCount
+    });
+  } catch (error) {
+    console.error('Error fetching group messages for super admin:', error);
+    return res.status(500).json({ message: 'Failed to fetch group messages' });
+  }
+};
+
 // Create or get a personal chat between two users
 export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Response) => {
   try {

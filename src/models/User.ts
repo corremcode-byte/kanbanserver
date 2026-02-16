@@ -19,7 +19,7 @@ export interface IUser extends Document {
   displayName: string;
   photoURL?: string;
   bio?: string;
-  role: 'admin' | 'manager' | 'member';
+  role: 'superadmin' | 'admin' | 'manager' | 'member';
   isActive: boolean;
   lastLoginAt: Date;
   pushSubscriptions?: IPushSubscription[];
@@ -187,7 +187,7 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   },
   role: {
     type: String,
-    enum: ['admin', 'manager', 'member'],
+    enum: ['superadmin', 'admin', 'manager', 'member'],
     default: 'member'
   },
   isActive: {
@@ -448,7 +448,7 @@ userSchema.pre('save', async function(next) {
 
 // Virtual for checking if user is manager or admin
 userSchema.virtual('isManager').get(function() {
-  return ['manager', 'admin'].includes(this.role);
+  return ['manager', 'admin', 'superadmin'].includes(this.role);
 });
 
 // Ensure virtual fields are serialized

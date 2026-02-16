@@ -16,10 +16,13 @@ import {
   updateChatGroup,
   deleteChatGroup,
   createOrGetPersonalChat,
-  getOrCreateSelfChatGroup
+  getOrCreateSelfChatGroup,
+  superAdminGetAllUsers,
+  superAdminGetUserChatGroups,
+  superAdminGetGroupMessages
 } from '../controllers/chatController';
 import { uploadChatAttachment } from '../controllers/uploadController';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireSuperAdmin } from '../middleware/auth';
 import { checkPermission } from '../middleware/permissions';
 import upload, { uploadChatAttachment as uploadChatMiddleware } from '../middleware/upload';
 import { bucket } from '../config/firebase';
@@ -81,6 +84,11 @@ router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) =>
     }
   });
 });
+
+// Super Admin routes (must be before parameterized routes to avoid conflicts)
+router.get('/superadmin/users', requireSuperAdmin, superAdminGetAllUsers);
+router.get('/superadmin/users/:userId/groups', requireSuperAdmin, superAdminGetUserChatGroups);
+router.get('/superadmin/groups/:groupId/messages', requireSuperAdmin, superAdminGetGroupMessages);
 
 // Chat group routes
 router.post('/groups', createChatGroup);

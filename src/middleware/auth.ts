@@ -68,7 +68,8 @@ export const authenticate = async (
       email: user.email,
       displayName: user.displayName,
       role: user.role,
-      isManager: ['manager', 'admin'].includes(user.role)
+      isManager: ['manager', 'admin', 'superadmin'].includes(user.role),
+      isSuperAdmin: user.role === 'superadmin'
     };
 
     console.log('Auth debug - Token verified, user found:', {
@@ -128,7 +129,8 @@ export const optionalAuth = async (
             email: user.email,
             displayName: user.displayName,
             role: user.role,
-            isManager: ['manager', 'admin'].includes(user.role)
+            isManager: ['manager', 'admin', 'superadmin'].includes(user.role),
+            isSuperAdmin: user.role === 'superadmin'
           };
         }
       }
@@ -154,7 +156,7 @@ export const requireManagerOrAdmin = (
     return;
   }
 
-  if (!['manager', 'admin'].includes(req.user.role)) {
+  if (!['manager', 'admin', 'superadmin'].includes(req.user.role)) {
     errorResponse(res, 'Manager or Admin access required', 403);
     return;
   }
@@ -172,8 +174,26 @@ export const requireAdmin = (
     return;
   }
 
-  if (req.user.role !== 'admin') {
+  if (!['admin', 'superadmin'].includes(req.user.role)) {
     errorResponse(res, 'Admin access required', 403);
+    return;
+  }
+
+  next();
+};
+
+export const requireSuperAdmin = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  if (!req.user) {
+    errorResponse(res, 'Authentication required', 401);
+    return;
+  }
+
+  if (req.user.role !== 'superadmin') {
+    errorResponse(res, 'Super Admin access required', 403);
     return;
   }
 
