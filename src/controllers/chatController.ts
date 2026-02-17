@@ -1016,10 +1016,9 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Get ALL chat groups where this user is a member (including inactive for full visibility)
+    // Get ALL chat groups where this user is a member (including deleted/inactive for full visibility)
     const chatGroups = await ChatGroup.find({
-      members: userId,
-      isActive: true
+      members: userId
     })
       .populate('members', 'displayName email photoURL')
       .populate('createdBy', 'displayName email')
