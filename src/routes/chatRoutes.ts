@@ -17,6 +17,7 @@ import {
   deleteChatGroup,
   createOrGetPersonalChat,
   getOrCreateSelfChatGroup,
+  getPlatformUsersForChat,
   superAdminGetAllUsers,
   superAdminGetUserChatGroups,
   superAdminGetGroupMessages
@@ -89,6 +90,9 @@ router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) =>
 router.get('/superadmin/users', requireSuperAdmin, superAdminGetAllUsers);
 router.get('/superadmin/users/:userId/groups', requireSuperAdmin, superAdminGetUserChatGroups);
 router.get('/superadmin/groups/:groupId/messages', requireSuperAdmin, superAdminGetGroupMessages);
+
+// Platform users with chat permission (for forward modal)
+router.get('/platform-users', getPlatformUsersForChat);
 
 // Chat group routes
 router.post('/groups', createChatGroup);

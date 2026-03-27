@@ -982,6 +982,45 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
 };
 
 // ==========================================
+// PLATFORM USERS FOR FORWARDING
+// ==========================================
+
+// Get all platform users with their chat permission status (for forward modal)
+export const getPlatformUsersForChat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?._id;
+    if (!currentUserId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const users = await User.find({
+      _id: { $ne: currentUserId },
+      isActive: true,
+      role: { $ne: 'superadmin' }
+    }).select('_id displayName email photoURL permissions');
+
+    const usersWithPermission = users.map(user => {
+      const chatPerms = user.permissions?.modules?.chat;
+      const hasChatPermission = chatPerms?.view === true;
+      return {
+        _id: user._id,
+        displayName: user.displayName,
+        email: user.email,
+        photoURL: user.photoURL,
+        hasChatPermission
+      };
+    });
+
+    const usersWithAbsoluteUrls = convertPhotoURLsToAbsolute(usersWithPermission, req);
+
+    return res.json({ users: usersWithAbsoluteUrls });
+  } catch (error) {
+    console.error('Error getting platform users for chat:', error);
+    return res.status(500).json({ message: 'Failed to get platform users' });
+  }
+};
+
+// ==========================================
 // SUPER ADMIN ENDPOINTS
 // ==========================================
 
