@@ -494,6 +494,12 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ message: 'Cannot edit a deleted message' });
     }
 
+    // Check if message is older than 24 hours
+    const hoursSinceCreation = (Date.now() - new Date(message.createdAt).getTime()) / (1000 * 60 * 60);
+    if (hoursSinceCreation > 24) {
+      return res.status(400).json({ message: 'Cannot edit a message older than 24 hours' });
+    }
+
     // Update message content
     message.encryptedContent = encryptedContent;
     message.nonce = nonce;
