@@ -435,6 +435,62 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+// Get starred messages for current user in a group
+export const getGroupStarredMessages = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const skip = parseInt(req.query.skip as string) || 0;
+
+    // Check if user is a member of the group
+    const chatGroup = await ChatGroup.findOne({
+      _id: groupId,
+      members: userId,
+      isActive: true
+    });
+
+    if (!chatGroup) {
+      return res.status(403).json({ message: 'Not authorized to view messages in this group' });
+    }
+
+    // Get messages starred by current user
+    const messages = await Message.find({
+      groupId,
+      isDeleted: false,
+      starredBy: userId
+    })
+      .populate('senderId', 'displayName email photoURL')
+      .populate({
+        path: 'replyTo',
+        populate: { path: 'senderId', select: 'displayName email photoURL' }
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const totalCount = await Message.countDocuments({
+      groupId,
+      isDeleted: false,
+      starredBy: userId
+    });
+
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(
+      messages.map(m => m.toObject()),
+      req
+    );
+
+    return res.json({
+      messages: messagesWithAbsoluteUrls,
+      totalCount,
+      hasMore: skip + limit < totalCount
+    });
+  } catch (error) {
+    console.error('Error fetching starred messages:', error);
+    return res.status(500).json({ message: 'Failed to fetch starred messages' });
+  }
+};
+
 // Mark message as read
 export const markMessageAsRead = async (req: AuthenticatedRequest, res: Response) => {
   try {
