@@ -18,6 +18,20 @@ export interface ITaskComment {
   updatedAt?: Date;
 }
 
+export interface ISubtask {
+  id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  status?: 'todo' | 'in-progress' | 'completed';
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  assigneeId?: mongoose.Types.ObjectId;
+  dueDate?: Date;
+  reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
+  customReminderMinutes?: number;
+  linkedTaskId?: mongoose.Types.ObjectId;
+}
+
 export interface ITask extends Document {
   title: string;
   description?: string;
@@ -32,11 +46,15 @@ export interface ITask extends Document {
   assignedAt?: Date; // Track when task was first assigned
   createdBy: mongoose.Types.ObjectId;
   dueDate: Date;
+  isSubtask?: boolean;
+  parentTaskId?: mongoose.Types.ObjectId;
   completedAt?: Date; // Track when task was marked as completed
-  reminderFrequency?: 'none' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours';
+  reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
+  customReminderMinutes?: number;
   lastReminderSent?: Date;
   attachments: ITaskAttachment[];
   comments: ITaskComment[];
+  subtasks: ISubtask[];
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -108,14 +126,28 @@ const TaskSchema = new Schema<ITask>({
     type: Date,
     required: true
   },
+  isSubtask: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  parentTaskId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Task',
+    index: true
+  },
   completedAt: {
     type: Date,
     index: true
   },
   reminderFrequency: {
     type: String,
-    enum: ['none', '1hour', '3hours', '12hours', '24hours', '48hours'],
+    enum: ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'],
     default: '24hours'
+  },
+  customReminderMinutes: {
+    type: Number,
+    min: 1
   },
   lastReminderSent: { type: Date },
   attachments: [{
@@ -133,6 +165,19 @@ const TaskSchema = new Schema<ITask>({
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date }
+  }],
+  subtasks: [{
+    id: { type: String, required: true },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true },
+    completed: { type: Boolean, default: false },
+    status: { type: String, enum: ['todo', 'in-progress', 'completed'], default: 'todo' },
+    priority: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+    assigneeId: { type: Schema.Types.ObjectId, ref: 'User' },
+    dueDate: { type: Date },
+    reminderFrequency: { type: String, enum: ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'], default: 'none' },
+    customReminderMinutes: { type: Number, min: 1 },
+    linkedTaskId: { type: Schema.Types.ObjectId, ref: 'Task' }
   }],
   order: { type: Number, default: 0 }
 }, {

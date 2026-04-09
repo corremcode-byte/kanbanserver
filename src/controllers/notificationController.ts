@@ -135,7 +135,7 @@ export const deleteNotification = async (req: AuthenticatedRequest, res: Respons
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added' | 'note_reminder';
   title: string;
   message: string;
   metadata?: {
@@ -148,6 +148,8 @@ export const createNotification = async (data: {
     actionByName?: string;
     groupId?: string | mongoose.Types.ObjectId;
     groupName?: string;
+    noteId?: string | mongoose.Types.ObjectId;
+    noteTitle?: string;
   };
 }) => {
   try {
@@ -171,6 +173,8 @@ export const createNotification = async (data: {
       let url = '/dashboard';
       if (data.metadata?.groupId) {
         url = `/chat?groupId=${data.metadata.groupId}`;
+      } else if (data.metadata?.noteId) {
+        url = '/notes';
       } else if (data.metadata?.projectId) {
         url = `/projects/${data.metadata.projectId}`;
       }
@@ -186,6 +190,7 @@ export const createNotification = async (data: {
           projectId: data.metadata?.projectId?.toString(),
           taskId: data.metadata?.taskId?.toString(),
           groupId: data.metadata?.groupId?.toString(),
+          noteId: data.metadata?.noteId?.toString(),
         },
         tag: `${data.type}-${notification._id}`,
         requireInteraction: ['project_invitation', 'task_assigned', 'chat_message'].includes(data.type),

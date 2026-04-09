@@ -371,12 +371,16 @@ export const getMyPermission = async (req: AuthenticatedRequest, res: Response) 
       : project.ownerId.toString();
 
     const isOwner = ownerId === req.user._id;
+    const isInOwners = project.owners && project.owners.some((owner: any) => {
+      const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
+      return owId === req.user._id;
+    });
 
     // Get user's global permissions
     const user = await User.findById(req.user._id);
     const globalPermissions = user?.permissions || {};
 
-    if (isOwner) {
+    if (isOwner || isInOwners) {
       // Return owner permissions
       // For personal projects, disable canManageMembers
       const ownerPermissions = ProjectPermission.getDefaultPermissions('owner');

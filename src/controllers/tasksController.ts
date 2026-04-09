@@ -19,6 +19,39 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
+/** Embedded subtasks: require non-empty title; assignee optional but must be owner/member/manager when set. */
+function normalizeEmbeddedSubtasks(subtasks: unknown, validAssigneeIds: string[]) {
+  if (!Array.isArray(subtasks)) return [];
+  return subtasks
+    .filter(
+      (subtask: any) =>
+        subtask &&
+        typeof subtask.title === 'string' &&
+        subtask.title.trim()
+    )
+    .map((subtask: any) => {
+      const rawAssignee = subtask.assigneeId ? String(subtask.assigneeId) : undefined;
+      const assigneeId =
+        rawAssignee && validAssigneeIds.includes(rawAssignee) ? rawAssignee : undefined;
+      return {
+        id: subtask.id || `subtask-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        title: subtask.title.trim(),
+        description: subtask.description?.trim() || undefined,
+        completed: Boolean(subtask.completed),
+        status: subtask.status || (subtask.completed ? 'completed' : 'todo'),
+        priority: subtask.priority || 'medium',
+        assigneeId,
+        dueDate: subtask.dueDate ? new Date(subtask.dueDate) : undefined,
+        reminderFrequency: subtask.reminderFrequency || 'none',
+        customReminderMinutes:
+          subtask.reminderFrequency === 'custom'
+            ? Number(subtask.customReminderMinutes || 1)
+            : undefined,
+        linkedTaskId: subtask.linkedTaskId || undefined
+      };
+    });
+}
+
 export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { projectId } = req.query;
@@ -78,6 +111,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         // Can view all tasks in the project
         tasks = await Task.find({
           projectId,
+          isSubtask: { $ne: true },
         }).populate('projectId', 'name')
           .populate('assignees', 'displayName email avatar photoURL')
           .populate('assignedTo', 'displayName email avatar photoURL')
@@ -87,6 +121,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         // Can only view tasks assigned to them or created by them
         tasks = await Task.find({
           projectId,
+          isSubtask: { $ne: true },
           $or: [
             { assignedTo: req.user._id },
             { assignees: req.user._id },
@@ -139,6 +174,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
       ];
 
       tasks = await Task.find({
+        isSubtask: { $ne: true },
         $or: [
           // Tasks assigned to the user
           { assignedTo: req.user._id },
@@ -214,7 +250,20 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency } = req.body;
+    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency, customReminderMinutes, subtasks, isSubtask, parentTaskId } = req.body;
+    if (reminderFrequency !== undefined) {
+      const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
+      if (!validFrequencies.includes(reminderFrequency)) {
+        return errorResponse(res, 'Invalid reminder frequency', 400);
+      }
+      if (reminderFrequency === 'custom') {
+        const customMinutes = Number(customReminderMinutes);
+        if (!Number.isFinite(customMinutes) || customMinutes < 1) {
+          return errorResponse(res, 'Custom reminder minutes must be at least 1', 400);
+        }
+      }
+    }
+
 
     if (!title?.trim()) {
       return errorResponse(res, 'Task title is required', 400);
@@ -291,6 +340,9 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       validatedAssignees = [assignedTo];
     }
 
+    const subtaskAssigneeWhitelist = [...new Set([...allValidUserIds, ownerId])];
+    const validatedSubtasks = normalizeEmbeddedSubtasks(subtasks, subtaskAssigneeWhitelist);
+
     // Get the highest order number for the list column
     const highestOrderTask = await Task.findOne({
       projectId,
@@ -311,12 +363,23 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       status: status || validatedListId || 'todo', // For backward compatibility
       priority: priority || 'medium',
       dueDate: new Date(dueDate),
+      isSubtask: Boolean(isSubtask),
+      parentTaskId: parentTaskId || undefined,
       reminderFrequency: reminderFrequency || '24hours', // Default to 24 hours if not specified
+      customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined,
+      subtasks: validatedSubtasks,
       createdBy: req.user._id,
       order
     });
 
     await task.save();
+    if (validatedSubtasks.length > 0) {
+      console.log('[tasks] Subtasks created and saved successfully', {
+        taskId: task._id.toString(),
+        count: validatedSubtasks.length,
+        subtasks: validatedSubtasks.map((s) => ({ id: s.id, title: s.title, assigneeId: s.assigneeId }))
+      });
+    }
     await task.populate('assignedTo', 'displayName email avatar photoURL');
     await task.populate('assignees', 'displayName email avatar photoURL');
     await task.populate('assignedBy', 'displayName email avatar photoURL');
@@ -507,6 +570,11 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
+    const subtaskAssigneeWhitelist = [...new Set([...allValidUserIds, ownerId])];
+    if (Array.isArray(updates.subtasks)) {
+      updates.subtasks = normalizeEmbeddedSubtasks(updates.subtasks, subtaskAssigneeWhitelist);
+    }
+
     // Normalize status values (convert old format to new format)
     const normalizeStatus = (status: string): string => {
       const normalized = status.toLowerCase().trim();
@@ -547,9 +615,18 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
     // Validate reminderFrequency if provided
     if (updates.reminderFrequency !== undefined) {
-      const validFrequencies = ['none', '1hour', '3hours', '12hours', '24hours', '48hours'];
+      const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
       if (!validFrequencies.includes(updates.reminderFrequency)) {
         return errorResponse(res, 'Invalid reminder frequency', 400);
+      }
+      if (updates.reminderFrequency === 'custom') {
+        const customMinutes = Number(updates.customReminderMinutes);
+        if (!Number.isFinite(customMinutes) || customMinutes < 1) {
+          return errorResponse(res, 'Custom reminder minutes must be at least 1', 400);
+        }
+        updates.customReminderMinutes = customMinutes;
+      } else {
+        updates.customReminderMinutes = undefined;
       }
     }
 
@@ -565,6 +642,15 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!task) {
       return notFoundResponse(res, 'Task not found');
+    }
+
+    if (Array.isArray(req.body.subtasks)) {
+      const st = task.subtasks || [];
+      console.log('[tasks] Subtasks saved successfully', {
+        taskId: task._id.toString(),
+        count: st.length,
+        subtasks: st.map((s: any) => ({ id: s.id, title: s.title, assigneeId: s.assigneeId }))
+      });
     }
 
     // Log audit action

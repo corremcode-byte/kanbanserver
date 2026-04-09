@@ -79,9 +79,29 @@ export const checkPermission = (permission: Permission) => {
         return owId === userId;
       });
 
-      // Owners always have all permissions
-      if (isOwner || isInOwners) {
+      // Main owner always has all permissions
+      if (isOwner) {
         return next();
+      }
+
+      // Co-owner permission model:
+      // - edit: can manage project-level operations
+      // - view: does not get owner management powers
+      if (isInOwners) {
+        const coOwnerPermissions = project.coOwnerPermissions as Map<string, 'view' | 'edit'> | Record<string, 'view' | 'edit'> | undefined;
+        let coOwnerPermission: 'view' | 'edit' = 'edit';
+
+        if (coOwnerPermissions) {
+          if (typeof (coOwnerPermissions as Map<string, 'view' | 'edit'>).get === 'function') {
+            coOwnerPermission = (coOwnerPermissions as Map<string, 'view' | 'edit'>).get(userId) || 'edit';
+          } else {
+            coOwnerPermission = (coOwnerPermissions as Record<string, 'view' | 'edit'>)[userId] || 'edit';
+          }
+        }
+
+        if (coOwnerPermission === 'edit') {
+          return next();
+        }
       }
 
       // Check global permissions first (for users with manage all projects permission)
@@ -445,9 +465,9 @@ export const checkCanDeleteProject = async (req: AuthenticatedRequest, res: Resp
       isInOwners
     });
 
-    // Owners can delete their projects
-    if (isOwner || isInOwners) {
-      console.log('✅ User is owner - allowing delete');
+    // Only main/original owner can delete project
+    if (isOwner) {
+      console.log('✅ User is main owner - allowing delete');
       return next();
     }
 

@@ -49,6 +49,18 @@ const isProjectManager = (project: any, userId: string): boolean => {
   return isOwner || isInOwners || isInManagers;
 };
 
+const getCoOwnerPermission = (project: any, userId: string): 'view' | 'edit' => {
+  const coOwnerPermissions = project?.coOwnerPermissions as Map<string, 'view' | 'edit'> | Record<string, 'view' | 'edit'> | undefined;
+
+  if (!coOwnerPermissions) return 'edit';
+
+  if (typeof (coOwnerPermissions as Map<string, 'view' | 'edit'>).get === 'function') {
+    return (coOwnerPermissions as Map<string, 'view' | 'edit'>).get(userId) || 'edit';
+  }
+
+  return (coOwnerPermissions as Record<string, 'view' | 'edit'>)[userId] || 'edit';
+};
+
 export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { page = 1, limit = 20, status, search } = req.query;
@@ -58,6 +70,7 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
     let query: any = {
       $or: [
         { ownerId: req.user._id },
+        { owners: req.user._id },
         { members: req.user._id },
         { managers: req.user._id }
       ]
@@ -106,6 +119,15 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
         const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
         return owId === userId;
       });
+      let coOwnerPerm: 'view' | 'edit' = 'edit';
+      if (projectObj.coOwnerPermissions) {
+        const coPerms: any = projectObj.coOwnerPermissions;
+        if (typeof coPerms.get === 'function') {
+          coOwnerPerm = coPerms.get(userId) || 'edit';
+        } else {
+          coOwnerPerm = coPerms[userId] || 'edit';
+        }
+      }
 
       const isInManagers = projectObj.managers && projectObj.managers.some((manager: any) => {
         const managerId = typeof manager === 'object' && manager._id ? manager._id.toString() : manager.toString();
@@ -113,8 +135,10 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
       });
 
       let userRole: 'owner' | 'manager' | 'member' = 'member';
-      if (isOwner || isInOwners) {
+      if (isOwner) {
         userRole = 'owner';
+      } else if (isInOwners) {
+        userRole = coOwnerPerm === 'edit' ? 'co-owner' as any : 'co-owner-view' as any;
       } else if (isInManagers) {
         userRole = 'manager';
       }
@@ -887,15 +911,28 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
 export const addOwner = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id, userId } = req.params;
+    const { permission = 'edit' } = req.body as { permission?: 'view' | 'edit' };
 
     const project = await Project.findById(id);
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner can add another owner
-    if (project.ownerId.toString() !== req.user._id) {
+    const mainOwnerId = project.ownerId.toString();
+    const isMainOwner = mainOwnerId === req.user._id;
+    const isInOwners = project.owners && project.owners.some((owner: any) => {
+      const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
+      return owId === req.user._id;
+    });
+    const requesterCoOwnerPermission = isInOwners ? getCoOwnerPermission(project, req.user._id) : 'edit';
+
+    // Main owner can always add co-owner. Co-owner needs edit permission.
+    if (!isMainOwner && (!isInOwners || requesterCoOwnerPermission !== 'edit')) {
       return errorResponse(res, 'Only project owner can add owners', 403);
+    }
+
+    if (!['view', 'edit'].includes(permission)) {
+      return errorResponse(res, 'Invalid co-owner permission. Use "view" or "edit"', 400);
     }
 
     // Check if user is a member of the project
@@ -920,13 +957,26 @@ export const addOwner = async (req: AuthenticatedRequest, res: Response) => {
     // Add user to owners array
     project.owners.push(new Types.ObjectId(userId));
 
-    // Also add to managers array if not already there
-    const isInManagers = project.managers.some((m: any) => {
-      const managerId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
-      return managerId === userId;
-    });
-    if (!isInManagers) {
-      project.managers.push(new Types.ObjectId(userId));
+    // Store permission level for this co-owner
+    if (!project.coOwnerPermissions) {
+      project.coOwnerPermissions = {} as any;
+    }
+    if (typeof (project.coOwnerPermissions as any).set === 'function') {
+      (project.coOwnerPermissions as any).set(userId, permission);
+    } else {
+      (project.coOwnerPermissions as any)[userId] = permission;
+    }
+
+    // For "edit" co-owners, also add to managers array.
+    // "view" co-owners stay out of managers and only remain in owners.
+    if (permission === 'edit') {
+      const isInManagers = project.managers.some((m: any) => {
+        const managerId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
+        return managerId === userId;
+      });
+      if (!isInManagers) {
+        project.managers.push(new Types.ObjectId(userId));
+      }
     }
 
     // Remove from members array if present
@@ -960,13 +1010,16 @@ export const removeOwner = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner can remove another owner
-    if (project.ownerId.toString() !== req.user._id) {
+    const mainOwnerId = project.ownerId.toString();
+    const isMainOwner = mainOwnerId === req.user._id;
+
+    // Only main/original owner can remove owners
+    if (!isMainOwner) {
       return errorResponse(res, 'Only project owner can remove owners', 403);
     }
 
     // Cannot remove the original owner
-    if (project.ownerId.toString() === userId) {
+    if (mainOwnerId === userId) {
       return errorResponse(res, 'Cannot remove the original project owner', 400);
     }
 
@@ -978,6 +1031,15 @@ export const removeOwner = async (req: AuthenticatedRequest, res: Response) => {
           : owner.toString();
         return ownerId !== userId;
       });
+    }
+
+    // Remove stored co-owner permission
+    if (project.coOwnerPermissions) {
+      if (typeof (project.coOwnerPermissions as any).delete === 'function') {
+        (project.coOwnerPermissions as any).delete(userId);
+      } else {
+        delete (project.coOwnerPermissions as any)[userId];
+      }
     }
 
     await project.save();
@@ -1010,8 +1072,15 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only the current owner can transfer ownership
-    if (project.ownerId.toString() !== req.user._id) {
+    const mainOwnerId = project.ownerId.toString();
+    const isMainOwner = mainOwnerId === req.user._id;
+    const isInOwners = project.owners && project.owners.some((owner: any) => {
+      const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
+      return owId === req.user._id;
+    });
+
+    // Only main/original owner can transfer ownership
+    if (!isMainOwner) {
       return errorResponse(res, 'Only the project owner can transfer ownership', 403);
     }
 

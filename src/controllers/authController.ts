@@ -602,7 +602,7 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
         status: 'completed'
       }),
       Project.countDocuments({
-        $or: [{ ownerId: userId }, { members: userId }, { managers: userId }],
+        $or: [{ ownerId: userId }, { owners: userId }, { members: userId }, { managers: userId }],
         status: 'active'
       }),
       Task.find({
@@ -620,7 +620,7 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
         .populate('assignees', 'displayName email avatar photoURL')
         .populate('assignedTo', 'displayName email avatar photoURL'),
       Project.find({
-        $or: [{ ownerId: userId }, { members: userId }, { managers: userId }],
+        $or: [{ ownerId: userId }, { owners: userId }, { members: userId }, { managers: userId }],
         status: { $ne: 'archived' } // Only return active projects
       })
         .sort({ updatedAt: -1 })
@@ -635,10 +635,17 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
       const projectObj = project.toObject();
       const userIdStr = userId.toString();
       const ownerIdStr = project.ownerId.toString();
+      const isInOwners = projectObj.owners && projectObj.owners.some((o: any) => {
+        const ownerId = typeof o === 'object' && o._id ? o._id.toString() : o.toString();
+        return ownerId === userIdStr;
+      });
+      const coOwnerPerm = (projectObj.coOwnerPermissions && projectObj.coOwnerPermissions[userIdStr]) || 'edit';
 
       let userRole = 'member';
       if (ownerIdStr === userIdStr) {
         userRole = 'owner';
+      } else if (isInOwners) {
+        userRole = coOwnerPerm === 'edit' ? 'co-owner' : 'co-owner-view';
       } else if (projectObj.managers && projectObj.managers.some((m: any) => {
         const managerId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
         return managerId === userIdStr;

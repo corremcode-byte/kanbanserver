@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added' | 'note_reminder';
   title: string;
   message: string;
   read: boolean;
@@ -31,7 +31,7 @@ const NotificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update', 'chat_message', 'group_added'],
+      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update', 'chat_message', 'group_added', 'note_reminder'],
       required: true,
     },
     title: {
@@ -57,6 +57,8 @@ const NotificationSchema = new Schema<INotification>(
       actionByName: String,
       groupId: { type: Schema.Types.ObjectId, ref: 'ChatGroup' },
       groupName: String,
+      noteId: { type: Schema.Types.ObjectId, ref: 'Note' },
+      noteTitle: String,
     },
     readAt: Date,
   },

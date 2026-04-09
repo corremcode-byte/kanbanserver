@@ -1,9 +1,11 @@
 import cron, { ScheduledTask } from 'node-cron';
 import Task from '../models/Task';
+import Note from '../models/Note';
 import User from '../models/User';
 import Project from '../models/Project';
 import { emailService } from './emailService';
 import { logger } from '../utils/logger';
+import { createNotification } from '../controllers/notificationController';
 
 class CronService {
   private tasks: Map<string, ScheduledTask> = new Map();
@@ -32,18 +34,19 @@ class CronService {
    * Runs every hour
    */
   private startTaskDeadlineReminders() {
-    // Run every hour at the start of the hour
-    const task = cron.schedule('0 * * * *', async () => {
+    // Run every 15 minutes to support shorter reminder intervals
+    const task = cron.schedule('*/15 * * * *', async () => {
       try {
         logger.info('Running task deadline reminder check...');
         await this.checkTaskDeadlines();
+        await this.checkNoteReminders();
       } catch (error) {
         logger.error('Error in task deadline reminder cron job:', error);
       }
     });
 
     this.tasks.set('taskDeadlineReminders', task);
-    logger.info('Task deadline reminder cron job scheduled (runs every hour)');
+    logger.info('Task/note reminder cron job scheduled (runs every 15 minutes)');
   }
 
   /**
@@ -79,6 +82,9 @@ class CronService {
         let frequencyMinutes = 1440; // default (24 hours in minutes)
 
         switch (reminderFreq) {
+          case '30minutes':
+            frequencyMinutes = 30;
+            break;
           case '1hour':
             frequencyMinutes = 60;
             break;
@@ -93,6 +99,11 @@ class CronService {
             break;
           case '48hours':
             frequencyMinutes = 2880;
+            break;
+          case 'custom':
+            frequencyMinutes = Number((task as any).customReminderMinutes) > 0
+              ? Number((task as any).customReminderMinutes)
+              : 1440;
             break;
         }
 
@@ -169,11 +180,88 @@ class CronService {
   }
 
   /**
+   * Check notes and create in-app/push reminders based on configured frequency.
+   */
+  private async checkNoteReminders() {
+    const now = new Date();
+
+    try {
+      const notes = await Note.find({
+        reminderDate: { $exists: true, $ne: null },
+        reminderFrequency: { $ne: 'none' }
+      }).lean();
+
+      for (const note of notes) {
+        const reminderDate = new Date(note.reminderDate!);
+        const reminderFreq = note.reminderFrequency || 'none';
+        if (reminderFreq === 'none') continue;
+
+        let frequencyMinutes = 1440;
+        switch (reminderFreq) {
+          case '30minutes':
+            frequencyMinutes = 30;
+            break;
+          case '1hour':
+            frequencyMinutes = 60;
+            break;
+          case '3hours':
+            frequencyMinutes = 180;
+            break;
+          case '12hours':
+            frequencyMinutes = 720;
+            break;
+          case '24hours':
+            frequencyMinutes = 1440;
+            break;
+          case '48hours':
+            frequencyMinutes = 2880;
+            break;
+          case 'custom':
+            frequencyMinutes = Number(note.customReminderMinutes) > 0
+              ? Number(note.customReminderMinutes)
+              : 1440;
+            break;
+        }
+
+        let shouldSend = false;
+        if (note.lastReminderSent) {
+          const lastReminder = new Date(note.lastReminderSent);
+          const minutesSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60));
+          shouldSend = minutesSinceLastReminder >= frequencyMinutes;
+        } else {
+          const minutesUntilReminder = Math.floor((reminderDate.getTime() - now.getTime()) / (1000 * 60));
+          shouldSend = minutesUntilReminder <= frequencyMinutes;
+        }
+
+        if (!shouldSend) continue;
+
+        await createNotification({
+          userId: note.userId,
+          type: 'note_reminder',
+          title: 'Note Reminder',
+          message: `Reminder for note "${note.title}"`,
+          metadata: {
+            noteId: note._id as any,
+            noteTitle: note.title
+          }
+        });
+
+        await Note.findByIdAndUpdate(note._id, {
+          lastReminderSent: new Date()
+        });
+      }
+    } catch (error) {
+      logger.error('Error checking note reminders:', error);
+    }
+  }
+
+  /**
    * Manually trigger task deadline check (for testing)
    */
   async manualCheckDeadlines() {
     logger.info('Manually triggering task deadline check...');
     await this.checkTaskDeadlines();
+    await this.checkNoteReminders();
   }
 }
 

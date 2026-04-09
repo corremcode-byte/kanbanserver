@@ -95,7 +95,26 @@ export const createNote = async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    const { title, description, content, contentType } = req.body;
+    const { title, description, content, contentType, reminderDate, reminderFrequency, customReminderMinutes } = req.body;
+    if (reminderFrequency !== undefined) {
+      const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
+      if (!validFrequencies.includes(reminderFrequency)) {
+        errorResponse(res, 'Invalid reminder frequency', 400);
+        return;
+      }
+      if (reminderFrequency !== 'none' && !reminderDate) {
+        errorResponse(res, 'Reminder date is required when reminders are enabled', 400);
+        return;
+      }
+      if (reminderFrequency === 'custom') {
+        const customMinutes = Number(customReminderMinutes);
+        if (!Number.isFinite(customMinutes) || customMinutes < 1) {
+          errorResponse(res, 'Custom reminder minutes must be at least 1', 400);
+          return;
+        }
+      }
+    }
+
 
     // Validate title
     if (!title || title.trim().length === 0) {
@@ -128,7 +147,10 @@ export const createNote = async (req: AuthenticatedRequest, res: Response): Prom
       content: sanitizedContent,
       description: type === 'plain' ? sanitizedContent : undefined, // Backward compatibility
       contentType: type,
-      userId: req.user._id
+      userId: req.user._id,
+      reminderDate: reminderDate ? new Date(reminderDate) : undefined,
+      reminderFrequency: reminderFrequency || 'none',
+      customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined
     });
 
     await note.save();
@@ -151,7 +173,26 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
     }
 
     const { id } = req.params;
-    const { title, description, content, contentType } = req.body;
+    const { title, description, content, contentType, reminderDate, reminderFrequency, customReminderMinutes } = req.body;
+    if (reminderFrequency !== undefined) {
+      const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
+      if (!validFrequencies.includes(reminderFrequency)) {
+        errorResponse(res, 'Invalid reminder frequency', 400);
+        return;
+      }
+      if (reminderFrequency !== 'none' && !reminderDate) {
+        errorResponse(res, 'Reminder date is required when reminders are enabled', 400);
+        return;
+      }
+      if (reminderFrequency === 'custom') {
+        const customMinutes = Number(customReminderMinutes);
+        if (!Number.isFinite(customMinutes) || customMinutes < 1) {
+          errorResponse(res, 'Custom reminder minutes must be at least 1', 400);
+          return;
+        }
+      }
+    }
+
 
     // Find note (owner or shared with user)
     const note = await Note.findOne({
@@ -200,6 +241,25 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
       note.content = sanitizedContent;
       note.contentType = newType;
       note.description = newType === 'plain' ? sanitizedContent : undefined; // Backward compatibility
+    }
+
+    if (reminderDate !== undefined) {
+      note.reminderDate = reminderDate ? new Date(reminderDate) : undefined;
+      if (!reminderDate) {
+        note.lastReminderSent = undefined;
+      }
+    }
+    if (reminderFrequency !== undefined) {
+      note.reminderFrequency = reminderFrequency;
+      if (reminderFrequency !== 'custom') {
+        note.customReminderMinutes = undefined;
+      }
+      if (reminderFrequency === 'none') {
+        note.lastReminderSent = undefined;
+      }
+    }
+    if (customReminderMinutes !== undefined && reminderFrequency === 'custom') {
+      note.customReminderMinutes = Number(customReminderMinutes);
     }
 
     await note.save();

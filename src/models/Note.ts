@@ -13,6 +13,10 @@ export interface INote extends Document {
   contentType: 'plain' | 'html'; // Content format type
   userId: mongoose.Types.ObjectId;
   sharedWith?: ISharedWith[]; // Users with access to this note
+  reminderDate?: Date;
+  reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
+  customReminderMinutes?: number;
+  lastReminderSent?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,7 +65,22 @@ const NoteSchema = new Schema<INote>(
         type: Date,
         default: Date.now
       }
-    }]
+    }],
+    reminderDate: {
+      type: Date
+    },
+    reminderFrequency: {
+      type: String,
+      enum: ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'],
+      default: 'none'
+    },
+    customReminderMinutes: {
+      type: Number,
+      min: 1
+    },
+    lastReminderSent: {
+      type: Date
+    }
   },
   {
     timestamps: true

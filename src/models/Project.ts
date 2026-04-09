@@ -8,6 +8,7 @@ export interface IProject extends Document {
   isPersonal?: boolean; // Personal projects cannot have members added
   ownerId: mongoose.Types.ObjectId; // Keep for backward compatibility
   owners: mongoose.Types.ObjectId[]; // Project owners (full access)
+  coOwnerPermissions?: Record<string, 'view' | 'edit'>; // Permission level for additional owners
   members: mongoose.Types.ObjectId[]; // Regular members
   managers: mongoose.Types.ObjectId[]; // Project managers
   columns: Array<{
@@ -57,6 +58,14 @@ const ProjectSchema = new Schema<IProject>({
     type: Schema.Types.ObjectId,
     ref: 'User'
   }],
+  coOwnerPermissions: {
+    type: Map,
+    of: {
+      type: String,
+      enum: ['view', 'edit']
+    },
+    default: {}
+  },
   members: [{
     type: Schema.Types.ObjectId,
     ref: 'User'
@@ -101,6 +110,7 @@ ProjectSchema.statics.findByUser = function(userId: string): Promise<IProject[]>
   return this.find({
     $or: [
       { ownerId: userId },
+      { owners: userId },
       { members: userId },
       { managers: userId }
     ]
