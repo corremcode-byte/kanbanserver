@@ -84,6 +84,9 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     // Track user connection
     addUserConnection(userId, socket.id);
 
+    // Store userId in socket.data so fetchSockets() can access it on RemoteSocket objects
+    socket.data.userId = userId;
+
     // Auto-join user's personal room for notifications
     const userRoom = `user:${userId}`;
     socket.join(userRoom);

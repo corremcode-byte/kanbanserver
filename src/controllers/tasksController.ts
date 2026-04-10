@@ -250,7 +250,7 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency, customReminderMinutes, subtasks, isSubtask, parentTaskId } = req.body;
+    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency, customReminderMinutes, reminderStartTime, reminderEndTime, subtasks, isSubtask, parentTaskId } = req.body;
     if (reminderFrequency !== undefined) {
       const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
       if (!validFrequencies.includes(reminderFrequency)) {
@@ -263,7 +263,6 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
         }
       }
     }
-
 
     if (!title?.trim()) {
       return errorResponse(res, 'Task title is required', 400);
@@ -365,8 +364,10 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       dueDate: new Date(dueDate),
       isSubtask: Boolean(isSubtask),
       parentTaskId: parentTaskId || undefined,
-      reminderFrequency: reminderFrequency || '24hours', // Default to 24 hours if not specified
+      reminderFrequency: reminderFrequency || '24hours',
       customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined,
+      reminderStartTime: reminderStartTime || undefined,
+      reminderEndTime: reminderEndTime || undefined,
       subtasks: validatedSubtasks,
       createdBy: req.user._id,
       order

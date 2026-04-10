@@ -1195,6 +1195,9 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
     if (!user) {
       return errorResponse(res, 'User not found', 404);
     }
+    const previousEmail = user.email;
+    let emailUpdated = false;
+    let passwordUpdated = false;
 
     // Update fields if provided
     if (displayName !== undefined) {
@@ -1220,6 +1223,7 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
       }
 
       user.email = email.trim();
+      emailUpdated = true;
     }
 
     if (password !== undefined) {
@@ -1227,6 +1231,7 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
         return errorResponse(res, 'New password must be at least 6 characters long', 400);
       }
       user.password = password; // Will be hashed by pre-save hook
+      passwordUpdated = true;
     }
 
     try {
@@ -1238,6 +1243,44 @@ export const updateUserProfile = async (req: AuthenticatedRequest, res: Response
     }
 
     logger.info(`User profile updated for ${user.email} (${userId}) by ${currentUser.email}`);
+    if (emailUpdated || passwordUpdated) {
+      try {
+        const { AuditLog } = require('../models/AuditLog');
+        await AuditLog.logSystemEvent({
+          userId: currentUserId.toString(),
+          action: 'user_sensitive_profile_updated_by_admin',
+          metadata: {
+            targetUserId: user._id.toString(),
+            targetUserEmail: user.email,
+            previousEmail: emailUpdated ? previousEmail : undefined,
+            emailUpdated,
+            passwordUpdated,
+            updatedBy: currentUser.displayName || currentUser.email
+          }
+        });
+      } catch (auditError) {
+        logger.error('Failed to log admin sensitive profile update event:', auditError);
+      }
+    }
+    if (emailUpdated || passwordUpdated) {
+      try {
+        const { AuditLog } = require('../models/AuditLog');
+        await AuditLog.logSystemEvent({
+          userId: currentUserId.toString(),
+          action: 'user_sensitive_profile_updated_by_admin',
+          metadata: {
+            targetUserId: user._id.toString(),
+            targetUserEmail: user.email,
+            previousEmail: emailUpdated ? previousEmail : undefined,
+            emailUpdated,
+            passwordUpdated,
+            updatedBy: currentUser.displayName || currentUser.email
+          }
+        });
+      } catch (auditError) {
+        logger.error('Failed to log admin sensitive profile update event:', auditError);
+      }
+    }
 
     return successResponse(res, 'User profile updated successfully', {
       user: {
@@ -1356,6 +1399,9 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
       return errorResponse(res, 'User not found', 404);
     }
 
+    const previousEmail = user.email;
+    let emailUpdated = false;
+    let passwordUpdated = false;
     let updated = false;
 
     // Update display name (requires canEditDisplayName permission)
@@ -1401,6 +1447,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
       }
 
       user.email = email.toLowerCase().trim();
+      emailUpdated = true;
       updated = true;
     }
 
@@ -1428,6 +1475,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
       }
 
       user.password = password;
+      passwordUpdated = true;
       updated = true;
     }
 
@@ -1436,6 +1484,24 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await user.save();
+
+    if (emailUpdated || passwordUpdated) {
+      try {
+        const { AuditLog } = require('../models/AuditLog');
+        await AuditLog.logSystemEvent({
+          userId: user._id.toString(),
+          action: 'user_sensitive_profile_updated',
+          metadata: {
+            userEmail: user.email,
+            previousEmail: emailUpdated ? previousEmail : undefined,
+            emailUpdated,
+            passwordUpdated
+          }
+        });
+      } catch (auditError) {
+        logger.error('Failed to log sensitive profile update event:', auditError);
+      }
+    }
 
     logger.info(`User profile updated: ${user.username} (${user._id})`);
     return successResponse(res, 'Profile updated successfully', {
@@ -1576,6 +1642,21 @@ export const updateUserPasskey = async (req: AuthenticatedRequest, res: Response
     // Encrypt and save new passkey
     user.passkey = encrypt(newPasskey);
     await user.save();
+
+    try {
+      const { AuditLog } = require('../models/AuditLog');
+      await AuditLog.logSystemEvent({
+        userId: currentUserId.toString(),
+        action: 'user_passkey_updated_by_admin',
+        metadata: {
+          targetUserId: user._id.toString(),
+          targetUserEmail: user.email,
+          updatedBy: currentUser.displayName || currentUser.email
+        }
+      });
+    } catch (auditError) {
+      logger.error('Failed to log admin passkey update event:', auditError);
+    }
 
     logger.info(`Passkey updated for user ${user.email} by admin ${currentUser.email}`);
     return successResponse(res, 'Passkey updated successfully');

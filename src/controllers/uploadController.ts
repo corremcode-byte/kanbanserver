@@ -295,3 +295,32 @@ export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Respo
     });
   }
 };
+
+/**
+ * Upload file for a support ticket or reply
+ */
+export const uploadSupportAttachment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'No file uploaded' });
+      return;
+    }
+
+    const file = req.file;
+    const baseUrl = getBaseUrl(req);
+    const publicUrl = `${baseUrl}/uploads/support-attachments/${file.filename}`;
+
+    const attachment = {
+      id: uuidv4(),
+      name: file.originalname,
+      url: publicUrl,
+      type: file.mimetype,
+      size: file.size,
+    };
+
+    res.json({ success: true, attachment });
+  } catch (error) {
+    logger.error('Error in uploadSupportAttachment:', error);
+    res.status(500).json({ success: false, message: 'Upload failed' });
+  }
+};

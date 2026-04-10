@@ -148,6 +148,7 @@ export const createNotification = async (data: {
     actionByName?: string;
     groupId?: string | mongoose.Types.ObjectId;
     groupName?: string;
+    messageId?: string | mongoose.Types.ObjectId;
     noteId?: string | mongoose.Types.ObjectId;
     noteTitle?: string;
   };

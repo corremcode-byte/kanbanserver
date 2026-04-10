@@ -128,6 +128,28 @@ class CronService {
 
         if (!shouldSend) continue;
 
+        // Check if current time is within the user-defined reminder window
+        if (task.reminderStartTime || task.reminderEndTime) {
+          const nowHour = now.getHours();
+          const nowMin = now.getMinutes();
+          const nowMins = nowHour * 60 + nowMin;
+
+          if (task.reminderStartTime) {
+            const [sh, sm] = task.reminderStartTime.split(':').map(Number);
+            if (nowMins < sh * 60 + sm) {
+              logger.info(`Skipping reminder for "${task.title}" — before start time ${task.reminderStartTime}`);
+              continue;
+            }
+          }
+          if (task.reminderEndTime) {
+            const [eh, em] = task.reminderEndTime.split(':').map(Number);
+            if (nowMins >= eh * 60 + em) {
+              logger.info(`Skipping reminder for "${task.title}" — after end time ${task.reminderEndTime}`);
+              continue;
+            }
+          }
+        }
+
         // Get all assignees
         const recipients: string[] = [];
 

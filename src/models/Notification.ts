@@ -16,6 +16,9 @@ export interface INotification extends Document {
     actionByName?: string;
     groupId?: mongoose.Types.ObjectId;
     groupName?: string;
+    messageId?: mongoose.Types.ObjectId;
+    noteId?: mongoose.Types.ObjectId;
+    noteTitle?: string;
   };
   createdAt: Date;
   readAt?: Date;
@@ -57,6 +60,7 @@ const NotificationSchema = new Schema<INotification>(
       actionByName: String,
       groupId: { type: Schema.Types.ObjectId, ref: 'ChatGroup' },
       groupName: String,
+      messageId: { type: Schema.Types.ObjectId, ref: 'Message' },
       noteId: { type: Schema.Types.ObjectId, ref: 'Note' },
       noteTitle: String,
     },

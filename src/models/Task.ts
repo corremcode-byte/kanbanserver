@@ -51,6 +51,8 @@ export interface ITask extends Document {
   completedAt?: Date; // Track when task was marked as completed
   reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
   customReminderMinutes?: number;
+  reminderStartTime?: string; // "HH:MM" e.g. "09:00"
+  reminderEndTime?: string;   // "HH:MM" e.g. "18:00"
   lastReminderSent?: Date;
   attachments: ITaskAttachment[];
   comments: ITaskComment[];
@@ -149,6 +151,8 @@ const TaskSchema = new Schema<ITask>({
     type: Number,
     min: 1
   },
+  reminderStartTime: { type: String }, // "HH:MM" — only send reminders at/after this time
+  reminderEndTime: { type: String },   // "HH:MM" — only send reminders before this time
   lastReminderSent: { type: Date },
   attachments: [{
     id: { type: String, required: true },

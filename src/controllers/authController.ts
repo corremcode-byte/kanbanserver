@@ -884,6 +884,20 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
     user.password = newPassword;
     await user.save();
 
+    // Log password update event to audit logs
+    try {
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_password_updated',
+        metadata: {
+          userEmail: user.email,
+          updatedBy: user.email
+        }
+      });
+    } catch (auditError) {
+      logger.error('Failed to log password update event:', auditError);
+    }
+
     logger.info(`Password updated for user: ${user.email}`);
     return successResponse(res, 'Password updated successfully');
   } catch (error) {
@@ -1064,6 +1078,20 @@ export const setPasskey = async (req: AuthenticatedRequest, res: Response) => {
     user.passkey = encrypt(passkey);
     await user.save();
 
+    // Log passkey setup event to audit logs
+    try {
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_passkey_set',
+        metadata: {
+          userEmail: user.email,
+          updatedBy: user.email
+        }
+      });
+    } catch (auditError) {
+      logger.error('Failed to log passkey setup event:', auditError);
+    }
+
     logger.info(`Passkey set for user: ${user.email}`);
     return successResponse(res, 'Passkey set successfully');
   } catch (error) {
@@ -1137,6 +1165,20 @@ export const changePasskey = async (req: AuthenticatedRequest, res: Response) =>
     user.passkey = encrypt(newPasskey);
     await user.save();
 
+    // Log passkey change event to audit logs
+    try {
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_passkey_changed',
+        metadata: {
+          userEmail: user.email,
+          updatedBy: user.email
+        }
+      });
+    } catch (auditError) {
+      logger.error('Failed to log passkey change event:', auditError);
+    }
+
     logger.info(`Passkey changed for user: ${user.email}`);
     return successResponse(res, 'Passkey changed successfully');
   } catch (error) {
@@ -1205,6 +1247,20 @@ export const resetPassword = async (req: Request, res: Response) => {
     // Note: plainPassword is automatically updated by pre-save middleware
     user.password = newPassword;
     await user.save();
+
+    // Log password reset event to audit logs
+    try {
+      await AuditLog.logSystemEvent({
+        userId: user._id.toString(),
+        action: 'user_password_reset',
+        metadata: {
+          userEmail: user.email,
+          resetMethod: 'token'
+        }
+      });
+    } catch (auditError) {
+      logger.error('Failed to log password reset event:', auditError);
+    }
 
     logger.info(`Password reset successful for user: ${user.email}`);
     return successResponse(res, 'Password has been reset successfully');

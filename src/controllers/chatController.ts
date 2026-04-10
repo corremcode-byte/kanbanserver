@@ -7,6 +7,7 @@ import { io } from '../server';
 import mongoose from 'mongoose';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { createNotification } from './notificationController';
+import { Notification } from '../models/Notification';
 import { convertPhotoURLsToAbsolute } from '../utils/urlHelper';
 
 // Create a new chat group (Admin or user with createGroups permission)
@@ -351,18 +352,41 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       (memberId) => memberId.toString() !== userId
     );
 
+    // Get users actively viewing this chat room right now via socket.
+    // socket.data.userId is set at connect time in socketHandlers so RemoteSocket can expose it.
+    const chatRoom = `chat:${groupId}`;
+    const socketsInRoom = await io.in(chatRoom).fetchSockets();
+    const userIdsActiveInChat = new Set(
+      socketsInRoom.map((s: any) => s.data?.userId).filter(Boolean)
+    );
+
     // Create in-app notifications and send push notifications
     otherMembers.forEach(async (memberId) => {
       try {
-        // Create in-app notification (this also sends push notification automatically)
+        const memberIdStr = memberId.toString();
+
+        // Skip: member is currently viewing this chat — they already see the message live
+        if (userIdsActiveInChat.has(memberIdStr)) {
+          return;
+        }
+
+        // Skip: member has already read this message (opened on another tab/device)
+        const alreadyRead = message.readBy?.some(
+          (r: any) => r.userId?.toString() === memberIdStr
+        );
+        if (alreadyRead) {
+          return;
+        }
+
         await createNotification({
-          userId: memberId.toString(),
+          userId: memberIdStr,
           type: 'chat_message',
           title: `New message from ${senderName}`,
           message: `You have a new message in ${chatGroup.name}`,
           metadata: {
             groupId: chatGroup._id as mongoose.Types.ObjectId,
             groupName: chatGroup.name,
+            messageId: message._id as mongoose.Types.ObjectId,
             actionBy: userId as unknown as mongoose.Types.ObjectId,
             actionByName: senderName,
           },
@@ -511,6 +535,28 @@ export const markMessageAsRead = async (req: AuthenticatedRequest, res: Response
     if (!alreadyRead) {
       message.readBy.push({ userId: userId!, readAt: new Date() });
       await message.save();
+
+      // Mark related chat notifications as read for this user.
+      await Notification.updateMany(
+        {
+          userId: userId,
+          type: 'chat_message',
+          read: false,
+          $or: [
+            { 'metadata.messageId': message._id },
+            {
+              'metadata.groupId': message.groupId,
+              'metadata.actionBy': message.senderId
+            }
+          ]
+        },
+        {
+          $set: {
+            read: true,
+            readAt: new Date()
+          }
+        }
+      );
 
       // Notify sender via Socket.IO
       io.to(`user:${message.senderId.toString()}`).emit('chat:message:read', {

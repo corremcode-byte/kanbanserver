@@ -1,11 +1,12 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import upload, { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware } from '../middleware/upload';
+import upload, { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware } from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,
   getTaskAttachments,
-  uploadChatAttachment
+  uploadChatAttachment,
+  uploadSupportAttachment
 } from '../controllers/uploadController';
 import { MulterError } from 'multer';
 
@@ -69,5 +70,12 @@ router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
  * @access  Private (chat group members only)
  */
 router.post('/chat/:groupId', uploadChatMiddleware.single('file'), handleMulterError, uploadChatAttachment);
+
+/**
+ * @route   POST /api/upload/support
+ * @desc    Upload attachment for support ticket or reply
+ * @access  Private
+ */
+router.post('/support', uploadSupportMiddleware.single('file'), handleMulterError, uploadSupportAttachment);
 
 export default router;

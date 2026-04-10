@@ -126,7 +126,7 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
     await invitation.populate('projectId', 'name description color');
     await invitation.populate('invitedBy', 'displayName email');
 
-    // Send invitation email
+    // Send invitation email — non-blocking: invitation is always saved regardless of email outcome
     try {
       const emailSent = await emailService.sendProjectInvitation(
         normalizedEmail,
@@ -141,52 +141,42 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
       );
 
       if (!emailSent) {
-        logger.error(`Email service reported failure sending invitation to ${normalizedEmail}`);
-        // Delete the invitation if email fails
-        await ProjectInvitation.findByIdAndDelete(invitation._id);
-        return internalServerErrorResponse(res, 'Failed to send invitation email');
+        logger.warn(`Email not sent for invitation to ${normalizedEmail} (email service not configured or unavailable)`);
       }
-
-      // Create notification for the invited user if they exist
-      if (existingUser) {
-        try {
-          await createNotification({
-            userId: existingUser._id.toString(),
-            type: 'project_invitation',
-            title: 'New Project Invitation',
-            message: `${req.user.displayName} invited you to join "${(invitation.projectId as any).name}"`,
-            metadata: {
-              projectId: project._id.toString(),
-              projectName: (invitation.projectId as any).name,
-              invitationId: invitation._id.toString(),
-              actionBy: req.user._id,
-              actionByName: req.user.displayName,
-            },
-          });
-        } catch (notifError) {
-          logger.error('Failed to create notification:', notifError);
-          // Continue even if notification creation fails
-        }
-      }
-
-      logger.info(`Invitation sent to ${normalizedEmail} for project ${projectId} by ${req.user.email}`);
-      return successResponse(res, 'Invitation sent successfully', {
-        id: invitation._id,
-        email: invitation.invitedEmail,
-        role: invitation.role,
-        status: invitation.status,
-        expiresAt: invitation.expiresAt
-      });
     } catch (emailError) {
       logger.error('Failed to send invitation email (exception):', emailError);
-      // Delete the invitation if email fails
-      try {
-        await ProjectInvitation.findByIdAndDelete(invitation._id);
-      } catch (delErr) {
-        logger.error('Failed to delete invitation after email error:', delErr);
-      }
-      return internalServerErrorResponse(res, 'Failed to send invitation email');
+      // Log but do not delete the invitation — it can still be accepted manually
     }
+
+    // Create notification for the invited user if they exist
+    if (existingUser) {
+      try {
+        await createNotification({
+          userId: existingUser._id.toString(),
+          type: 'project_invitation',
+          title: 'New Project Invitation',
+          message: `${req.user.displayName} invited you to join "${(invitation.projectId as any).name}"`,
+          metadata: {
+            projectId: project._id.toString(),
+            projectName: (invitation.projectId as any).name,
+            invitationId: invitation._id.toString(),
+            actionBy: req.user._id,
+            actionByName: req.user.displayName,
+          },
+        });
+      } catch (notifError) {
+        logger.error('Failed to create notification:', notifError);
+      }
+    }
+
+    logger.info(`Invitation created for ${normalizedEmail} (project ${projectId}) by ${req.user.email}`);
+    return successResponse(res, 'Invitation sent successfully', {
+      id: invitation._id,
+      email: invitation.invitedEmail,
+      role: invitation.role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt
+    });
   } catch (error) {
     logger.error('Error sending invitation:', error);
     return internalServerErrorResponse(res, 'Failed to send invitation');

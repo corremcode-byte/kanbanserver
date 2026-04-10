@@ -7,6 +7,7 @@ const avatarsDir = path.join(__dirname, '../../uploads/avatars');
 const attachmentsDir = path.join(__dirname, '../../uploads/attachments');
 const taskAttachmentsDir = path.join(__dirname, '../../uploads/task-attachments');
 const chatAttachmentsDir = path.join(__dirname, '../../uploads/chat-attachments');
+const supportAttachmentsDir = path.join(__dirname, '../../uploads/support-attachments');
 
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir, { recursive: true });
@@ -22,6 +23,10 @@ if (!fs.existsSync(taskAttachmentsDir)) {
 
 if (!fs.existsSync(chatAttachmentsDir)) {
   fs.mkdirSync(chatAttachmentsDir, { recursive: true });
+}
+
+if (!fs.existsSync(supportAttachmentsDir)) {
+  fs.mkdirSync(supportAttachmentsDir, { recursive: true });
 }
 
 // Configure storage for avatars
@@ -174,6 +179,28 @@ export const uploadChatAttachment = multer({
   fileFilter: attachmentFileFilter,
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB max file size for chat (to support videos)
+  }
+});
+
+// Configure storage for support ticket attachments
+const supportAttachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, supportAttachmentsDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const uuid = require('uuid').v4();
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    cb(null, `${timestamp}-${uuid}-${basename}${ext}`);
+  }
+});
+
+export const uploadSupportAttachment = multer({
+  storage: supportAttachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB
   }
 });
 
