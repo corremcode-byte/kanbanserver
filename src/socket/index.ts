@@ -32,12 +32,9 @@ export const initializeSocket = (io: SocketIOServer) => {
 };
 
 /**
- * Get the Socket.IO instance
- * @throws {Error} If socket.io is not initialized
+ * Get the Socket.IO instance, or null if not yet initialized.
+ * Callers must guard: `const io = getIO(); if (!io) return;`
  */
-export const getIO = (): SocketIOServer => {
-  if (!ioInstance) {
-    throw new Error('Socket.IO not initialized. Call initializeSocket first.');
-  }
+export const getIO = (): SocketIOServer | null => {
   return ioInstance;
 };    

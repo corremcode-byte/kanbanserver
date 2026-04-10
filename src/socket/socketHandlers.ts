@@ -950,11 +950,13 @@ export const getUserPresence = (userId: string): boolean => {
   return activeConnections.has(userId) && activeConnections.get(userId)!.size > 0;
 };
 
-export const broadcastToUser = (io: SocketIOServer, userId: string, event: string, data: any) => {
+export const broadcastToUser = (io: SocketIOServer | null, userId: string, event: string, data: any) => {
+  if (!io) return;
   io.to(`user:${userId}`).emit(event, data);
 };
 
-export const broadcastToProject = (io: SocketIOServer, projectId: string, event: string, data: any) => {
+export const broadcastToProject = (io: SocketIOServer | null, projectId: string, event: string, data: any) => {
+  if (!io) return;
   io.to(`project:${projectId}`).emit(event, data);
 };
 
