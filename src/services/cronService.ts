@@ -108,22 +108,17 @@ class CronService {
         }
 
         // Check if it's time to send based on last reminder sent
+        const minutesUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60));
         if (lastReminder) {
           const minutesSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60));
           if (minutesSinceLastReminder >= frequencyMinutes) {
             shouldSend = true;
           }
         } else {
-          // No reminder sent yet, send if within reminder window
-          const minutesUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60));
-          if (minutesUntilDue <= frequencyMinutes && minutesUntilDue > -1440) {
+          // No reminder sent yet — send immediately as long as task isn't severely overdue
+          if (minutesUntilDue > -1440) {
             shouldSend = true;
           }
-        }
-
-        // Always send for overdue tasks (but respect frequency)
-        if (hoursUntilDue < 0 && shouldSend) {
-          shouldSend = true;
         }
 
         if (!shouldSend) continue;
@@ -150,51 +145,95 @@ class CronService {
           }
         }
 
-        // Get all assignees
+        // Collect assignee emails and user IDs
         const recipients: string[] = [];
+        const assigneeUserIds: string[] = [];
 
         if (task.assignees && Array.isArray(task.assignees)) {
           task.assignees.forEach((assignee: any) => {
-            if (assignee && assignee.email) {
-              recipients.push(assignee.email);
-            }
+            if (assignee && assignee.email) recipients.push(assignee.email);
+            if (assignee && assignee._id) assigneeUserIds.push(assignee._id.toString());
           });
         }
 
-        if (task.assignedTo && typeof task.assignedTo === 'object' && (task.assignedTo as any).email) {
-          const email = (task.assignedTo as any).email;
-          if (!recipients.includes(email)) {
-            recipients.push(email);
+        if (task.assignedTo && typeof task.assignedTo === 'object') {
+          const at = task.assignedTo as any;
+          if (at.email && !recipients.includes(at.email)) recipients.push(at.email);
+          if (at._id) {
+            const uid = at._id.toString();
+            if (!assigneeUserIds.includes(uid)) assigneeUserIds.push(uid);
           }
         }
 
-        if (recipients.length === 0) {
+        if (recipients.length === 0 && assigneeUserIds.length === 0) {
           logger.warn(`Task ${task._id} has no assignees to notify`);
           continue;
         }
 
-        // Send reminder email
         const projectName = typeof task.projectId === 'object' && (task.projectId as any).name
           ? (task.projectId as any).name
           : 'Unknown Project';
 
-        await emailService.sendTaskDeadlineReminder(recipients, {
-          taskTitle: task.title,
-          taskId: task._id.toString(),
-          projectName,
-          projectId: typeof task.projectId === 'object' && (task.projectId as any)._id
-            ? (task.projectId as any)._id.toString()
-            : task.projectId.toString(),
-          dueDate,
-          priority: task.priority
-        });
+        const projectId = typeof task.projectId === 'object' && (task.projectId as any)._id
+          ? (task.projectId as any)._id.toString()
+          : task.projectId.toString();
 
-        // Update lastReminderSent timestamp
-        await Task.findByIdAndUpdate(task._id, {
-          lastReminderSent: new Date()
-        });
+        // Human-readable time until due
+        const absMinutes = Math.abs(minutesUntilDue);
+        let dueLabel: string;
+        if (minutesUntilDue < 0) {
+          dueLabel = `overdue by ${absMinutes < 60 ? `${absMinutes}m` : `${Math.round(absMinutes / 60)}h`}`;
+        } else if (minutesUntilDue < 60) {
+          dueLabel = `due in ${minutesUntilDue}m`;
+        } else if (minutesUntilDue < 1440) {
+          dueLabel = `due in ${Math.round(minutesUntilDue / 60)}h`;
+        } else {
+          dueLabel = `due in ${Math.round(minutesUntilDue / 1440)}d`;
+        }
 
-        logger.info(`Sent deadline reminder for task "${task.title}" to ${recipients.join(', ')}`);
+        // Send in-app + push notification to each assignee
+        for (const uid of assigneeUserIds) {
+          try {
+            await createNotification({
+              userId: uid,
+              type: 'task_deadline_reminder',
+              title: `Task Reminder: ${task.title}`,
+              message: `"${task.title}" is ${dueLabel} (${projectName})`,
+              metadata: {
+                taskId: task._id as any,
+                taskTitle: task.title,
+                projectId,
+                projectName,
+              }
+            });
+          } catch (notifErr) {
+            logger.warn(`Failed to create in-app notification for user ${uid}:`, notifErr);
+          }
+        }
+
+        // Send reminder email
+        let emailSent = false;
+        if (recipients.length > 0) {
+          emailSent = await emailService.sendTaskDeadlineReminder(recipients, {
+            taskTitle: task.title,
+            taskId: task._id.toString(),
+            projectName,
+            projectId,
+            dueDate,
+            priority: task.priority
+          });
+
+          if (emailSent) {
+            logger.info(`Sent deadline reminder email for task "${task.title}" to ${recipients.join(', ')}`);
+          } else {
+            logger.warn(`Failed to send reminder email for task "${task.title}" to ${recipients.join(', ')}`);
+          }
+        }
+
+        // Update lastReminderSent if either channel delivered
+        if (assigneeUserIds.length > 0 || emailSent) {
+          await Task.findByIdAndUpdate(task._id, { lastReminderSent: new Date() });
+        }
       }
     } catch (error) {
       logger.error('Error checking task deadlines:', error);

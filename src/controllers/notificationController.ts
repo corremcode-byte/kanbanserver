@@ -135,7 +135,7 @@ export const deleteNotification = async (req: AuthenticatedRequest, res: Respons
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added' | 'note_reminder';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder';
   title: string;
   message: string;
   metadata?: {

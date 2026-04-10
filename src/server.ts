@@ -59,11 +59,13 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory with no-cache headers
 app.use('/uploads', (req, res, next) => {
-  // Set cache-control headers to prevent browser caching
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
+  // Tell browsers to display the file inline instead of downloading it
+  res.setHeader('Content-Disposition', 'inline');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   next();
 }, express.static(path.join(__dirname, '../uploads')));
 

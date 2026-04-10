@@ -317,26 +317,28 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Access denied to this project', 403);
     }
 
-    // Get all valid project member and manager IDs
+    // Get all valid project member, manager, and owner IDs
     const projectMemberIds = project.members.map(m => m.toString());
     const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
-    const allValidUserIds = [...projectMemberIds, ...projectManagerIds];
+    const allValidUserIds = [...new Set([...projectMemberIds, ...projectManagerIds, ownerId])];
 
-    // Validate assignees array - allow assigning to both members and managers
+    // Validate assignees array — silently drop any IDs not in the project
     let validatedAssignees: string[] = [];
     if (assignees && Array.isArray(assignees) && assignees.length > 0) {
       validatedAssignees = assignees.filter((userId: string) => allValidUserIds.includes(userId));
       if (validatedAssignees.length !== assignees.length) {
-        return errorResponse(res, 'Some assigned users are not project members or managers', 400);
+        const invalidIds = assignees.filter((userId: string) => !allValidUserIds.includes(userId));
+        logger.warn(`[createTask] Dropping invalid assignee IDs: ${JSON.stringify(invalidIds)}`);
       }
     }
 
     // For backward compatibility: if assignedTo is provided but not assignees, use assignedTo
     if (assignedTo && !assignees) {
-      if (!allValidUserIds.includes(assignedTo)) {
-        return errorResponse(res, 'Assigned user is not a project member or manager', 400);
+      if (allValidUserIds.includes(assignedTo)) {
+        validatedAssignees = [assignedTo];
+      } else {
+        logger.warn(`[createTask] Dropping invalid assignedTo ID: ${assignedTo}`);
       }
-      validatedAssignees = [assignedTo];
     }
 
     const subtaskAssigneeWhitelist = [...new Set([...allValidUserIds, ownerId])];
@@ -525,20 +527,21 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     // Permission check is now handled by checkCanEditTask middleware
     // No need for additional permission checks here
 
-    // Get all valid project member and manager IDs
+    // Get all valid project member, manager, and owner IDs
     const projectMemberIds = project.members.map(m => m.toString());
     const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
-    const allValidUserIds = [...projectMemberIds, ...projectManagerIds];
+    const allValidUserIds = [...new Set([...projectMemberIds, ...projectManagerIds, ownerId])];
 
     // Track old assignees for notification comparison
     const oldAssignees = existingTask.assignees ? existingTask.assignees.map((a: any) => a.toString()) : [];
     let newlyAssignedUsers: string[] = [];
 
-    // Validate assignees array - allow assigning to both members and managers
+    // Validate assignees array — silently drop any IDs no longer in the project
     if (updates.assignees && Array.isArray(updates.assignees) && updates.assignees.length > 0) {
       const validatedAssignees = updates.assignees.filter((userId: string) => allValidUserIds.includes(userId));
       if (validatedAssignees.length !== updates.assignees.length) {
-        return errorResponse(res, 'Some assigned users are not project members or managers', 400);
+        const invalidIds = updates.assignees.filter((userId: string) => !allValidUserIds.includes(userId));
+        logger.warn(`[updateTask] Dropping invalid assignee IDs: ${JSON.stringify(invalidIds)} (not in project members/managers/owner). Valid: ${JSON.stringify(allValidUserIds)}`);
       }
       updates.assignees = validatedAssignees;
       // For backward compatibility, set assignedTo if there's only one assignee
@@ -556,18 +559,20 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     // For backward compatibility: if assignedTo is provided but not assignees
     if (updates.assignedTo && !updates.assignees) {
       if (!allValidUserIds.includes(updates.assignedTo)) {
-        return errorResponse(res, 'Assigned user is not a project member or manager', 400);
-      }
-      updates.assignees = [updates.assignedTo];
+        logger.warn(`[updateTask] Dropping invalid assignedTo ID: ${updates.assignedTo}`);
+        updates.assignedTo = undefined;
+      } else {
+        updates.assignees = [updates.assignedTo];
 
-      // Set assignedAt timestamp if task wasn't previously assigned
-      if (!existingTask.assignedAt) {
-        updates.assignedAt = new Date();
-      }
+        // Set assignedAt timestamp if task wasn't previously assigned
+        if (!existingTask.assignedAt) {
+          updates.assignedAt = new Date();
+        }
 
-      // Check if this is a newly assigned user
-      if (!oldAssignees.includes(updates.assignedTo)) {
-        newlyAssignedUsers = [updates.assignedTo];
+        // Check if this is a newly assigned user
+        if (!oldAssignees.includes(updates.assignedTo)) {
+          newlyAssignedUsers = [updates.assignedTo];
+        }
       }
     }
 
@@ -706,6 +711,42 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         metadata.assigneesChanged = true;
         metadata.oldAssignees = oldAssignees;
         metadata.newAssignees = currentAssignees;
+        // Resolve assignee names for display
+        try {
+          const { User: UserModel } = require('../models');
+          const allIds = [...new Set([...oldAssignees, ...currentAssignees])];
+          const users = await UserModel.find({ _id: { $in: allIds } }).select('displayName email').lean();
+          const idToName: Record<string, string> = {};
+          users.forEach((u: any) => { idToName[u._id.toString()] = u.displayName || u.email; });
+          metadata.oldAssigneeNames = oldAssignees.map((id: string) => idToName[id] || id);
+          metadata.newAssigneeNames = currentAssignees.map((id: string) => idToName[id] || id);
+        } catch { /* non-critical */ }
+      }
+
+      // Track field-level changes (title, description, priority, dueDate)
+      const fieldChanges: Record<string, { from: any; to: any }> = {};
+      if (updates.title !== undefined && updates.title !== existingTask.title) {
+        fieldChanges.title = { from: existingTask.title, to: updates.title };
+      }
+      if (updates.description !== undefined && updates.description !== existingTask.description) {
+        fieldChanges.description = {
+          from: existingTask.description || '(none)',
+          to: updates.description || '(none)'
+        };
+      }
+      if (updates.priority !== undefined && updates.priority !== existingTask.priority) {
+        fieldChanges.priority = { from: existingTask.priority, to: updates.priority };
+      }
+      const existingDue = existingTask.dueDate ? new Date(existingTask.dueDate).toISOString() : null;
+      const newDue = updates.dueDate ? new Date(updates.dueDate).toISOString() : null;
+      if (newDue !== null && newDue !== existingDue) {
+        fieldChanges.dueDate = {
+          from: existingDue,
+          to: newDue
+        };
+      }
+      if (Object.keys(fieldChanges).length > 0) {
+        metadata.fieldChanges = fieldChanges;
       }
 
       await AuditLog.logAction({
@@ -1264,20 +1305,30 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
 // Helper function to get human-readable action description
 function getActionDescription(log: any): string {
   const metadata = log.metadata || {};
+  const fc = metadata.fieldChanges || {};
+  const changedFields = Object.keys(fc);
 
   switch (log.action) {
     case 'task_created':
-      return `Task "${metadata.taskTitle || 'Unknown'}" was created`;
-    case 'task_updated':
-      return 'Task was updated';
+      return `Created task "${metadata.taskTitle || 'Unknown'}"`;
+    case 'task_updated': {
+      if (changedFields.length > 0) {
+        return `Updated ${changedFields.join(', ')}`;
+      }
+      if (metadata.assigneesChanged) return 'Updated assignees';
+      return 'Updated task';
+    }
     case 'task_assigned':
-      return `Task assigned to ${metadata.assigneeName || 'someone'}`;
-    case 'task_status_changed':
-      return `Status changed from "${metadata.oldStatus || 'Unknown'}" to "${metadata.newStatus || 'Unknown'}"`;
+      return `Assigned task to ${metadata.assigneeName || 'someone'}`;
+    case 'task_status_changed': {
+      const from = metadata.oldListTitle || metadata.oldStatus || '?';
+      const to = metadata.newListTitle || metadata.newStatus || '?';
+      return `Moved from "${from}" to "${to}"`;
+    }
     case 'task_completed':
-      return 'Task was marked as completed';
+      return 'Marked task as completed';
     case 'task_deleted':
-      return 'Task was deleted';
+      return 'Deleted this task';
     default:
       return log.action.replace(/_/g, ' ');
   }
@@ -1289,32 +1340,45 @@ function extractChanges(metadata: any): any {
 
   const changes: any = {};
 
-  // Extract status change
-  if (metadata.oldStatus && metadata.newStatus) {
-    changes.status = {
-      from: metadata.oldStatus,
-      to: metadata.newStatus
-    };
+  // Status change
+  if (metadata.oldStatus && metadata.newStatus && metadata.oldStatus !== metadata.newStatus) {
+    changes.status = { from: metadata.oldStatus, to: metadata.newStatus };
   }
 
-  // Extract priority change
-  if (metadata.oldPriority && metadata.newPriority) {
-    changes.priority = {
-      from: metadata.oldPriority,
-      to: metadata.newPriority
-    };
+  // List/column change
+  if (metadata.oldListTitle && metadata.newListTitle && metadata.oldListTitle !== metadata.newListTitle) {
+    changes.column = { from: metadata.oldListTitle, to: metadata.newListTitle };
   }
 
-  // Extract assignee change
-  if (metadata.oldAssignee || metadata.newAssignee) {
-    changes.assignee = {
+  // Field-level changes (title, description, priority, dueDate)
+  if (metadata.fieldChanges && typeof metadata.fieldChanges === 'object') {
+    Object.assign(changes, metadata.fieldChanges);
+  }
+
+  // Assignee changes — prefer display names over IDs
+  if (metadata.assigneesChanged) {
+    const oldNames: string[] = metadata.oldAssigneeNames || metadata.oldAssignees || [];
+    const newNames: string[] = metadata.newAssigneeNames || metadata.newAssignees || [];
+    const added = newNames.filter((n: string) => !oldNames.includes(n));
+    const removed = oldNames.filter((n: string) => !newNames.includes(n));
+    if (added.length > 0 || removed.length > 0) {
+      changes.assignees = {
+        from: oldNames.length > 0 ? oldNames.join(', ') : 'None',
+        to: newNames.length > 0 ? newNames.join(', ') : 'None',
+      };
+    }
+  }
+
+  // Legacy single-assignee change
+  if (!changes.assignees && (metadata.oldAssignee || metadata.newAssignee)) {
+    changes.assignees = {
       from: metadata.oldAssignee || 'None',
-      to: metadata.newAssignee || 'None'
+      to: metadata.newAssignee || 'None',
     };
   }
 
-  // Extract other field changes from metadata
-  if (metadata.changes) {
+  // Any extra changes stored directly
+  if (metadata.changes && typeof metadata.changes === 'object') {
     Object.assign(changes, metadata.changes);
   }
 

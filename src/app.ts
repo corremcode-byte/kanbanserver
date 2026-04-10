@@ -80,6 +80,10 @@ app.use('/uploads', express.static(uploadsPath, {
     console.log('📤 Serving file:', filePath);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    // Tell browsers to display the file inline instead of downloading it
+    res.setHeader('Content-Disposition', 'inline');
+    // Allow embedding in iframes (for in-browser preview)
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   }
 }));
 

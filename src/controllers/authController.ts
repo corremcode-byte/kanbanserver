@@ -862,7 +862,11 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    const { newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword) {
+      return errorResponse(res, 'Current password is required', 400);
+    }
 
     if (!newPassword) {
       return errorResponse(res, 'New password is required', 400);
@@ -872,15 +876,25 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'New password must be at least 6 characters long', 400);
     }
 
-    // Find user
-    const user = await User.findById(req.user._id);
+    // Find user (include password field which is normally excluded)
+    const user = await User.findById(req.user._id).select('+password');
 
     if (!user) {
       return notFoundResponse(res, 'User not found');
     }
 
+    // Verify current password
+    const bcrypt = require('bcryptjs');
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return errorResponse(res, 'Current password is incorrect', 400);
+    }
+
+    if (currentPassword === newPassword) {
+      return errorResponse(res, 'New password must be different from your current password', 400);
+    }
+
     // Update password (will be hashed by pre-save middleware)
-    // Note: plainPassword is automatically updated by pre-save middleware
     user.password = newPassword;
     await user.save();
 
