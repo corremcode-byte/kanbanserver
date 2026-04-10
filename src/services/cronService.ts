@@ -56,50 +56,31 @@ class CronService {
     const now = new Date();
 
     try {
-      // Find tasks that are not completed and have due dates
+      // Find all non-completed tasks with a reminder frequency set (due date NOT required)
       const tasks = await Task.find({
         status: { $ne: 'completed' },
-        dueDate: { $exists: true, $ne: null },
-        reminderFrequency: { $ne: 'none' }
+        reminderFrequency: { $exists: true, $nin: ['none', null] }
       })
-        .populate('assignees', 'email name')
-        .populate('assignedTo', 'email name')
+        .populate('assignees', 'displayName email')
+        .populate('assignedTo', 'displayName email')
         .populate('projectId', 'name')
         .lean();
 
       logger.info(`Found ${tasks.length} tasks to check for reminders`);
 
       for (const task of tasks) {
-        const dueDate = new Date(task.dueDate!);
         const reminderFreq = task.reminderFrequency || '24hours';
         const lastReminder = task.lastReminderSent ? new Date(task.lastReminderSent) : null;
 
-        // Calculate hours until due
-        const hoursUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60));
-
-        // Determine if we should send reminder based on frequency
-        let shouldSend = false;
-        let frequencyMinutes = 1440; // default (24 hours in minutes)
-
+        // Resolve frequency in minutes
+        let frequencyMinutes = 1440;
         switch (reminderFreq) {
-          case '30minutes':
-            frequencyMinutes = 30;
-            break;
-          case '1hour':
-            frequencyMinutes = 60;
-            break;
-          case '3hours':
-            frequencyMinutes = 180;
-            break;
-          case '12hours':
-            frequencyMinutes = 720;
-            break;
-          case '24hours':
-            frequencyMinutes = 1440;
-            break;
-          case '48hours':
-            frequencyMinutes = 2880;
-            break;
+          case '30minutes':   frequencyMinutes = 30;   break;
+          case '1hour':       frequencyMinutes = 60;   break;
+          case '3hours':      frequencyMinutes = 180;  break;
+          case '12hours':     frequencyMinutes = 720;  break;
+          case '24hours':     frequencyMinutes = 1440; break;
+          case '48hours':     frequencyMinutes = 2880; break;
           case 'custom':
             frequencyMinutes = Number((task as any).customReminderMinutes) > 0
               ? Number((task as any).customReminderMinutes)
@@ -107,39 +88,45 @@ class CronService {
             break;
         }
 
-        // Check if it's time to send based on last reminder sent
-        const minutesUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60));
+        // Determine whether it is time to send
+        let shouldSend = false;
         if (lastReminder) {
           const minutesSinceLastReminder = Math.floor((now.getTime() - lastReminder.getTime()) / (1000 * 60));
           if (minutesSinceLastReminder >= frequencyMinutes) {
             shouldSend = true;
+          } else {
+            logger.info(`Skipping "${task.title}" — only ${minutesSinceLastReminder}/${frequencyMinutes} min since last reminder`);
           }
         } else {
-          // No reminder sent yet — send immediately as long as task isn't severely overdue
-          if (minutesUntilDue > -1440) {
-            shouldSend = true;
+          // First reminder ever — fire immediately (unless task has a due date that is >24h overdue)
+          if (task.dueDate) {
+            const minutesUntilDue = Math.floor((new Date(task.dueDate).getTime() - now.getTime()) / (1000 * 60));
+            shouldSend = minutesUntilDue > -1440; // don't spam for very old overdue tasks
+          } else {
+            shouldSend = true; // no due date — fire on first cron hit inside the time window
           }
         }
 
         if (!shouldSend) continue;
 
-        // Check if current time is within the user-defined reminder window
+        // Check if current server time is within the reminder window
+        // Times are stored as "HH:MM" in the server's local timezone (IST)
         if (task.reminderStartTime || task.reminderEndTime) {
-          const nowHour = now.getHours();
-          const nowMin = now.getMinutes();
-          const nowMins = nowHour * 60 + nowMin;
+          const nowMins = now.getHours() * 60 + now.getMinutes();
 
           if (task.reminderStartTime) {
-            const [sh, sm] = task.reminderStartTime.split(':').map(Number);
-            if (nowMins < sh * 60 + sm) {
-              logger.info(`Skipping reminder for "${task.title}" — before start time ${task.reminderStartTime}`);
+            const [sh, sm] = (task.reminderStartTime as string).split(':').map(Number);
+            const startMins = sh * 60 + sm;
+            if (nowMins < startMins) {
+              logger.info(`Skipping "${task.title}" — current time ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} is before window start ${task.reminderStartTime}`);
               continue;
             }
           }
           if (task.reminderEndTime) {
-            const [eh, em] = task.reminderEndTime.split(':').map(Number);
-            if (nowMins >= eh * 60 + em) {
-              logger.info(`Skipping reminder for "${task.title}" — after end time ${task.reminderEndTime}`);
+            const [eh, em] = (task.reminderEndTime as string).split(':').map(Number);
+            const endMins = eh * 60 + em;
+            if (nowMins >= endMins) {
+              logger.info(`Skipping "${task.title}" — current time ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} is at/after window end ${task.reminderEndTime}`);
               continue;
             }
           }
@@ -178,17 +165,23 @@ class CronService {
           ? (task.projectId as any)._id.toString()
           : task.projectId.toString();
 
-        // Human-readable time until due
-        const absMinutes = Math.abs(minutesUntilDue);
+        // Human-readable time until due (graceful when no due date)
+        const dueDateObj: Date | null = task.dueDate ? new Date(task.dueDate) : null;
         let dueLabel: string;
-        if (minutesUntilDue < 0) {
-          dueLabel = `overdue by ${absMinutes < 60 ? `${absMinutes}m` : `${Math.round(absMinutes / 60)}h`}`;
-        } else if (minutesUntilDue < 60) {
-          dueLabel = `due in ${minutesUntilDue}m`;
-        } else if (minutesUntilDue < 1440) {
-          dueLabel = `due in ${Math.round(minutesUntilDue / 60)}h`;
+        if (!dueDateObj) {
+          dueLabel = 'no due date';
         } else {
-          dueLabel = `due in ${Math.round(minutesUntilDue / 1440)}d`;
+          const minutesUntilDue = Math.floor((dueDateObj.getTime() - now.getTime()) / (1000 * 60));
+          const absMinutes = Math.abs(minutesUntilDue);
+          if (minutesUntilDue < 0) {
+            dueLabel = `overdue by ${absMinutes < 60 ? `${absMinutes}m` : `${Math.round(absMinutes / 60)}h`}`;
+          } else if (minutesUntilDue < 60) {
+            dueLabel = `due in ${minutesUntilDue}m`;
+          } else if (minutesUntilDue < 1440) {
+            dueLabel = `due in ${Math.round(minutesUntilDue / 60)}h`;
+          } else {
+            dueLabel = `due in ${Math.round(minutesUntilDue / 1440)}d`;
+          }
         }
 
         // Send in-app + push notification to each assignee
@@ -198,7 +191,7 @@ class CronService {
               userId: uid,
               type: 'task_deadline_reminder',
               title: `Task Reminder: ${task.title}`,
-              message: `"${task.title}" is ${dueLabel} (${projectName})`,
+              message: `"${task.title}" — ${dueLabel} (${projectName})`,
               metadata: {
                 taskId: task._id as any,
                 taskTitle: task.title,
@@ -219,7 +212,7 @@ class CronService {
             taskId: task._id.toString(),
             projectName,
             projectId,
-            dueDate,
+            dueDate: dueDateObj,  // null if no due date — email handles it gracefully
             priority: task.priority
           });
 

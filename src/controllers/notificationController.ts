@@ -176,6 +176,8 @@ export const createNotification = async (data: {
         url = `/chat?groupId=${data.metadata.groupId}`;
       } else if (data.metadata?.noteId) {
         url = '/notes';
+      } else if (data.metadata?.taskId && data.metadata?.projectId) {
+        url = `/projects/${data.metadata.projectId}?taskId=${data.metadata.taskId}`;
       } else if (data.metadata?.projectId) {
         url = `/projects/${data.metadata.projectId}`;
       }

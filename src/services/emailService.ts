@@ -30,7 +30,7 @@ interface TaskReminderNotification {
   taskId: string;
   projectName: string;
   projectId: string;
-  dueDate: Date;
+  dueDate: Date | null;
   priority: string;
 }
 
@@ -38,6 +38,7 @@ class EmailService {
   private transporter: Transporter | null = null;
   private isConfigured: boolean = false;
   private initPromise: Promise<void> | null = null;
+  private lastInitError: string | null = null;
 
   constructor() {
     // Delay initialization to allow dotenv to load first
@@ -45,87 +46,90 @@ class EmailService {
   }
 
   private async initialize() {
+    // If already successfully configured, skip
+    if (this.isConfigured && this.transporter) return;
+
+    // If an init is in-flight, wait for it
     if (this.initPromise) {
       return this.initPromise;
     }
 
-    this.initPromise = this.doInitialize();
+    this.initPromise = this.doInitialize().finally(() => {
+      // Always clear the promise so a failed init will retry on next call
+      if (!this.isConfigured) {
+        this.initPromise = null;
+      }
+    });
     return this.initPromise;
   }
 
   private async doInitialize() {
     try {
-      // Check if email configuration is provided
       const {
         EMAIL_SERVICE,
         EMAIL_HOST,
         EMAIL_PORT,
         EMAIL_USER,
         EMAIL_PASS,
-        EMAIL_FROM,
-        APP_URL
       } = process.env;
 
       if (!EMAIL_USER || !EMAIL_PASS) {
-        logger.warn('Email credentials not configured. Email notifications will be disabled.');
+        this.lastInitError = 'EMAIL_USER or EMAIL_PASS not set in environment';
+        logger.warn(`Email service: ${this.lastInitError}`);
         return;
       }
 
-      // Create transporter based on configuration
+      // Build transporter
       if (EMAIL_SERVICE === 'gmail') {
         this.transporter = nodemailer.createTransport({
           service: 'gmail',
-          auth: {
-            user: EMAIL_USER,
-            pass: EMAIL_PASS // Use App Password for Gmail
-          }
+          auth: { user: EMAIL_USER, pass: EMAIL_PASS }
         });
       } else if (EMAIL_HOST && EMAIL_PORT) {
-        // Custom SMTP configuration
-        const port = parseInt(EMAIL_PORT);
+        const port = parseInt(EMAIL_PORT, 10);
         this.transporter = nodemailer.createTransport({
           host: EMAIL_HOST,
-          port: port,
-          secure: port === 465, // true for 465 (SSL), false for other ports (STARTTLS)
-          auth: {
-            user: EMAIL_USER,
-            pass: EMAIL_PASS
-          },
-          // Add these for better compatibility with various SMTP providers
-          tls: {
-            // Do not fail on invalid certs (some providers might have self-signed certs)
-            rejectUnauthorized: false
-          },
-          debug: process.env.NODE_ENV === 'development', // Enable debug output in development
-          logger: process.env.NODE_ENV === 'development' // Log to console in development
+          port,
+          secure: port === 465,
+          auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+          tls: { rejectUnauthorized: false },
         });
       } else {
-        // Default to Gmail if no specific config
         this.transporter = nodemailer.createTransport({
           service: 'gmail',
-          auth: {
-            user: EMAIL_USER,
-            pass: EMAIL_PASS
-          }
+          auth: { user: EMAIL_USER, pass: EMAIL_PASS }
         });
       }
 
-      // Verify connection
+      // Verify SMTP connection
       await this.transporter.verify();
       this.isConfigured = true;
-      logger.info('Email service initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize email service:', error);
+      this.lastInitError = null;
+      logger.info(`Email service initialized — host: ${EMAIL_HOST || 'gmail'}, user: ${EMAIL_USER}`);
+    } catch (error: any) {
+      this.lastInitError = error?.message || String(error);
+      this.transporter = null;
       this.isConfigured = false;
+      logger.error(`Email service init failed: ${this.lastInitError}`);
     }
   }
 
+  /** Expose status for the debug endpoint */
+  getStatus() {
+    return {
+      isConfigured: this.isConfigured,
+      lastInitError: this.lastInitError,
+      host: process.env.EMAIL_HOST || '(gmail)',
+      port: process.env.EMAIL_PORT || '587',
+      user: process.env.EMAIL_USER || '(not set)',
+    };
+  }
+
   private async sendEmail(options: EmailOptions): Promise<boolean> {
-    // Ensure initialization happens before sending
     await this.initialize();
 
     if (!this.isConfigured || !this.transporter) {
-      logger.warn('Email service not configured. Skipping email send.');
+      logger.warn(`Email send skipped — service not configured. Last error: ${this.lastInitError ?? 'unknown'}`);
       return false;
     }
 
@@ -143,8 +147,10 @@ class EmailService {
 
       logger.info(`Email sent successfully to: ${recipients}`);
       return true;
-    } catch (error) {
-      logger.error('Failed to send email:', error);
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      logger.error(`Failed to send email to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}: ${msg}`);
+      this.lastInitError = msg; // surface it via getStatus()
       return false;
     }
   }
@@ -298,15 +304,28 @@ class EmailService {
     const taskUrl = `${appUrl}/projects/${data.projectId}?tab=tasks`;
 
     const now = new Date();
-    const dueDate = new Date(data.dueDate);
-    const hoursUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60));
-    const isOverdue = hoursUntilDue < 0;
+    const hasDueDate = data.dueDate !== null;
+    const dueDate = hasDueDate ? new Date(data.dueDate!) : null;
 
-    const urgencyText = isOverdue
-      ? `<strong style="color: #dc2626;">⚠️ OVERDUE</strong>`
-      : hoursUntilDue < 24
-      ? `<strong style="color: #ef4444;">⏰ Due in ${hoursUntilDue} hours</strong>`
-      : `<strong style="color: #f59e0b;">📅 Due in ${Math.floor(hoursUntilDue / 24)} days</strong>`;
+    let urgencyText: string;
+    let subjectPrefix: string;
+    let dueDateLine: string;
+
+    if (!hasDueDate || !dueDate) {
+      urgencyText = `<strong style="color: #6b7280;">📋 Scheduled Reminder</strong>`;
+      subjectPrefix = '⏰ Reminder';
+      dueDateLine = '<p><strong>Due Date:</strong> Not set</p>';
+    } else {
+      const hoursUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60));
+      const isOverdue = hoursUntilDue < 0;
+      urgencyText = isOverdue
+        ? `<strong style="color: #dc2626;">⚠️ OVERDUE</strong>`
+        : hoursUntilDue < 24
+        ? `<strong style="color: #ef4444;">⏰ Due in ${hoursUntilDue} hour${hoursUntilDue === 1 ? '' : 's'}</strong>`
+        : `<strong style="color: #f59e0b;">📅 Due in ${Math.floor(hoursUntilDue / 24)} day${Math.floor(hoursUntilDue / 24) === 1 ? '' : 's'}</strong>`;
+      subjectPrefix = isOverdue ? '⚠️ OVERDUE' : '⏰ Reminder';
+      dueDateLine = `<p><strong>Due Date:</strong> ${dueDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>`;
+    }
 
     const html = `
       <!DOCTYPE html>
@@ -324,13 +343,13 @@ class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>⏰ Task Deadline Reminder</h1>
+              <h1>⏰ Task Reminder</h1>
             </div>
             <div class="content">
               <h2>${data.taskTitle}</h2>
               <p><strong>Project:</strong> ${data.projectName}</p>
               <p>${urgencyText}</p>
-              <p><strong>Due Date:</strong> ${dueDate.toLocaleDateString()} at ${dueDate.toLocaleTimeString()}</p>
+              ${dueDateLine}
               <a href="${taskUrl}" class="button">View Task</a>
             </div>
             <div class="footer">
@@ -341,19 +360,11 @@ class EmailService {
       </html>
     `;
 
-    const text = `
-      Task Deadline Reminder: ${data.taskTitle}
-
-      Project: ${data.projectName}
-      ${isOverdue ? 'OVERDUE' : `Due in ${hoursUntilDue} hours`}
-      Due Date: ${dueDate.toLocaleDateString()} at ${dueDate.toLocaleTimeString()}
-
-      View task: ${taskUrl}
-    `;
+    const text = `Task Reminder: ${data.taskTitle}\nProject: ${data.projectName}\n${dueDate ? `Due: ${dueDate.toLocaleString()}` : 'No due date set'}\n\nView task: ${taskUrl}`;
 
     return this.sendEmail({
       to: recipients,
-      subject: `${isOverdue ? '⚠️ OVERDUE' : '⏰ Reminder'}: ${data.taskTitle}`,
+      subject: `${subjectPrefix}: ${data.taskTitle}`,
       html,
       text
     });
