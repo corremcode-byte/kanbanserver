@@ -610,6 +610,9 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
     if (isNowCompleted && !wasCompleted) {
       updates.completedAt = new Date();
+      // Stop reminders when task is completed
+      updates.reminderFrequency = 'none';
+      updates.lastReminderSent = null;
       logger.info(`Task "${existingTask.title}" marked as completed by ${req.user.displayName}`);
     }
 
