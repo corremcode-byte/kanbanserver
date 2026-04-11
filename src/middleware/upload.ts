@@ -139,7 +139,9 @@ const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.Fi
     'audio/x-wav',
   ];
 
-  if (allowedMimes.includes(file.mimetype)) {
+  // Check exact match OR prefix match (handles codec variants like audio/webm;codecs=opus)
+  const baseType = file.mimetype.split(';')[0].trim();
+  if (allowedMimes.includes(file.mimetype) || allowedMimes.includes(baseType)) {
     cb(null, true);
   } else {
     cb(new Error('Invalid file type. Please upload images, videos, audio, PDFs, or common document formats.'));

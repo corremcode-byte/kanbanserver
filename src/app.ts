@@ -84,6 +84,12 @@ app.use('/uploads', express.static(uploadsPath, {
     res.setHeader('Content-Disposition', 'inline');
     // Allow embedding in iframes (for in-browser preview)
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    // Required for audio/video seeking in browsers
+    res.setHeader('Accept-Ranges', 'bytes');
+    // Serve webm voice messages with audio MIME type so browsers play them correctly
+    if (filePath.endsWith('.webm') && filePath.includes('voice_message')) {
+      res.setHeader('Content-Type', 'audio/webm');
+    }
   }
 }));
 
