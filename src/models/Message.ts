@@ -27,6 +27,7 @@ export interface IMessage extends Document {
   pinnedBy?: mongoose.Types.ObjectId;
   starredBy: mongoose.Types.ObjectId[];
   isDeleted: boolean;
+  isEdited: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -100,6 +101,10 @@ const messageSchema = new Schema<IMessage>(
       ref: 'User'
     }],
     isDeleted: {
+      type: Boolean,
+      default: false
+    },
+    isEdited: {
       type: Boolean,
       default: false
     }

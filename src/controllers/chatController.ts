@@ -605,6 +605,7 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
     // Update message content
     message.encryptedContent = encryptedContent;
     message.nonce = nonce;
+    message.isEdited = true;
     await message.save();
 
     // Populate sender info
