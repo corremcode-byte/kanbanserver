@@ -13,9 +13,29 @@ class CronService {
   /**
    * Start all cron jobs
    */
-  start() {
+  async start() {
+    await this.clearStaleReminderEndTimes();
     this.startTaskDeadlineReminders();
     logger.info('Cron service started');
+  }
+
+  /**
+   * One-time cleanup: clear reminderEndTime from all tasks (no longer used in UI)
+   * and reset lastReminderSent for tasks that have a future startTime so they
+   * don't get stuck waiting for a frequency gap that never resets.
+   */
+  private async clearStaleReminderEndTimes() {
+    try {
+      const result = await Task.updateMany(
+        { reminderEndTime: { $exists: true, $ne: null } },
+        { $unset: { reminderEndTime: '' }, $set: { lastReminderSent: null } }
+      );
+      if (result.modifiedCount > 0) {
+        logger.info(`Cleared stale reminderEndTime from ${result.modifiedCount} tasks and reset their lastReminderSent`);
+      }
+    } catch (err) {
+      logger.warn('Failed to clear stale reminderEndTime values:', err);
+    }
   }
 
   /**
@@ -34,8 +54,8 @@ class CronService {
    * Runs every hour
    */
   private startTaskDeadlineReminders() {
-    // Run every 15 minutes to support shorter reminder intervals
-    const task = cron.schedule('*/15 * * * *', async () => {
+    // Run every minute to support short custom intervals (e.g. every 1 minute)
+    const task = cron.schedule('* * * * *', async () => {
       try {
         logger.info('Running task deadline reminder check...');
         await this.checkTaskDeadlines();
@@ -109,26 +129,18 @@ class CronService {
 
         if (!shouldSend) continue;
 
-        // Check if current server time is within the reminder window
-        // Times are stored as "HH:MM" in the server's local timezone (IST)
-        if (task.reminderStartTime || task.reminderEndTime) {
+        // Check reminderStartTime — only block if we haven't passed start time today
+        // Ignore reminderEndTime (removed from UI; old DB values should not block indefinitely)
+        if (task.reminderStartTime) {
           const nowMins = now.getHours() * 60 + now.getMinutes();
+          const [sh, sm] = (task.reminderStartTime as string).split(':').map(Number);
+          const startMins = sh * 60 + sm;
 
-          if (task.reminderStartTime) {
-            const [sh, sm] = (task.reminderStartTime as string).split(':').map(Number);
-            const startMins = sh * 60 + sm;
-            if (nowMins < startMins) {
-              logger.info(`Skipping "${task.title}" — current time ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} is before window start ${task.reminderStartTime}`);
-              continue;
-            }
-          }
-          if (task.reminderEndTime) {
-            const [eh, em] = (task.reminderEndTime as string).split(':').map(Number);
-            const endMins = eh * 60 + em;
-            if (nowMins >= endMins) {
-              logger.info(`Skipping "${task.title}" — current time ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} is at/after window end ${task.reminderEndTime}`);
-              continue;
-            }
+          if (nowMins < startMins) {
+            // Before start time today — skip but don't consume the frequency slot
+            // (don't set lastReminderSent so it will fire once start time is reached)
+            logger.info(`Skipping "${task.title}" — ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} is before start time ${task.reminderStartTime}`);
+            continue;
           }
         }
 

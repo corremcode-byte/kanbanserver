@@ -100,7 +100,7 @@ const startServer = async () => {
     await connectDB();
 
     // Start cron jobs
-    cronService.start();
+    await cronService.start();
 
     server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);

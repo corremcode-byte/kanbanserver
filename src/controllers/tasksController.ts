@@ -369,7 +369,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       reminderFrequency: reminderFrequency || '24hours',
       customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined,
       reminderStartTime: reminderStartTime || undefined,
-      reminderEndTime: reminderEndTime || undefined,
+      reminderEndTime: undefined, // not used — UI only sets start time
       subtasks: validatedSubtasks,
       createdBy: req.user._id,
       order
@@ -634,7 +634,18 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       } else {
         updates.customReminderMinutes = undefined;
       }
+      // Reset lastReminderSent so the new frequency takes effect immediately
+      updates.lastReminderSent = null;
     }
+
+    // Save reminderStartTime — clear reminderEndTime (no longer used)
+    if ('reminderStartTime' in updates) {
+      updates.reminderStartTime = updates.reminderStartTime || null;
+      // Reset so reminder fires at start time without waiting for old frequency gap
+      updates.lastReminderSent = null;
+    }
+    // Always clear reminderEndTime — UI no longer sets it
+    updates.reminderEndTime = null;
 
     // Apply updates
     const task = await Task.findByIdAndUpdate(
