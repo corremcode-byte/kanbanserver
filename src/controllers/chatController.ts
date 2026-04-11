@@ -442,24 +442,9 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     });
 
-    // Convert messages to plain objects and normalize readBy userId to strings
-    // (ObjectIds in readBy are not populated, so they must be stringified before
-    // convertPhotoURLsToAbsolute recurses into them and corrupts them)
-    // Convert messages to plain objects and normalize readBy userId to strings
-    // (ObjectIds in readBy are not populated, so they must be stringified before
-    // convertPhotoURLsToAbsolute recurses into them and corrupts them)
-    const plainMessages = messages.map(m => {
-      const obj = m.toObject() as unknown as Record<string, unknown>;
-      const readBy = obj.readBy as { userId: unknown; readAt: unknown }[] | undefined;
-      obj.readBy = (readBy || []).map(r => ({
-        ...r,
-        userId: r.userId ? String(r.userId) : r.userId
-      }));
-      return obj;
-    });
-
     // Convert photoURLs to absolute URLs
-    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(plainMessages, req);
+    // convertPhotoURLsToAbsolute now handles ObjectId serialization internally
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
     return res.json({
       messages: messagesWithAbsoluteUrls.reverse(), // Reverse to get chronological order
@@ -512,17 +497,7 @@ export const getGroupStarredMessages = async (req: AuthenticatedRequest, res: Re
       starredBy: userId
     });
 
-    const plainMessages = messages.map(m => {
-      const obj = m.toObject() as unknown as Record<string, unknown>;
-      const readBy = obj.readBy as { userId: unknown; readAt: unknown }[] | undefined;
-      obj.readBy = (readBy || []).map(r => ({
-        ...r,
-        userId: r.userId ? String(r.userId) : r.userId
-      }));
-      return obj;
-    });
-
-    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(plainMessages, req);
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
     return res.json({
       messages: messagesWithAbsoluteUrls,
@@ -1277,17 +1252,7 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
     // Get total count (including deleted)
     const totalCount = await Message.countDocuments({ groupId });
 
-    const plainMessages2 = messages.map(m => {
-      const obj = m.toObject() as unknown as Record<string, unknown>;
-      const readBy = obj.readBy as { userId: unknown; readAt: unknown }[] | undefined;
-      obj.readBy = (readBy || []).map(r => ({
-        ...r,
-        userId: r.userId ? String(r.userId) : r.userId
-      }));
-      return obj;
-    });
-
-    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(plainMessages2, req);
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
     // Get group details with members
     await chatGroup.populate('members', 'displayName email photoURL');

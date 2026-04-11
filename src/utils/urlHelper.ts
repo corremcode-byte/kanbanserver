@@ -61,7 +61,6 @@ export function toAbsoluteUserUrl(user: any, req?: any): any {
  */
 export function convertPhotoURLsToAbsolute(obj: any, req?: any): any {
   if (!obj) return obj;
-  if (typeof obj !== 'object') return obj;
 
   const baseUrl = getBaseUrl(req);
 
@@ -73,33 +72,28 @@ export function convertPhotoURLsToAbsolute(obj: any, req?: any): any {
     return `${baseUrl}${path}`;
   };
 
-  // Handle arrays
-  if (Array.isArray(obj)) {
-    return obj.map(item => convertPhotoURLsToAbsolute(item, req));
-  }
+  // Serialize through JSON first so all BSON ObjectIds become hex strings,
+  // Dates become ISO strings, and Buffers are safely handled. This prevents
+  // the spread operator from corrupting ObjectId instances into empty objects.
+  const plain: any = JSON.parse(JSON.stringify(obj));
 
-  // Handle objects
-  const result = { ...obj };
+  const walk = (node: any): any => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(walk);
 
-  // Convert photoURL if it exists
-  if (result.photoURL) {
-    result.photoURL = convertURL(result.photoURL);
-  }
+    const result = { ...node };
 
-  // Convert avatar if it exists (some components use 'avatar' field)
-  if (result.avatar) {
-    result.avatar = convertURL(result.avatar);
-  }
+    if (result.photoURL) result.photoURL = convertURL(result.photoURL);
+    if (result.avatar) result.avatar = convertURL(result.avatar);
 
-  // Recursively convert nested objects (like populated fields)
-  Object.keys(result).forEach(key => {
-    if (result[key] && typeof result[key] === 'object') {
-      // Don't recurse into certain fields to avoid infinite loops
-      if (!['_id', 'id', 'createdAt', 'updatedAt'].includes(key)) {
-        result[key] = convertPhotoURLsToAbsolute(result[key], req);
+    Object.keys(result).forEach(key => {
+      if (result[key] && typeof result[key] === 'object') {
+        result[key] = walk(result[key]);
       }
-    }
-  });
+    });
 
-  return result;
+    return result;
+  };
+
+  return walk(plain);
 }
