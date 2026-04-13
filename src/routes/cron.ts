@@ -28,6 +28,22 @@ router.get('/test-reminders', async (req, res) => {
 });
 
 /**
+ * Diagnostic — shows what the cron would do right now without actually sending
+ * GET /api/cron/diagnose
+ */
+router.get('/diagnose', async (req, res) => {
+  try {
+    const report = await cronService.diagnosticCheck();
+    res.json(report);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
  * Check email service status and optionally send a test email
  * GET  /api/cron/test-email          — shows SMTP status
  * POST /api/cron/test-email          — sends a test email to body.to

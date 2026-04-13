@@ -340,6 +340,97 @@ class CronService {
     await this.checkTaskDeadlines();
     await this.checkNoteReminders();
   }
+
+  /**
+   * Diagnostic check — returns a report of what the cron would do right now
+   */
+  async diagnosticCheck() {
+    const now = new Date();
+    const tasks = await Task.find({
+      status: { $ne: 'completed' },
+      reminderFrequency: { $exists: true, $nin: ['none', null] }
+    })
+      .populate('assignees', 'displayName email')
+      .populate('assignedTo', 'displayName email')
+      .populate('createdBy', 'displayName email')
+      .lean();
+
+    const report = tasks.map(task => {
+      const freq = task.reminderFrequency || 'none';
+      const lastSent = task.lastReminderSent ? new Date(task.lastReminderSent) : null;
+
+      let frequencyMinutes = 1440;
+      switch (freq) {
+        case '30minutes':   frequencyMinutes = 30;   break;
+        case '1hour':       frequencyMinutes = 60;   break;
+        case '3hours':      frequencyMinutes = 180;  break;
+        case '12hours':     frequencyMinutes = 720;  break;
+        case '24hours':     frequencyMinutes = 1440; break;
+        case '48hours':     frequencyMinutes = 2880; break;
+        case 'custom':
+          frequencyMinutes = Number((task as any).customReminderMinutes) > 0
+            ? Number((task as any).customReminderMinutes) : 1440;
+          break;
+      }
+
+      const minutesSinceLast = lastSent
+        ? Math.floor((now.getTime() - lastSent.getTime()) / 60000)
+        : null;
+
+      let wouldSend = false;
+      let skipReason = '';
+      if (lastSent) {
+        wouldSend = (minutesSinceLast ?? 0) >= frequencyMinutes;
+        if (!wouldSend) skipReason = `only ${minutesSinceLast}/${frequencyMinutes} min since last reminder`;
+      } else {
+        if (task.dueDate) {
+          const minUntilDue = Math.floor((new Date(task.dueDate).getTime() - now.getTime()) / 60000);
+          wouldSend = minUntilDue > -1440;
+          if (!wouldSend) skipReason = `due date is more than 24h overdue (${minUntilDue} min)`;
+        } else {
+          wouldSend = true;
+        }
+      }
+
+      const recipients: string[] = [];
+      if (Array.isArray(task.assignees)) {
+        task.assignees.forEach((a: any) => { if (a?.email) recipients.push(a.email); });
+      }
+      if (task.assignedTo && typeof task.assignedTo === 'object') {
+        const at = task.assignedTo as any;
+        if (at.email && !recipients.includes(at.email)) recipients.push(at.email);
+      }
+      if (task.createdBy && typeof task.createdBy === 'object') {
+        const cb = task.createdBy as any;
+        if (cb.email && !recipients.includes(cb.email)) recipients.push(cb.email);
+      }
+
+      if (wouldSend && recipients.length === 0) {
+        skipReason = 'no recipients found';
+        wouldSend = false;
+      }
+
+      return {
+        taskId: task._id,
+        title: task.title,
+        reminderFrequency: freq,
+        customReminderMinutes: (task as any).customReminderMinutes,
+        lastReminderSent: lastSent ? lastSent.toISOString() : null,
+        minutesSinceLast,
+        frequencyMinutes,
+        wouldSend,
+        skipReason: skipReason || null,
+        recipients,
+      };
+    });
+
+    return {
+      checkedAt: now.toISOString(),
+      tasksFound: tasks.length,
+      tasksToSend: report.filter(r => r.wouldSend).length,
+      details: report,
+    };
+  }
 }
 
 // Export singleton instance
