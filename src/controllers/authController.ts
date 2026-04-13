@@ -116,53 +116,38 @@ export const login = async (req: Request, res: Response) => {
 // MongoDB-only authentication - Create user endpoint
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { email, password, displayName, username, role = 'member', permissions, settings } = req.body;
+    const { email, password, displayName, role = 'member', permissions, settings } = req.body;
 
     if (!email || !password) {
       return errorResponse(res, 'Email and password are required', 400);
     }
 
-    // Check if user already exists
+    if (!displayName || !displayName.trim()) {
+      return errorResponse(res, 'Display name is required', 400);
+    }
+
+    // Check if email already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return errorResponse(res, 'User with this email already exists', 400);
     }
 
-    // Generate unique displayName if not provided or if it's already taken
-    let uniqueDisplayName = displayName || email.split('@')[0];
-    let existingDisplayName = await User.findOne({ displayName: uniqueDisplayName });
-
+    // Display name must be unique — reject if taken (no auto-fix)
+    const existingDisplayName = await User.findOne({ displayName: displayName.trim() });
     if (existingDisplayName) {
-      let counter = 1;
-      while (existingDisplayName) {
-        uniqueDisplayName = `${displayName || email.split('@')[0]}_${counter}`;
-        existingDisplayName = await User.findOne({ displayName: uniqueDisplayName });
-        counter++;
-      }
-      logger.info(`DisplayName was taken, generated unique name: ${uniqueDisplayName}`);
+      return errorResponse(res, 'This display name is already taken. Please choose a different one.', 400);
     }
 
-    // Generate unique username if not provided
-    let uniqueUsername = username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-    let existingUsername = await User.findOne({ username: uniqueUsername });
-
-    if (existingUsername) {
-      let counter = 1;
-      while (existingUsername) {
-        uniqueUsername = `${username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_')}_${counter}`;
-        existingUsername = await User.findOne({ username: uniqueUsername });
-        counter++;
-      }
-      logger.info(`Username was taken, generated unique name: ${uniqueUsername}`);
-    }
+    // Username is always the email address
+    const username = email.toLowerCase().trim();
 
     // Create new user
-    // Note: plainPassword is automatically saved by pre-save middleware
+    // Note: plainPassword and userId are automatically set by pre-save middleware
     const user = new User({
       email: email.toLowerCase(),
       password,
-      username: uniqueUsername,
-      displayName: uniqueDisplayName,
+      username,
+      displayName: displayName.trim(),
       role,
       permissions,
       settings,

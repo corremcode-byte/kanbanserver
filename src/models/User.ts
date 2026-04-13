@@ -11,7 +11,8 @@ export interface IPushSubscription {
 }
 
 export interface IUser extends Document {
-  username: string;  // Unique, immutable username
+  userId: string;    // System-generated unique ID (e.g. USR-A1B2C3)
+  username: string;  // Set to email at creation, immutable
   email: string;
   password: string;
   plainPassword?: string;  // Plain text password for admin viewing
@@ -137,6 +138,12 @@ interface IUserModel extends Model<IUser, {}, IUserMethods> {
 }
 
 const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
+  userId: {
+    type: String,
+    unique: true,
+    index: true,
+    // Generated in pre-save hook
+  },
   username: {
     type: String,
     required: true,
@@ -144,8 +151,7 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     lowercase: true,
     trim: true,
     index: true,
-    immutable: true,  // Username cannot be changed after creation
-    match: [/^[a-z0-9_-]{3,20}$/, 'Username must be 3-20 characters long and contain only lowercase letters, numbers, hyphens, and underscores']
+    immutable: true,  // Set to email at creation, cannot be changed
   },
   email: {
     type: String,
@@ -420,11 +426,31 @@ userSchema.statics.searchUsers = function(query: string, limit: number = 10): Pr
   .exec();
 };
 
+// Generate a unique userId like USR-A1B2C3
+function generateUserId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let id = 'USR-';
+  for (let i = 0; i < 6; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return id;
+}
+
 // Pre-save middleware
 userSchema.pre('save', async function(next) {
   // Ensure email is lowercase
   if (this.isModified('email')) {
     this.email = this.email.toLowerCase();
+  }
+
+  // Auto-generate unique userId on first save
+  if (this.isNew && !this.userId) {
+    let uid = generateUserId();
+    // Retry on collision (extremely rare)
+    while (await (this.constructor as IUserModel).findOne({ userId: uid })) {
+      uid = generateUserId();
+    }
+    this.userId = uid;
   }
 
   // Set displayName from email if not provided

@@ -246,10 +246,9 @@ class CronService {
           }
         }
 
-        // Update lastReminderSent if either channel delivered
-        if (assigneeUserIds.length > 0 || emailSent) {
-          await Task.findByIdAndUpdate(task._id, { lastReminderSent: new Date() });
-        }
+        // Always update lastReminderSent once we decide to send,
+        // so silent failures don't cause infinite retry every minute
+        await Task.findByIdAndUpdate(task._id, { lastReminderSent: new Date() });
       }
     } catch (error) {
       logger.error('Error checking task deadlines:', error);
@@ -393,19 +392,25 @@ class CronService {
       }
 
       const recipients: string[] = [];
+      const userIds: string[] = [];
       if (Array.isArray(task.assignees)) {
-        task.assignees.forEach((a: any) => { if (a?.email) recipients.push(a.email); });
+        task.assignees.forEach((a: any) => {
+          if (a?.email) recipients.push(a.email);
+          if (a?._id) userIds.push(a._id.toString());
+        });
       }
       if (task.assignedTo && typeof task.assignedTo === 'object') {
         const at = task.assignedTo as any;
         if (at.email && !recipients.includes(at.email)) recipients.push(at.email);
+        if (at._id && !userIds.includes(at._id.toString())) userIds.push(at._id.toString());
       }
       if (task.createdBy && typeof task.createdBy === 'object') {
         const cb = task.createdBy as any;
         if (cb.email && !recipients.includes(cb.email)) recipients.push(cb.email);
+        if (cb._id && !userIds.includes(cb._id.toString())) userIds.push(cb._id.toString());
       }
 
-      if (wouldSend && recipients.length === 0) {
+      if (wouldSend && recipients.length === 0 && userIds.length === 0) {
         skipReason = 'no recipients found';
         wouldSend = false;
       }
@@ -421,6 +426,8 @@ class CronService {
         wouldSend,
         skipReason: skipReason || null,
         recipients,
+        userIds,
+        createdByRaw: task.createdBy ? (typeof task.createdBy === 'object' ? 'populated' : 'id-only') : 'missing',
       };
     });
 
