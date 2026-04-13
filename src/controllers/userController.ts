@@ -717,6 +717,11 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Email is required', 400);
     }
 
+    // Only allow @mail.com email addresses for new registrations
+    if (!email.toLowerCase().trim().endsWith('@mail.com')) {
+      return errorResponse(res, 'Only @mail.com email addresses are allowed for registration', 400);
+    }
+
     if (!password || password.length < 6) {
       return errorResponse(res, 'Password must be at least 6 characters', 400);
     }

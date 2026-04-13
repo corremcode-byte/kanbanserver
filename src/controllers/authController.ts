@@ -126,6 +126,11 @@ export const createUser = async (req: Request, res: Response) => {
       return errorResponse(res, 'Display name is required', 400);
     }
 
+    // Only allow @mail.com email addresses for new registrations
+    if (!email.toLowerCase().trim().endsWith('@mail.com')) {
+      return errorResponse(res, 'Only @mail.com email addresses are allowed for registration', 400);
+    }
+
     // Check if email already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
