@@ -366,7 +366,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       dueDate: new Date(dueDate),
       isSubtask: Boolean(isSubtask),
       parentTaskId: parentTaskId || undefined,
-      reminderFrequency: reminderFrequency || '24hours',
+      reminderFrequency: reminderFrequency || 'none',
       customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined,
       reminderStartTime: reminderStartTime || undefined,
       reminderEndTime: undefined, // not used — UI only sets start time

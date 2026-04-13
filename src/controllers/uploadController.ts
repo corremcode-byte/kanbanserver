@@ -222,6 +222,121 @@ export const getTaskAttachments = async (req: Request, res: Response): Promise<v
 };
 
 /**
+ * Upload attachment to a specific subtask
+ */
+export const uploadSubtaskAttachment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { taskId, subtaskId } = req.params;
+
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'No file uploaded' });
+      return;
+    }
+
+    const task = await Task.findById(taskId).populate('projectId');
+    if (!task) {
+      res.status(404).json({ success: false, message: 'Task not found' });
+      return;
+    }
+
+    const project = await Project.findById(task.projectId);
+    if (!project) {
+      res.status(404).json({ success: false, message: 'Project not found' });
+      return;
+    }
+
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const userId = req.user._id.toString();
+    const isOwner = project.ownerId.toString() === userId;
+    const isMember = project.members.some((m: any) => m.toString() === userId);
+    const isManager = project.managers?.some((m: any) => m.toString() === userId);
+    if (!isOwner && !isMember && !isManager) {
+      res.status(403).json({ success: false, message: 'Access denied' });
+      return;
+    }
+
+    const subtask = (task.subtasks as any[]).find((s) => s.id === subtaskId);
+    if (!subtask) {
+      res.status(404).json({ success: false, message: 'Subtask not found' });
+      return;
+    }
+
+    const file = req.file;
+    const fileId = uuidv4();
+    const baseUrl = getBaseUrl(req);
+    const publicUrl = `${baseUrl}/uploads/task-attachments/${file.filename}`;
+
+    const attachment = {
+      id: fileId,
+      name: file.originalname,
+      url: publicUrl,
+      type: file.mimetype,
+      size: file.size,
+      uploadedBy: new mongoose.Types.ObjectId(req.user._id),
+      uploadedAt: new Date()
+    };
+
+    if (!subtask.attachments) subtask.attachments = [];
+    subtask.attachments.push(attachment);
+    task.markModified('subtasks');
+    await task.save();
+
+    logger.info(`✅ Subtask attachment uploaded: ${file.filename}`);
+    res.json({ success: true, message: 'File uploaded successfully', attachment });
+  } catch (error) {
+    logger.error('❌ Error in uploadSubtaskAttachment:', error);
+    res.status(500).json({ success: false, message: 'Upload failed' });
+  }
+};
+
+/**
+ * Delete attachment from a subtask
+ */
+export const deleteSubtaskAttachment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { taskId, subtaskId, attachmentId } = req.params;
+
+    const task = await Task.findById(taskId).populate('projectId');
+    if (!task) {
+      res.status(404).json({ success: false, message: 'Task not found' });
+      return;
+    }
+
+    const subtask = (task.subtasks as any[]).find((s) => s.id === subtaskId);
+    if (!subtask) {
+      res.status(404).json({ success: false, message: 'Subtask not found' });
+      return;
+    }
+
+    const attachment = (subtask.attachments || []).find((a: any) => a.id === attachmentId);
+    if (!attachment) {
+      res.status(404).json({ success: false, message: 'Attachment not found' });
+      return;
+    }
+
+    // Delete file from disk
+    try {
+      const filename = attachment.url.split('/').pop();
+      const filePath = path.join(process.cwd(), 'uploads', 'task-attachments', filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch { /* continue if file missing */ }
+
+    subtask.attachments = (subtask.attachments || []).filter((a: any) => a.id !== attachmentId);
+    task.markModified('subtasks');
+    await task.save();
+
+    res.json({ success: true, message: 'Attachment deleted successfully' });
+  } catch (error) {
+    logger.error('Error in deleteSubtaskAttachment:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
  * Upload file to VPS storage for chat attachment
  */
 export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {

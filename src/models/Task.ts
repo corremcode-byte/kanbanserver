@@ -30,6 +30,7 @@ export interface ISubtask {
   reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
   customReminderMinutes?: number;
   linkedTaskId?: mongoose.Types.ObjectId;
+  attachments?: ITaskAttachment[];
 }
 
 export interface ITask extends Document {
@@ -181,7 +182,16 @@ const TaskSchema = new Schema<ITask>({
     dueDate: { type: Date },
     reminderFrequency: { type: String, enum: ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'], default: 'none' },
     customReminderMinutes: { type: Number, min: 1 },
-    linkedTaskId: { type: Schema.Types.ObjectId, ref: 'Task' }
+    linkedTaskId: { type: Schema.Types.ObjectId, ref: 'Task' },
+    attachments: [{
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+      url: { type: String, required: true },
+      type: { type: String, required: true },
+      size: { type: Number, required: true },
+      uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+      uploadedAt: { type: Date, default: Date.now }
+    }]
   }],
   order: { type: Number, default: 0 }
 }, {

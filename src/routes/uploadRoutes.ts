@@ -5,6 +5,8 @@ import {
   uploadTaskAttachment,
   deleteTaskAttachment,
   getTaskAttachments,
+  uploadSubtaskAttachment,
+  deleteSubtaskAttachment,
   uploadChatAttachment,
   uploadSupportAttachment
 } from '../controllers/uploadController';
@@ -63,6 +65,20 @@ router.get('/task/:taskId/attachments', getTaskAttachments);
  * @access  Private (owner/manager/uploader only)
  */
 router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
+
+/**
+ * @route   POST /api/upload/task/:taskId/subtask/:subtaskId
+ * @desc    Upload attachment to a subtask
+ * @access  Private (project members)
+ */
+router.post('/task/:taskId/subtask/:subtaskId', uploadTaskMiddleware.single('file'), handleMulterError, uploadSubtaskAttachment);
+
+/**
+ * @route   DELETE /api/upload/task/:taskId/subtask/:subtaskId/attachment/:attachmentId
+ * @desc    Delete attachment from a subtask
+ * @access  Private
+ */
+router.delete('/task/:taskId/subtask/:subtaskId/attachment/:attachmentId', deleteSubtaskAttachment);
 
 /**
  * @route   POST /api/upload/chat/:groupId

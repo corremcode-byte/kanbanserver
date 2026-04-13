@@ -4,6 +4,8 @@ import { successResponse, errorResponse, internalServerErrorResponse } from '../
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
 import { pushNotificationService } from '../services/pushNotificationService';
+import { getIO } from '../socket';
+import { broadcastToUser } from '../socket/socketHandlers';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -188,6 +190,17 @@ export const createNotification = async (data: {
 
     await notification.save();
     logger.info(`Notification created for user ${data.userId}: ${data.title}`);
+
+    // Emit real-time socket event so the bell updates instantly
+    try {
+      const io = getIO();
+      const userId = typeof data.userId === 'string' ? data.userId : data.userId.toString();
+      broadcastToUser(io, userId, 'new_notification', {
+        notification: notification.toObject(),
+      });
+    } catch (socketErr) {
+      logger.warn(`Failed to emit socket notification for user ${data.userId}:`, socketErr);
+    }
 
     // Send push notification
     try {
