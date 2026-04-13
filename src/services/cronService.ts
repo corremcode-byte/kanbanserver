@@ -83,6 +83,7 @@ class CronService {
       })
         .populate('assignees', 'displayName email')
         .populate('assignedTo', 'displayName email')
+        .populate('createdBy', 'displayName email')
         .populate('projectId', 'name')
         .lean();
 
@@ -144,7 +145,7 @@ class CronService {
           }
         }
 
-        // Collect assignee emails and user IDs
+        // Collect assignee emails and user IDs (assignees + createdBy)
         const recipients: string[] = [];
         const assigneeUserIds: string[] = [];
 
@@ -164,8 +165,18 @@ class CronService {
           }
         }
 
+        // Always include the task creator so solo tasks (no assignees) still get reminders
+        if (task.createdBy && typeof task.createdBy === 'object') {
+          const cb = task.createdBy as any;
+          if (cb.email && !recipients.includes(cb.email)) recipients.push(cb.email);
+          if (cb._id) {
+            const uid = cb._id.toString();
+            if (!assigneeUserIds.includes(uid)) assigneeUserIds.push(uid);
+          }
+        }
+
         if (recipients.length === 0 && assigneeUserIds.length === 0) {
-          logger.warn(`Task ${task._id} has no assignees to notify`);
+          logger.warn(`Task ${task._id} has no recipients to notify`);
           continue;
         }
 

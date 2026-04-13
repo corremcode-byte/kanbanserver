@@ -145,7 +145,7 @@ const TaskSchema = new Schema<ITask>({
   reminderFrequency: {
     type: String,
     enum: ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'],
-    default: '24hours'
+    default: 'none'
   },
   customReminderMinutes: {
     type: Number,

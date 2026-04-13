@@ -132,6 +132,29 @@ export const deleteNotification = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
+// Get notification stats for a specific task (sent + read counts across all recipients)
+export const getTaskNotificationStats = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { taskId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return errorResponse(res, 'Invalid task ID', 400);
+    }
+
+    const taskObjectId = new mongoose.Types.ObjectId(taskId);
+
+    const [total, read] = await Promise.all([
+      Notification.countDocuments({ 'metadata.taskId': taskObjectId }),
+      Notification.countDocuments({ 'metadata.taskId': taskObjectId, read: true }),
+    ]);
+
+    return successResponse(res, 'Task notification stats retrieved', { total, read, unread: total - read });
+  } catch (error) {
+    logger.error('Error getting task notification stats:', error);
+    return internalServerErrorResponse(res, 'Failed to get notification stats');
+  }
+};
+
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
