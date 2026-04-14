@@ -157,6 +157,26 @@ export const getTaskNotificationStats = async (req: AuthenticatedRequest, res: R
   }
 };
 
+// Get individual notification records for a specific task
+export const getTaskNotificationDetails = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { taskId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return errorResponse(res, 'Invalid task ID', 400);
+    }
+
+    const notifications = await Notification.find({ 'metadata.taskId': new mongoose.Types.ObjectId(taskId) })
+      .populate('userId', 'displayName email')
+      .sort({ createdAt: -1 });
+
+    return successResponse(res, 'Task notification details retrieved', notifications);
+  } catch (error) {
+    logger.error('Error getting task notification details:', error);
+    return internalServerErrorResponse(res, 'Failed to get notification details');
+  }
+};
+
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;

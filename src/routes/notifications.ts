@@ -7,6 +7,7 @@ import {
   deleteNotification,
   getUnreadCount,
   getTaskNotificationStats,
+  getTaskNotificationDetails,
 } from '../controllers/notificationController';
 
 const router = express.Router();
@@ -22,6 +23,9 @@ router.get('/unread-count', getUnreadCount);
 
 // Get notification stats for a task
 router.get('/stats/task/:taskId', getTaskNotificationStats);
+
+// Get individual notification records for a task
+router.get('/details/task/:taskId', getTaskNotificationDetails);
 
 // Mark notification as read
 router.patch('/:notificationId/read', markNotificationAsRead);
