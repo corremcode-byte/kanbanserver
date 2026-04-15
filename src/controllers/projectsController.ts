@@ -453,6 +453,30 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
+    // Send in-app notifications to all initial members (excluding creator)
+    try {
+      const { createNotification } = await import('./notificationController');
+      const notifPromises = memberIds
+        .filter((memberId: string) => memberId !== creatorId)
+        .map((memberId: string) =>
+          createNotification({
+            userId: memberId,
+            type: 'project_added',
+            title: 'Added to Project',
+            message: `${req.user.displayName} added you to the project "${project.name}"`,
+            metadata: {
+              projectId: project._id.toString(),
+              projectName: project.name,
+              actionBy: req.user._id,
+              actionByName: req.user.displayName,
+            },
+          }).catch((err: unknown) => logger.error(`Failed to create notification for member ${memberId}:`, err))
+        );
+      await Promise.all(notifPromises);
+    } catch (notifError) {
+      logger.error('Error sending project creation notifications:', notifError);
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Project created successfully',
