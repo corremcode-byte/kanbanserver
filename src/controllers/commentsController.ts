@@ -283,6 +283,24 @@ export const getComments = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
+    // Standalone task (no project): allow creator/assignee/assigner.
+    if (!task.projectId) {
+      const requesterId = req.user!._id.toString();
+      const isCreator = task.createdBy?.toString() === requesterId;
+      const assigneeIds = Array.isArray(task.assignees)
+        ? task.assignees.map((a: any) => a?._id ? a._id.toString() : a.toString())
+        : [];
+      const isAssignee = assigneeIds.includes(requesterId);
+      const isAssigner = task.assignedBy?.toString() === requesterId;
+      if (!isCreator && !isAssignee && !isAssigner) {
+        return errorResponse(res, 'Access denied', 403);
+      }
+      const comments = task.comments.sort((a: any, b: any) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      return successResponse(res, 'Comments retrieved successfully', comments);
+    }
+
     // Get project to verify user has access
     const project = await Project.findById(task.projectId);
     if (!project) {

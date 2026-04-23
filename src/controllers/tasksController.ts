@@ -211,6 +211,26 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
+    // Standalone task (no project): allow creator/assignee/assigner to view.
+    if (!task.projectId) {
+      const requesterId = req.user._id.toString();
+      const isCreator = task.createdBy?.toString() === requesterId;
+      const assigneeIds = Array.isArray(task.assignees)
+        ? task.assignees.map((a: any) => a?._id ? a._id.toString() : a.toString())
+        : [];
+      const isAssignee = assigneeIds.includes(requesterId);
+      const isAssigner = task.assignedBy
+        ? (typeof task.assignedBy === 'object' && (task.assignedBy as any)._id
+            ? (task.assignedBy as any)._id.toString()
+            : task.assignedBy.toString()) === requesterId
+        : false;
+
+      if (!isCreator && !isAssignee && !isAssigner) {
+        return errorResponse(res, 'Access denied to this task', 403);
+      }
+      return successResponse(res, 'Task retrieved successfully', task);
+    }
+
     // Check if user has access to the project this task belongs to
     const project = await Project.findById(task.projectId);
     if (!project) {
@@ -250,7 +270,15 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { title, description, projectId, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency, customReminderMinutes, reminderStartTime, reminderEndTime, subtasks, isSubtask, parentTaskId } = req.body;
+    const { title, description, assignedTo, assignees, status, listId, priority, dueDate, reminderFrequency, customReminderMinutes, reminderStartTime, reminderEndTime, subtasks, isSubtask, parentTaskId } = req.body;
+    const rawProjectId = req.body?.projectId;
+    const normalizedProjectId = typeof rawProjectId === 'string' ? rawProjectId.trim() : rawProjectId;
+    const projectId = (
+      normalizedProjectId &&
+      normalizedProjectId !== '__NO_PROJECT__' &&
+      normalizedProjectId !== 'undefined' &&
+      normalizedProjectId !== 'null'
+    ) ? normalizedProjectId : undefined;
     if (reminderFrequency !== undefined) {
       const validFrequencies = ['none', '30minutes', '1hour', '3hours', '12hours', '24hours', '48hours', 'custom'];
       if (!validFrequencies.includes(reminderFrequency)) {
@@ -268,59 +296,64 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Task title is required', 400);
     }
 
-    if (!projectId) {
-      return errorResponse(res, 'Project ID is required', 400);
-    }
-
     if (!dueDate) {
       return errorResponse(res, 'Due date is required', 400);
     }
 
-    // Check if project exists and user has access
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return notFoundResponse(res, 'Project not found');
-    }
-
-    // Validate listId if provided - check if it exists in project's columns
+    let project = null;
     let validatedListId = listId || status || 'todo';
-    if (project.columns && project.columns.length > 0) {
-      const listExists = project.columns.some(col => col.id === validatedListId);
-      if (!listExists) {
-        // If provided listId doesn't exist, use the first column
-        validatedListId = project.columns[0].id;
+    let allValidUserIds: string[] = [];
+    let ownerId = req.user._id.toString();
+
+    if (projectId) {
+      // Check if project exists and user has access
+      project = await Project.findById(projectId);
+      if (!project) {
+        return notFoundResponse(res, 'Project not found');
       }
+
+      // Validate listId if provided - check if it exists in project's columns
+      if (project.columns && project.columns.length > 0) {
+        const listExists = project.columns.some(col => col.id === validatedListId);
+        if (!listExists) {
+          // If provided listId doesn't exist, use the first column
+          validatedListId = project.columns[0].id;
+        }
+      }
+
+      // Check if user is a member, manager, or owner of the project
+      ownerId = typeof project.ownerId === 'object' && project.ownerId._id
+        ? project.ownerId._id.toString()
+        : project.ownerId.toString();
+
+      const isMember = project.members.some(member => {
+        const memberId = typeof member === 'object' && member._id
+          ? member._id.toString()
+          : member.toString();
+        return memberId === req.user._id;
+      });
+
+      const isManager = project.managers && project.managers.some((manager) => {
+        const managerId = typeof manager === 'object' && manager._id
+          ? manager._id.toString()
+          : manager.toString();
+        return managerId === req.user._id;
+      });
+
+      const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager;
+
+      if (!isOwnerOrMemberOrManager) {
+        return errorResponse(res, 'Access denied to this project', 403);
+      }
+
+      // Get all valid project member, manager, and owner IDs
+      const projectMemberIds = project.members.map(m => m.toString());
+      const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
+      allValidUserIds = [...new Set([...projectMemberIds, ...projectManagerIds, ownerId])];
+    } else {
+      // Without project, only validate that users are unique IDs and include self for subtasks.
+      allValidUserIds = [...new Set([req.user._id.toString(), ...(Array.isArray(assignees) ? assignees : []), ...(assignedTo ? [assignedTo] : [])])];
     }
-
-    // Check if user is a member, manager, or owner of the project
-    const ownerId = typeof project.ownerId === 'object' && project.ownerId._id
-      ? project.ownerId._id.toString()
-      : project.ownerId.toString();
-
-    const isMember = project.members.some(member => {
-      const memberId = typeof member === 'object' && member._id
-        ? member._id.toString()
-        : member.toString();
-      return memberId === req.user._id;
-    });
-
-    const isManager = project.managers && project.managers.some((manager) => {
-      const managerId = typeof manager === 'object' && manager._id
-        ? manager._id.toString()
-        : manager.toString();
-      return managerId === req.user._id;
-    });
-
-    const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager;
-
-    if (!isOwnerOrMemberOrManager) {
-      return errorResponse(res, 'Access denied to this project', 403);
-    }
-
-    // Get all valid project member, manager, and owner IDs
-    const projectMemberIds = project.members.map(m => m.toString());
-    const projectManagerIds = project.managers ? project.managers.map(m => m.toString()) : [];
-    const allValidUserIds = [...new Set([...projectMemberIds, ...projectManagerIds, ownerId])];
 
     // Validate assignees array — silently drop any IDs not in the project
     let validatedAssignees: string[] = [];
@@ -345,17 +378,18 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
     const validatedSubtasks = normalizeEmbeddedSubtasks(subtasks, subtaskAssigneeWhitelist);
 
     // Get the highest order number for the list column
-    const highestOrderTask = await Task.findOne({
-      projectId,
-      listId: validatedListId
-    }).sort({ order: -1 });
+    const highestOrderTask = await Task.findOne(
+      projectId
+        ? { projectId, listId: validatedListId }
+        : { createdBy: req.user._id, projectId: { $exists: false }, listId: validatedListId }
+    ).sort({ order: -1 });
 
     const order = highestOrderTask ? highestOrderTask.order + 1 : 0;
 
     const task = new Task({
       title: title.trim(),
       description: description?.trim(),
-      projectId,
+      projectId: projectId || undefined,
       assignedTo: validatedAssignees.length === 1 ? validatedAssignees[0] : undefined, // backward compatibility
       assignees: validatedAssignees,
       assignedBy: req.user._id,
@@ -391,7 +425,8 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
     logger.info(`Task created: ${task.title} in project ${projectId}`);
 
     // Log audit action
-    try {
+    if (projectId) {
+      try {
       await AuditLog.logAction({
         projectId: projectId,
         userId: req.user._id,
@@ -408,28 +443,31 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
           initialAssignees: task.assignees ? task.assignees.map((a: any) => a._id ? a._id.toString() : a.toString()) : [],
         },
       });
-    } catch (auditError) {
+      } catch (auditError) {
       logger.error('Failed to log audit action:', auditError);
+      }
     }
 
     // Broadcast to project room via socket
     const io = getIO();
-    broadcastToProject(io, projectId, 'task:created', {
-      task,
-      createdBy: {
-        id: req.user._id,
-        name: req.user.displayName,
-        email: req.user.email
-      },
-      timestamp: new Date()
-    });
+    if (projectId) {
+      broadcastToProject(io, projectId, 'task:created', {
+        task,
+        createdBy: {
+          id: req.user._id,
+          name: req.user.displayName,
+          email: req.user.email
+        },
+        timestamp: new Date()
+      });
+    }
 
     // Send email notifications and create in-app notifications for assignees
     if (validatedAssignees.length > 0) {
       const assigneeEmails: string[] = [];
       const projectName = typeof task.projectId === 'object' && (task.projectId as any).name
         ? (task.projectId as any).name
-        : 'Unknown Project';
+        : 'No Project';
 
       // Get populated assignees
       if (task.assignees && Array.isArray(task.assignees)) {
@@ -444,7 +482,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
               title: 'New Task Assigned',
               message: `${req.user.displayName} assigned you a task "${task.title}" in ${projectName}`,
               metadata: {
-                projectId: projectId.toString(),
+                projectId: (projectId || '').toString(),
                 projectName: projectName,
                 taskId: task._id.toString(),
                 taskTitle: task.title,
@@ -463,7 +501,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
           taskTitle: task.title,
           taskId: task._id.toString(),
           projectName,
-          projectId: projectId,
+          projectId: projectId || '',
           assignedByName: req.user.displayName,
           dueDate: task.dueDate,
           priority: task.priority
@@ -491,6 +529,45 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     const existingTask = await Task.findById(id);
     if (!existingTask) {
       return notFoundResponse(res, 'Task not found');
+    }
+
+    // Standalone task (no project): skip project-based checks entirely
+    if (!existingTask.projectId) {
+      const isStatusUpdateRequest =
+        (typeof updates.status === 'string' && updates.status.trim().length > 0) ||
+        (typeof updates.listId === 'string' && updates.listId.trim().length > 0);
+
+      if (isStatusUpdateRequest) {
+        const existingAssignees = Array.isArray(existingTask.assignees) && existingTask.assignees.length > 0
+          ? existingTask.assignees.map((assignee: any) => assignee.toString())
+          : (existingTask.assignedTo ? [existingTask.assignedTo.toString()] : []);
+        const isAssignedUser = existingAssignees.includes(req.user._id.toString());
+        if (!isAssignedUser) {
+          return errorResponse(res, 'Only the assigned user can update task status', 403);
+        }
+      }
+
+      // Normalize status/listId for standalone tasks too
+      if (updates.listId) {
+        const n = (updates.listId as string).toLowerCase().trim().replace('_', '-').replace('done', 'completed');
+        updates.listId = n; updates.status = n;
+      } else if (updates.status) {
+        const n = (updates.status as string).toLowerCase().trim().replace('_', '-').replace('done', 'completed');
+        updates.status = n; updates.listId = n;
+      }
+
+      const task = await Task.findByIdAndUpdate(id, { ...updates }, { new: true, runValidators: true })
+        .populate('assignedTo', 'displayName email avatar photoURL')
+        .populate('assignees', 'displayName email avatar photoURL')
+        .populate('assignedBy', 'displayName email avatar photoURL')
+        .populate('projectId', 'name color');
+
+      if (!task) {
+        return notFoundResponse(res, 'Task not found');
+      }
+
+      logger.info(`Standalone task updated: ${task.title}`);
+      return successResponse(res, 'Task updated successfully', task);
     }
 
     // Check if user has access to the project
@@ -522,6 +599,21 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!isOwnerOrMemberOrManager) {
       return errorResponse(res, 'Access denied to this project', 403);
+    }
+
+    const isStatusUpdateRequest =
+      (typeof updates.status === 'string' && updates.status.trim().length > 0) ||
+      (typeof updates.listId === 'string' && updates.listId.trim().length > 0);
+
+    if (isStatusUpdateRequest) {
+      const existingAssignees = Array.isArray(existingTask.assignees) && existingTask.assignees.length > 0
+        ? existingTask.assignees.map((assignee: any) => assignee.toString())
+        : (existingTask.assignedTo ? [existingTask.assignedTo.toString()] : []);
+
+      const isAssignedUser = existingAssignees.includes(req.user._id.toString());
+      if (!isAssignedUser) {
+        return errorResponse(res, 'Only the assigned user can update task status', 403);
+      }
     }
 
     // Permission check is now handled by checkCanEditTask middleware
@@ -1106,14 +1198,19 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
+    // Permission check is handled by checkCanDeleteTask middleware
+    // For standalone tasks (no project), skip project lookup entirely
+    if (!task.projectId) {
+      await Task.findByIdAndDelete(id);
+      logger.info(`Standalone task deleted: ${task.title}`);
+      return successResponse(res, 'Task deleted successfully');
+    }
+
     // Check if user has access to the project
     const project = await Project.findById(task.projectId);
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
-
-    // Permission check is now handled by checkCanDeleteTask middleware
-    // No need for additional permission checks here
 
     const projectId = task.projectId.toString();
     const taskTitle = task.title;
@@ -1235,7 +1332,8 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
 
     const project = task.projectId as any;
     if (!project) {
-      return notFoundResponse(res, 'Project not found');
+      // Standalone tasks currently don't have project-scoped audit logs; return empty history.
+      return successResponse(res, 'Task history retrieved successfully', []);
     }
 
     // Check if user has access to the project

@@ -50,6 +50,14 @@ export const checkPermission = (permission: Permission) => {
 
       // 3. From task (if updating/deleting a task and not a project route)
       if (!projectId) {
+        if (permission === 'canCreateTasks') {
+          // Support creating standalone tasks (without project) when global permission exists.
+          const User = (await import('../models/User')).User;
+          const user = await User.findById(userId);
+          if (user?.permissions?.canCreateTasks === true || user?.permissions?.canManageAllProjects === true) {
+            return next();
+          }
+        }
         return errorResponse(res, 'Project ID not found', 400);
       }
 
@@ -191,6 +199,24 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
       return errorResponse(res, 'Task not found', 404);
     }
 
+    // Standalone task (no project): allow creator/assignee or users with global edit permission.
+    if (!task.projectId) {
+      const User = (await import('../models/User')).User;
+      const user = await User.findById(userId);
+      const isCreator = task.createdBy?.toString() === userId;
+      const isAssigned = Array.isArray(task.assignees) && task.assignees.some((assignee: any) => {
+        const assigneeId = typeof assignee === 'object' && assignee._id
+          ? assignee._id.toString()
+          : assignee.toString();
+        return assigneeId === userId;
+      });
+      const isAssignedBy = task.assignedBy?.toString() === userId;
+      if (user?.permissions?.canEditTasks === true || isCreator || isAssigned || isAssignedBy) {
+        return next();
+      }
+      return errorResponse(res, 'You don\'t have permission to edit this task', 403);
+    }
+
     const projectId = task.projectId.toString();
 
     // Check if user is project owner
@@ -289,6 +315,17 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
     const task = await Task.findById(taskId);
     if (!task) {
       return errorResponse(res, 'Task not found', 404);
+    }
+
+    // Standalone task (no project): allow creator or users with global delete permission.
+    if (!task.projectId) {
+      const User = (await import('../models/User')).User;
+      const user = await User.findById(userId);
+      const isCreator = task.createdBy?.toString() === userId;
+      if (user?.permissions?.canDeleteTasks === true || isCreator) {
+        return next();
+      }
+      return errorResponse(res, 'You don\'t have permission to delete this task', 403);
     }
 
     const projectId = task.projectId.toString();

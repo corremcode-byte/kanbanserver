@@ -39,7 +39,7 @@ export interface ITask extends Document {
   status: string; // legacy - kept for backward compatibility, now supports custom values
   listId: string; // new - references project column/list ID
   priority: 'low' | 'medium' | 'high' | 'critical';
-  projectId: mongoose.Types.ObjectId;
+  projectId?: mongoose.Types.ObjectId;
   assigneeId?: mongoose.Types.ObjectId; // legacy
   assignedTo?: mongoose.Types.ObjectId; // legacy - single assignee
   assignees: mongoose.Types.ObjectId[]; // new - multiple assignees
@@ -96,7 +96,7 @@ const TaskSchema = new Schema<ITask>({
   projectId: { 
     type: Schema.Types.ObjectId, 
     ref: 'Project',
-    required: true 
+    required: false
   },
   assigneeId: { 
     type: Schema.Types.ObjectId, 
