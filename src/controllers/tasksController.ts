@@ -538,12 +538,15 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         (typeof updates.listId === 'string' && updates.listId.trim().length > 0);
 
       if (isStatusUpdateRequest) {
+        const userId = req.user._id.toString();
+        const isCreator = existingTask.createdBy?.toString() === userId;
+        const isAssignedBy = existingTask.assignedBy?.toString() === userId;
         const existingAssignees = Array.isArray(existingTask.assignees) && existingTask.assignees.length > 0
           ? existingTask.assignees.map((assignee: any) => assignee.toString())
           : (existingTask.assignedTo ? [existingTask.assignedTo.toString()] : []);
-        const isAssignedUser = existingAssignees.includes(req.user._id.toString());
-        if (!isAssignedUser) {
-          return errorResponse(res, 'Only the assigned user can update task status', 403);
+        const isAssignedUser = existingAssignees.includes(userId);
+        if (!isCreator && !isAssignedBy && !isAssignedUser) {
+          return errorResponse(res, 'Only the task creator or assigned user can update this task', 403);
         }
       }
 

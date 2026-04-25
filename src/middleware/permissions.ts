@@ -204,12 +204,12 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
       const User = (await import('../models/User')).User;
       const user = await User.findById(userId);
       const isCreator = task.createdBy?.toString() === userId;
-      const isAssigned = Array.isArray(task.assignees) && task.assignees.some((assignee: any) => {
+      const isAssigned = (Array.isArray(task.assignees) && task.assignees.some((assignee: any) => {
         const assigneeId = typeof assignee === 'object' && assignee._id
           ? assignee._id.toString()
           : assignee.toString();
         return assigneeId === userId;
-      });
+      })) || task.assignedTo?.toString() === userId;
       const isAssignedBy = task.assignedBy?.toString() === userId;
       if (user?.permissions?.canEditTasks === true || isCreator || isAssigned || isAssignedBy) {
         return next();
