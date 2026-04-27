@@ -86,7 +86,13 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
       return managerId === req.user._id;
     });
 
-    const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager;
+    const isCoOwner = project.owners && project.owners.some((owner) => {
+      const ownerObj = owner as unknown as { _id?: { toString(): string }; toString(): string };
+      const coOwnerId = ownerObj._id ? ownerObj._id.toString() : ownerObj.toString();
+      return coOwnerId === req.user._id;
+    });
+
+    const isOwnerOrMemberOrManager = ownerId === req.user._id || isMember || isManager || isCoOwner;
 
       if (!isOwnerOrMemberOrManager) {
         return errorResponse(res, 'Access denied to this project', 403);
@@ -94,9 +100,10 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
 
       // Check if user has canViewAllTasks permission
       const isOwner = ownerId === req.user._id;
-      let canViewAllTasks = isOwner; // Owners can always view all tasks
+      // Co-owners always have full task visibility regardless of permission level
+      let canViewAllTasks = isOwner || isCoOwner;
 
-      if (!isOwner) {
+      if (!isOwner && !isCoOwner) {
         // Check user's permissions
         const userPermission = await ProjectPermission.findOne({
           projectId,
@@ -140,20 +147,24 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         $or: [
           { ownerId: req.user._id },
           { members: req.user._id },
-          { managers: req.user._id }
+          { managers: req.user._id },
+          { owners: req.user._id }
         ]
       }).select('_id ownerId');
 
       const projectIds = userProjects.map(p => p._id);
 
-      // For managers/owners: show ALL tasks in their projects
+      // For managers/owners/co-owners: show ALL tasks in their projects
       const managedProjectIds = userProjects
         .filter(p => p.ownerId.toString() === req.user._id.toString())
         .map(p => p._id);
 
-      // Also include projects where user is a manager
+      // Also include projects where user is a manager or co-owner
       const managerProjects = await Project.find({
-        managers: req.user._id
+        $or: [
+          { managers: req.user._id },
+          { owners: req.user._id }
+        ]
       }).select('_id');
 
       managedProjectIds.push(...managerProjects.map(p => p._id));

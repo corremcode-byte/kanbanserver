@@ -1066,6 +1066,23 @@ export const removeOwner = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
+    // Remove from managers array (added when co-owner had 'edit' permission)
+    if (project.managers) {
+      project.managers = project.managers.filter((m: any) => {
+        const managerId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
+        return managerId !== userId;
+      });
+    }
+
+    // Add back to members so they remain part of the project
+    const alreadyMember = project.members.some((m: any) => {
+      const memberId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
+      return memberId === userId;
+    });
+    if (!alreadyMember) {
+      project.members.push(new Types.ObjectId(userId));
+    }
+
     await project.save();
 
     const updatedProject = await Project.findById(id)
