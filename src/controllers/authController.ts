@@ -278,10 +278,15 @@ export const getAllUsersWithPasswords = async (req: AuthenticatedRequest, res: R
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    // Verify the requesting user is an admin
+    // Allow any user with userManagement module permission (view or viewUsers)
     const requestingUser = await User.findById(req.user._id);
-    if (!requestingUser || !['admin', 'superadmin'].includes(requestingUser.role)) {
-      return errorResponse(res, 'Access denied. Admin privileges required.', 403);
+    if (!requestingUser) {
+      return errorResponse(res, 'User not found', 404);
+    }
+    const umPerms = requestingUser.permissions?.modules?.userManagement as Record<string, unknown> | undefined;
+    const hasUserMgmtPerm = umPerms?.view === true || umPerms?.viewUsers === true;
+    if (!hasUserMgmtPerm) {
+      return errorResponse(res, 'Access denied. User management permission required.', 403);
     }
 
     // Fetch users with plainPassword field included (excluding superadmin)

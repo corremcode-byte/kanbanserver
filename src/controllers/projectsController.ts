@@ -301,7 +301,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     // Permission check is handled by middleware (checkCanCreateProject)
     // No need to check again here
 
-    const { name, description, members = [], lists, isPersonal = false } = req.body;
+    const { name, description, color, members = [], lists, isPersonal = false } = req.body;
 
     if (!name?.trim()) {
       return errorResponse(res, 'Project name is required', 400);
@@ -356,6 +356,7 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     const projectData: any = {
       name: name.trim(),
       description: description?.trim(),
+      color: color || '#3B82F6',
       isPersonal: isPersonal,
       ownerId: creatorId,
       owners: [creatorId], // Add creator as first owner

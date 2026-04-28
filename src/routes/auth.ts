@@ -25,8 +25,7 @@ import {
 } from '../controllers/authController';
 import {
   authenticate,
-  requireManagerOrAdmin,
-  requireAdmin
+  requireManagerOrAdmin
 } from '../middleware/auth';
 import { successResponse } from '../utils/responses';
 import { uploadAvatar as uploadAvatarMiddleware } from '../middleware/upload';
@@ -84,7 +83,7 @@ router.get('/users', getAllUsers);
 router.get('/users/search', searchUsers);
 
 // Admin only routes
-router.get('/users/with-passwords', requireAdmin, getAllUsersWithPasswords);
+router.get('/users/with-passwords', getAllUsersWithPasswords);
 
 // Admin/Manager only routes
 router.put('/users/:userId/role', requireManagerOrAdmin, updateUserRole);
