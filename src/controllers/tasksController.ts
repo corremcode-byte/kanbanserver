@@ -619,16 +619,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       (typeof updates.status === 'string' && updates.status.trim().length > 0) ||
       (typeof updates.listId === 'string' && updates.listId.trim().length > 0);
 
-    if (isStatusUpdateRequest) {
-      const existingAssignees = Array.isArray(existingTask.assignees) && existingTask.assignees.length > 0
-        ? existingTask.assignees.map((assignee: any) => assignee.toString())
-        : (existingTask.assignedTo ? [existingTask.assignedTo.toString()] : []);
-
-      const isAssignedUser = existingAssignees.includes(req.user._id.toString());
-      if (!isAssignedUser) {
-        return errorResponse(res, 'Only the assigned user can update task status', 403);
-      }
-    }
+    // Status update allowed for any user who passed the checkCanEditTask middleware
 
     // Permission check is now handled by checkCanEditTask middleware
     // No need for additional permission checks here

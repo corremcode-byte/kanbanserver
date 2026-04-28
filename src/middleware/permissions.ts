@@ -248,52 +248,35 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
       return next();
     }
 
-    // Check if user is assigned to this task
+    // Check if user is assigned to or assigned this task
     const isAssigned = task.assignees && task.assignees.some((assignee: any) => {
       const assigneeId = typeof assignee === 'object' && assignee._id
         ? assignee._id.toString()
         : assignee.toString();
       return assigneeId === userId;
-    });
+    }) || task.assignedTo?.toString() === userId;
 
-    console.log('Task edit permission check:', {
-      taskId: task._id,
-      userId,
-      isOwner,
-      isInOwners,
-      isAssigned,
-      assignees: task.assignees,
-      taskTitle: task.title
-    });
+    const isAssignedBy = task.assignedBy?.toString() === userId ||
+                         task.createdBy?.toString() === userId;
 
-    // If user is assigned to the task, they can always update status and basic fields
-    if (isAssigned) {
-      console.log('User is assigned - allowing edit');
+    // Assignee or the person who assigned the task can always edit
+    if (isAssigned || isAssignedBy) {
       return next();
     }
 
-    // Check user's permissions for non-assigned users
-    const userPermission = await ProjectPermission.findOne({
-      projectId,
-      userId
-    });
+    // Check project-level permissions for everyone else
+    const userPermission = await ProjectPermission.findOne({ projectId, userId });
 
     if (!userPermission) {
       return errorResponse(res, 'You are not a member of this project', 403);
     }
 
-    // Check if user has canEditTasks permission
-    if (!userPermission.permissions.canEditTasks) {
-      return errorResponse(res, 'You don\'t have permission to edit tasks', 403);
-    }
-
-    // If user has canViewAllTasks, they can edit any task
-    if (userPermission.permissions.canViewAllTasks) {
+    // Any project member with canEditTasks permission can edit
+    if (userPermission.permissions.canEditTasks) {
       return next();
     }
 
-    // User has canEditTasks but not canViewAllTasks and not assigned
-    return errorResponse(res, 'You can only edit tasks assigned to you', 403);
+    return errorResponse(res, 'You don\'t have permission to edit tasks in this project', 403);
   } catch (error) {
     console.error('Task edit check error:', error);
     return errorResponse(res, 'Permission check failed', 500);
