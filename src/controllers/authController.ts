@@ -341,6 +341,7 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
     // Calculate stats
     // Create a query that matches tasks assigned to the user or created by them
     const taskQuery = {
+      isDeleted: { $ne: true },
       $or: [
         { assigneeId: userId },
         { assignedTo: userId },
@@ -580,6 +581,7 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
       projects
     ] = await Promise.all([
       Task.countDocuments({
+        isDeleted: { $ne: true },
         $or: [
           { assigneeId: userId },
           { assignedTo: userId },
@@ -588,6 +590,7 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
         ]
       }),
       Task.countDocuments({
+        isDeleted: { $ne: true },
         $or: [
           { assigneeId: userId },
           { assignedTo: userId },
@@ -601,6 +604,7 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
         status: 'active'
       }),
       Task.find({
+        isDeleted: { $ne: true },
         $or: [
           { assigneeId: userId },
           { assignedTo: userId },
