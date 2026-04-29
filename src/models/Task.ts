@@ -61,6 +61,10 @@ export interface ITask extends Document {
   order: number;
   createdAt: Date;
   updatedAt: Date;
+  // Soft-delete fields
+  isDeleted?: boolean;
+  deletedAt?: Date;
+  deletedBy?: mongoose.Types.ObjectId;
 }
 
 interface ITaskModel extends Model<ITask> {
@@ -193,7 +197,10 @@ const TaskSchema = new Schema<ITask>({
       uploadedAt: { type: Date, default: Date.now }
     }]
   }],
-  order: { type: Number, default: 0 }
+  order: { type: Number, default: 0 },
+  isDeleted: { type: Boolean, default: false, index: true },
+  deletedAt: { type: Date },
+  deletedBy: { type: Schema.Types.ObjectId, ref: 'User' }
 }, {
   timestamps: true,
   toJSON: {
@@ -227,7 +234,7 @@ TaskSchema.pre('save', function(next) {
 
 // Find tasks by project
 TaskSchema.statics.findByProject = function(projectId: string): Promise<ITask[]> {
-  return this.find({ projectId })
+  return this.find({ projectId, isDeleted: { $ne: true } })
     .sort({ status: 1, order: 1 })
     .populate('assigneeId', 'name email avatar');
 };
@@ -235,6 +242,7 @@ TaskSchema.statics.findByProject = function(projectId: string): Promise<ITask[]>
 // Find tasks by assignee
 TaskSchema.statics.findByAssignee = function(userId: string): Promise<ITask[]> {
   return this.find({
+    isDeleted: { $ne: true },
     $or: [
       { assigneeId: userId },
       { assignedTo: userId },

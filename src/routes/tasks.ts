@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticate);
 
 // Task CRUD operations
+router.get('/deleted', tasksController.getDeletedTasks); // Superadmin: view all soft-deleted tasks
 router.get('/', tasksController.getTasks); // No permission check - users see their assigned tasks
 router.get('/:id/history', tasksController.getTaskHistory); // Get task history (audit logs)
 router.get('/:id', tasksController.getTask); // Get single task by ID

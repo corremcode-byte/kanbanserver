@@ -119,6 +119,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         tasks = await Task.find({
           projectId,
           isSubtask: { $ne: true },
+          isDeleted: { $ne: true },
         }).populate('projectId', 'name')
           .populate('assignees', 'displayName email avatar photoURL')
           .populate('assignedTo', 'displayName email avatar photoURL')
@@ -129,6 +130,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         tasks = await Task.find({
           projectId,
           isSubtask: { $ne: true },
+          isDeleted: { $ne: true },
           $or: [
             { assignedTo: req.user._id },
             { assignees: req.user._id },
@@ -186,6 +188,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
 
       tasks = await Task.find({
         isSubtask: { $ne: true },
+        isDeleted: { $ne: true },
         $or: [
           // Tasks assigned to the user
           { assignedTo: req.user._id },
@@ -212,7 +215,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
 export const getTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const task = await Task.findById(id)
+    const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('projectId', 'name')
       .populate('assignees', 'displayName email avatar photoURL')
       .populate('assignedTo', 'displayName email avatar photoURL')
@@ -537,7 +540,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     const updates = req.body;
 
     // Find the task first to check permissions
-    const existingTask = await Task.findById(id);
+    const existingTask = await Task.findOne({ _id: id, isDeleted: { $ne: true } });
     if (!existingTask) {
       return notFoundResponse(res, 'Task not found');
     }
@@ -1196,9 +1199,14 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    
+
     // Find the task first to check permissions
-    const task = await Task.findById(id);
+    const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
+      .populate('assignees', 'displayName email')
+      .populate('assignedTo', 'displayName email')
+      .populate('assignedBy', 'displayName email')
+      .populate('createdBy', 'displayName email')
+      .populate('projectId', 'name');
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
@@ -1217,10 +1225,15 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Project not found');
     }
 
-    const projectId = task.projectId.toString();
+    const projectId = task.projectId._id ? task.projectId._id.toString() : task.projectId.toString();
     const taskTitle = task.title;
 
-    await Task.findByIdAndDelete(id);
+    // Soft-delete: preserve full task data for superadmin review
+    await Task.findByIdAndUpdate(id, {
+      isDeleted: true,
+      deletedAt: new Date(),
+      deletedBy: req.user._id
+    });
 
     // Log audit event for task deletion
     await AuditLog.logAction({
@@ -1234,6 +1247,9 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
         taskId: id,
         status: task.status,
         listId: task.listId,
+        priority: task.priority,
+        dueDate: task.dueDate,
+        description: task.description,
       },
     });
 
@@ -1330,7 +1346,7 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
     const { id } = req.params;
 
     // Verify task exists and user has access
-    const task = await Task.findById(id).populate('projectId');
+    const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } }).populate('projectId');
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
@@ -1416,6 +1432,29 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
   } catch (error) {
     logger.error('Error fetching task history:', error);
     return internalServerErrorResponse(res, 'Failed to fetch task history');
+  }
+};
+
+// Superadmin: get all soft-deleted tasks with full info
+export const getDeletedTasks = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'superadmin') {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    const tasks = await Task.find({ isDeleted: true })
+      .populate('projectId', 'name color')
+      .populate('assignees', 'displayName email avatar photoURL')
+      .populate('assignedTo', 'displayName email avatar photoURL')
+      .populate('assignedBy', 'displayName email avatar photoURL')
+      .populate('createdBy', 'displayName email avatar photoURL')
+      .populate('deletedBy', 'displayName email avatar photoURL')
+      .sort({ deletedAt: -1 });
+
+    return successResponse(res, 'Deleted tasks retrieved successfully', tasks);
+  } catch (error) {
+    logger.error('Error fetching deleted tasks:', error);
+    return internalServerErrorResponse(res, 'Failed to fetch deleted tasks');
   }
 };
 
