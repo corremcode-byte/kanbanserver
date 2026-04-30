@@ -75,7 +75,7 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
     });
 
     // Populate members
-    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email');
 
     // Notify all members via Socket.IO (including creator)
@@ -130,7 +130,7 @@ export const getOrCreateSelfChatGroup = async (req: AuthenticatedRequest, res: R
       name: 'Message Yourself',
       isActive: true
     })
-      .populate('members', 'displayName email photoURL')
+      .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email');
 
     // If doesn't exist, create it
@@ -147,7 +147,7 @@ export const getOrCreateSelfChatGroup = async (req: AuthenticatedRequest, res: R
         isActive: true
       });
 
-      await selfChatGroup.populate('members', 'displayName email photoURL');
+      await selfChatGroup.populate('members', 'displayName email photoURL isActive');
       await selfChatGroup.populate('createdBy', 'displayName email');
 
       // Notify user via Socket.IO
@@ -170,7 +170,7 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
       members: userId,
       isActive: true
     })
-      .populate('members', 'displayName email photoURL')
+      .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email')
       .sort({ updatedAt: -1 });
 
@@ -235,7 +235,7 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
       members: userId,
       isActive: true
     })
-      .populate('members', 'displayName email photoURL')
+      .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email');
 
     if (!chatGroup) {
@@ -885,7 +885,7 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
     chatGroup.members.push(...newMemberIds);
     await chatGroup.save();
 
-    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email photoURL');
 
     // Notify new members
@@ -966,7 +966,7 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
     );
     await chatGroup.save();
 
-    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email photoURL');
 
     // Notify removed member
@@ -1022,7 +1022,7 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
     if (description !== undefined) chatGroup.description = description;
 
     await chatGroup.save();
-    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email');
 
     // Notify all members
@@ -1163,7 +1163,7 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
     const chatGroups = await ChatGroup.find({
       members: userId
     })
-      .populate('members', 'displayName email photoURL')
+      .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email')
       .sort({ updatedAt: -1 });
 
@@ -1255,7 +1255,7 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
     // Get group details with members
-    await chatGroup.populate('members', 'displayName email photoURL');
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email');
 
     return res.json({
@@ -1324,7 +1324,7 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
       members: { $all: [currentUserId, otherUserId], $size: 2 },
       isActive: true
     })
-      .populate('members', 'displayName email photoURL')
+      .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email');
 
     if (existingPersonalChat) {
@@ -1365,7 +1365,7 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
     });
 
     // Populate members
-    await personalChat.populate('members', 'displayName email photoURL');
+    await personalChat.populate('members', 'displayName email photoURL isActive');
     await personalChat.populate('createdBy', 'displayName email');
 
     // Notify both users via Socket.IO
