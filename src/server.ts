@@ -1,6 +1,7 @@
 // Load environment variables FIRST before any other imports
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 import express from 'express';
 import { createServer } from 'http';
@@ -10,7 +11,6 @@ import mongoose from 'mongoose';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import path from 'path';
 import { initializeSocket } from './socket';
 import routes from './routes';
 import { errorHandler } from './middleware';
