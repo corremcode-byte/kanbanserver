@@ -24,6 +24,7 @@ const actionToEventMap: Record<string, string> = {
   'chat_group_created': 'chat_group.created',
   'chat_group_deleted': 'chat_group.deleted',
   'user_login': 'user.login',
+  'user_logout': 'user.logout',
   'user_created': 'user.created'
 };
 
@@ -67,8 +68,9 @@ const generateDetails = (log: any): string => {
     case 'chat_group_deleted':
       return `Deleted chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` from project "${metadata.projectName}"` : ''}`;
     case 'user_login':
-      const ipInfo = metadata.ipAddress ? ` from ${metadata.ipAddress}` : '';
-      return `User logged in${ipInfo}`;
+      return `User logged in`;
+    case 'user_logout':
+      return `User logged out`;
     case 'user_created':
       const createdByInfo = metadata.createdBy ? ` by ${metadata.createdBy}` : '';
       return `Created user "${metadata.userName || metadata.userEmail || 'user'}"${createdByInfo}`;

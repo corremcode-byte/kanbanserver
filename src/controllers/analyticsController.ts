@@ -884,9 +884,8 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           limit: 10
         });
 
-        // Get ALL tasks where this member was EVER assigned (including tasks they were reassigned away from)
-        // First, find all task IDs from audit logs where this member was involved
-        const memberAuditLogs = await AuditLog.find({
+        // Get all task IDs for this member (two queries, combined in memory)
+        const memberAuditLogTaskIds = await AuditLog.find({
           projectId,
           entityType: 'task',
           $or: [
@@ -896,8 +895,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           ]
         }).distinct('entityId');
 
-        // Also get currently assigned tasks
-        const currentlyAssignedTasks = await Task.find({
+        const currentlyAssignedTaskIds = await Task.find({
           projectId,
           $or: [
             { assigneeId: memberId },
@@ -907,198 +905,158 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           ]
         }).distinct('_id');
 
-        // Combine both lists and get unique task IDs
-        const allTaskIds = [...new Set([...memberAuditLogs, ...currentlyAssignedTasks.map(id => id.toString())])];
+        const allTaskIds = [...new Set([
+          ...memberAuditLogTaskIds.map(String),
+          ...currentlyAssignedTaskIds.map(String)
+        ])].slice(0, 200); // hard cap to prevent OOM
 
-        // Fetch all tasks
-        const memberTasks = await Task.find({
-          _id: { $in: allTaskIds }
-        }).select('title assignees assignedAt completedAt status priority createdAt');
+        // Fetch all tasks in one query
+        const memberTasks = await Task.find({ _id: { $in: allTaskIds } })
+          .select('title assignees assignedAt completedAt status priority createdAt')
+          .lean();
 
-        const tasks = await Promise.all(memberTasks.map(async (task: any) => {
+        // BATCH: fetch ALL audit logs for ALL tasks in a single query
+        const allTaskAuditLogs = await AuditLog.find({
+          projectId,
+          entityType: 'task',
+          entityId: { $in: allTaskIds },
+          action: { $in: ['task_created', 'task_updated', 'task_completed'] }
+        }).select('entityId action userId metadata createdAt')
+          .populate('userId', 'displayName email isActive')
+          .sort({ createdAt: 1 })
+          .lean();
+
+        // Collect all user IDs referenced in those audit logs
+        const referencedUserIds = new Set<string>();
+        const extractId = (a: any): string => {
+          if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a)) return a;
+          if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
+            try {
+              const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
+              if (match) return match[1];
+              const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
+              if (idMatch) return idMatch[1];
+              const parsed = JSON.parse(a);
+              if (parsed._id) return parsed._id.toString();
+              return parsed.toString();
+            } catch { return String(a); }
+          }
+          if (a && typeof a === 'object' && a._id) return a._id.toString();
+          return String(a);
+        };
+
+        for (const log of allTaskAuditLogs) {
+          if (log.userId) {
+            referencedUserIds.add((log.userId as any)?._id?.toString() || String(log.userId));
+          }
+          const meta = log.metadata as any;
+          [...(meta?.initialAssignees || []), ...(meta?.oldAssignees || []), ...(meta?.newAssignees || [])]
+            .forEach((a: any) => {
+              const id = extractId(a);
+              if (/^[0-9a-fA-F]{24}$/.test(id)) referencedUserIds.add(id);
+            });
+        }
+
+        // BATCH: fetch all needed users in a single query
+        const usersArr = await User.find({ _id: { $in: Array.from(referencedUserIds) } })
+          .select('displayName email isActive photoURL').lean();
+        const userMap = new Map<string, any>(usersArr.map((u: any) => [u._id.toString(), u]));
+
+        // Group audit logs by task ID for O(1) lookup
+        const auditLogsByTask = new Map<string, any[]>();
+        for (const log of allTaskAuditLogs) {
+          const tid = String(log.entityId);
+          if (!auditLogsByTask.has(tid)) auditLogsByTask.set(tid, []);
+          auditLogsByTask.get(tid)!.push(log);
+        }
+
+        // Build tasks array entirely in memory — zero additional DB queries
+        const tasks = memberTasks.map((task: any) => {
+          const taskId = task._id.toString();
           const assignedAt = task.assignedAt || task.createdAt;
           const completedAt = task.completedAt;
 
-          // Calculate time spent: either from assigned to completed, or from assigned to now if not completed
           let timeSpent = 0;
           if (completedAt && assignedAt) {
-            timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+            timeSpent = (new Date(completedAt).getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
           } else if (assignedAt) {
-            timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60); // hours
+            timeSpent = (new Date().getTime() - new Date(assignedAt).getTime()) / (1000 * 60 * 60);
           }
 
-          // Build assignment history from audit logs
           const assignmentHistory: any[] = [];
 
-          // Get all audit logs related to this task (don't filter by date to get complete history)
-          const allTaskAudits = await AuditLog.find({
-            projectId,
-            entityType: 'task',
-            entityId: task._id.toString(),
-            action: { $in: ['task_created', 'task_updated', 'task_completed'] }
-          }).populate('userId', 'displayName email isActive').sort({ createdAt: 1 });
+          // Filter out logs for deleted/inactive users using pre-loaded userMap
+          const taskAudits = (auditLogsByTask.get(taskId) || []).filter((audit: any) => {
+            if (!audit.userId) return false;
+            const uid = (audit.userId as any)?._id?.toString() || String(audit.userId);
+            const user = userMap.get(uid);
+            return user && (user as any).isActive !== false;
+          });
 
-          // Filter out logs for deleted or inactive users
-          const taskAudits: any[] = [];
-          
-          for (const audit of allTaskAudits) {
-            if (audit.userId) {
-              const userId = typeof audit.userId === 'object' && (audit.userId as any)._id 
-                ? (audit.userId as any)._id.toString() 
-                : audit.userId.toString();
-              
-              // Check if user exists and is active
-              const user = await User.findById(userId).select('isActive').lean();
-              if (user && user.isActive !== false) {
-                taskAudits.push(audit);
-              }
-            }
-          }
-
-          // Track assignment changes - map of userId to their assignment start time
           const assignmentTimes = new Map<string, Date>();
           let currentAssignees = new Set<string>();
 
           for (const audit of taskAudits) {
-            const auditUser = audit.userId as any;
-
             if (audit.action === 'task_created') {
-              // Task was created - record initial assignment from metadata
               const metadata = audit.metadata as any;
-
-              // Helper to extract ID from various formats
-              const extractId = (a: any): string => {
-                // If it's already a simple string ID (24 hex chars), return it
-                if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a)) return a;
-
-                // If it's a stringified object, try to parse it
-                if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
-                  try {
-                    // Try to extract ObjectId from stringified format
-                    const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
-                    if (match) return match[1];
-
-                    // Try to extract _id from stringified object
-                    const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
-                    if (idMatch) return idMatch[1];
-
-                    // Try parsing as JSON
-                    const parsed = JSON.parse(a);
-                    if (parsed._id) return parsed._id.toString();
-                    return parsed.toString();
-                  } catch (e) {
-                    // If parsing fails, continue to other methods
-                  }
-                }
-
-                // If it's an object with _id
-                if (a && typeof a === 'object' && a._id) {
-                  return a._id.toString();
-                }
-
-                // Last resort
-                return a.toString();
-              };
-
               const initialAssignees = (metadata?.initialAssignees || []).map(extractId);
 
-              if (initialAssignees.length > 0) {
-                for (const assigneeId of initialAssignees) {
-                  const assignee = await User.findById(assigneeId).select('displayName email');
-                  if (assignee) {
-                    const assigneeIdStr = assigneeId.toString();
-                    currentAssignees.add(assigneeIdStr);
-                    assignmentTimes.set(assigneeIdStr, new Date(audit.createdAt));
-                    assignmentHistory.push({
-                      assignedTo: assigneeIdStr,
-                      assignedToName: assignee.displayName,
-                      assignedToEmail: assignee.email,
-                      assignedAt: audit.createdAt,
-                      timeSpent: 0,
-                      action: 'assigned'
-                    });
-                  }
+              for (const assigneeId of initialAssignees) {
+                const assignee = userMap.get(assigneeId);
+                if (assignee) {
+                  currentAssignees.add(assigneeId);
+                  assignmentTimes.set(assigneeId, new Date(audit.createdAt));
+                  assignmentHistory.push({
+                    assignedTo: assigneeId,
+                    assignedToName: (assignee as any).displayName,
+                    assignedToEmail: (assignee as any).email,
+                    assignedAt: audit.createdAt,
+                    timeSpent: 0,
+                    action: 'assigned'
+                  });
                 }
               }
             } else if (audit.action === 'task_updated') {
-              // Check if assignees changed in this update
               const metadata = audit.metadata as any;
               if (metadata && metadata.assigneesChanged) {
-                // Get assignees from audit log metadata (historical data)
-                // Ensure we extract just the IDs in case they're objects or stringified objects
-                const extractId = (a: any): string => {
-                  // If it's already a simple string ID (24 hex chars), return it
-                  if (typeof a === 'string' && /^[0-9a-fA-F]{24}$/.test(a)) return a;
-
-                  // If it's a stringified object, try to parse it
-                  if (typeof a === 'string' && (a.includes('{') || a.includes('ObjectId'))) {
-                    try {
-                      // Try to extract ObjectId from stringified format
-                      const match = a.match(/ObjectId\('([0-9a-fA-F]{24})'\)/);
-                      if (match) return match[1];
-
-                      // Try to extract _id from stringified object
-                      const idMatch = a.match(/_id:\s*(?:new\s+)?ObjectId\('([0-9a-fA-F]{24})'\)/);
-                      if (idMatch) return idMatch[1];
-
-                      // Try parsing as JSON
-                      const parsed = JSON.parse(a);
-                      if (parsed._id) return parsed._id.toString();
-                      return parsed.toString();
-                    } catch (e) {
-                      // If parsing fails, continue to other methods
-                    }
-                  }
-
-                  // If it's an object with _id
-                  if (a && typeof a === 'object' && a._id) {
-                    return a._id.toString();
-                  }
-
-                  // Last resort
-                  return a.toString();
-                };
 
                 const newAssignees = (metadata.newAssignees || []).map(extractId);
                 const oldAssigneesFromMetadata = (metadata.oldAssignees || []).map(extractId);
                 const newAssigneeSet = new Set<string>(newAssignees);
 
-                // Find removed assignees (reassigned away)
+                // Find removed assignees — use pre-loaded userMap, no DB query
                 for (const oldAssignee of currentAssignees) {
                   if (!newAssigneeSet.has(oldAssignee)) {
-                    const assignee = await User.findById(oldAssignee).select('displayName email');
+                    const assignee = userMap.get(oldAssignee);
                     if (assignee) {
-                      // Calculate time this person had the task
                       const assignStartTime = assignmentTimes.get(oldAssignee);
-                      const timeOnTask = assignStartTime ?
-                        (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
-
+                      const timeOnTask = assignStartTime
+                        ? (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60)
+                        : 0;
                       assignmentHistory.push({
                         assignedTo: oldAssignee,
-                        assignedToName: assignee.displayName,
-                        assignedToEmail: assignee.email,
+                        assignedToName: (assignee as any).displayName,
+                        assignedToEmail: (assignee as any).email,
                         assignedAt: assignStartTime || audit.createdAt,
                         reassignedAt: audit.createdAt,
                         timeSpent: Math.round(timeOnTask * 10) / 10,
                         action: 'reassigned'
                       });
-
-                      // Remove from tracking
                       assignmentTimes.delete(oldAssignee);
                     }
                   }
                 }
 
-                // Find new assignees
+                // Find new assignees — use pre-loaded userMap, no DB query
                 for (const newAssigneeId of newAssigneeSet) {
                   if (!currentAssignees.has(newAssigneeId)) {
-                    const assignee = await User.findById(newAssigneeId).select('displayName email');
+                    const assignee = userMap.get(newAssigneeId);
                     if (assignee) {
                       assignmentTimes.set(newAssigneeId, new Date(audit.createdAt));
                       assignmentHistory.push({
                         assignedTo: newAssigneeId,
-                        assignedToName: assignee.displayName,
-                        assignedToEmail: assignee.email,
+                        assignedToName: (assignee as any).displayName,
+                        assignedToEmail: (assignee as any).email,
                         assignedAt: audit.createdAt,
                         timeSpent: 0,
                         action: 'assigned'
@@ -1110,24 +1068,23 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
                 currentAssignees = newAssigneeSet;
               }
             } else if (audit.action === 'task_completed') {
-              // Task completed - calculate final time for all current assignees
+              // Use pre-loaded userMap, no DB query
               for (const assigneeId of currentAssignees) {
-                const assignee = await User.findById(assigneeId).select('displayName email');
+                const assignee = userMap.get(assigneeId);
                 if (assignee) {
                   const assignStartTime = assignmentTimes.get(assigneeId);
-                  const timeOnTask = assignStartTime ?
-                    (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60) : 0;
-
+                  const timeOnTask = assignStartTime
+                    ? (new Date(audit.createdAt).getTime() - assignStartTime.getTime()) / (1000 * 60 * 60)
+                    : 0;
                   assignmentHistory.push({
                     assignedTo: assigneeId,
-                    assignedToName: assignee.displayName,
-                    assignedToEmail: assignee.email,
+                    assignedToName: (assignee as any).displayName,
+                    assignedToEmail: (assignee as any).email,
                     assignedAt: assignStartTime || audit.createdAt,
                     completedAt: audit.createdAt,
                     timeSpent: Math.round(timeOnTask * 10) / 10,
                     action: 'completed'
                   });
-
                   assignmentTimes.delete(assigneeId);
                 }
               }
@@ -1135,18 +1092,18 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           }
 
           return {
-            taskId: task._id.toString(),
+            taskId,
             taskTitle: task.title,
             assignedTo: memberId,
-            assignedToName: memberData?.displayName || 'Unknown',
-            assignedAt: assignedAt,
-            completedAt: completedAt,
+            assignedToName: (memberData as any)?.displayName || 'Unknown',
+            assignedAt,
+            completedAt,
             timeSpent: Math.round(timeSpent * 10) / 10,
             status: task.status,
             priority: task.priority,
-            assignmentHistory: assignmentHistory
+            assignmentHistory
           };
-        }));
+        });
 
         return {
           userId: memberId,

@@ -25,9 +25,12 @@ import {
 } from '../controllers/authController';
 import {
   authenticate,
-  requireManagerOrAdmin
+  optionalAuth,
+  requireManagerOrAdmin,
+  AuthenticatedRequest
 } from '../middleware/auth';
 import { successResponse } from '../utils/responses';
+import { User, AuditLog } from '../models';
 import { uploadAvatar as uploadAvatarMiddleware } from '../middleware/upload';
 
 const router = Router();
@@ -38,7 +41,19 @@ router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
 // Logout route
-router.post('/logout', (req, res) => {
+router.post('/logout', optionalAuth, async (req: AuthenticatedRequest, res) => {
+  if (req.user) {
+    try {
+      await User.findByIdAndUpdate(req.user._id, { lastLogoutAt: new Date() });
+      await AuditLog.logSystemEvent({
+        userId: req.user._id,
+        action: 'user_logout',
+        metadata: { userName: req.user.displayName, userEmail: req.user.email }
+      });
+    } catch (err) {
+      console.error('Failed to record logout:', err);
+    }
+  }
   res.clearCookie('auth_token', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

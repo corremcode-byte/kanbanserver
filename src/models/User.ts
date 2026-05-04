@@ -23,6 +23,7 @@ export interface IUser extends Document {
   role: 'superadmin' | 'admin' | 'manager' | 'member';
   isActive: boolean;
   lastLoginAt: Date;
+  lastLogoutAt?: Date;
   pushSubscriptions?: IPushSubscription[];
   comparePassword(candidatePassword: string): Promise<boolean>;
   comparePasskey(candidatePasskey: string): Promise<boolean>;
@@ -203,6 +204,9 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   lastLoginAt: {
     type: Date,
     default: Date.now
+  },
+  lastLogoutAt: {
+    type: Date
   },
   pushSubscriptions: [{
     endpoint: {

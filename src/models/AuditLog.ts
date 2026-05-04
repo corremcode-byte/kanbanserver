@@ -7,7 +7,7 @@ export interface IAuditLog extends Document {
           'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' |
           'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' |
           'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted' |
-          'user_login' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
+          'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
           'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
           'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
   entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user';
@@ -43,7 +43,7 @@ interface IAuditLogModel extends Model<IAuditLog> {
 
   logSystemEvent(data: {
     userId: string;
-    action: 'user_login' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
+    action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
             'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
             'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
     metadata?: IAuditLog['metadata'];
@@ -104,6 +104,7 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'chat_group_created',
       'chat_group_deleted',
       'user_login',
+      'user_logout',
       'user_created',
       'user_password_updated',
       'user_passkey_set',
@@ -192,7 +193,7 @@ AuditLogSchema.statics.logAction = async function(data: {
 // Static method to log system-level events (login, user creation, etc.)
 AuditLogSchema.statics.logSystemEvent = async function(data: {
   userId: string;
-  action: 'user_login' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
+  action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
           'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
           'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
   metadata?: IAuditLog['metadata'];

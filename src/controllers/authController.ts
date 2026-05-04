@@ -82,16 +82,10 @@ export const login = async (req: Request, res: Response) => {
 
     // Log login event to audit logs
     try {
-      const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
-      const userAgent = req.headers['user-agent'] || 'unknown';
-      
       await AuditLog.logSystemEvent({
         userId: user._id.toString(),
         action: 'user_login',
-        metadata: {
-          ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
-          userAgent: userAgent
-        }
+        metadata: {}
       });
     } catch (auditError) {
       // Don't fail login if audit logging fails
