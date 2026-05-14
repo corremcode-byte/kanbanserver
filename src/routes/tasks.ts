@@ -20,4 +20,7 @@ router.delete('/:id', checkCanDeleteTask, tasksController.deleteTask);
 // Task reordering (permission check handled in controller since it's a batch operation)
 router.post('/reorder', tasksController.reorderTasks);
 
+// Like/unlike a task
+router.post('/:id/like', tasksController.toggleLike);
+
 export default router;

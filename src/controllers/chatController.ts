@@ -1319,15 +1319,22 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
       });
     }
 
-    // Check if a personal chat (2-member group) already exists between these two users
+    // Check if a personal chat already exists between these two users.
+    // The $or handles pre-migration chats (no isPersonalChat field) and new ones.
     const existingPersonalChat = await ChatGroup.findOne({
       members: { $all: [currentUserId, otherUserId], $size: 2 },
-      isActive: true
+      isActive: true,
+      $or: [{ isPersonalChat: true }, { isPersonalChat: { $exists: false } }]
     })
       .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email');
 
     if (existingPersonalChat) {
+      // Back-fill the flag on pre-migration chats
+      if (!existingPersonalChat.isPersonalChat) {
+        existingPersonalChat.isPersonalChat = true;
+        await existingPersonalChat.save();
+      }
       // Get last message and unread count
       const lastMessage = await Message.findOne({
         groupId: existingPersonalChat._id,
@@ -1361,7 +1368,8 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
       createdBy: currentUserId,
       members: [currentUserId, otherUserId],
       encryptionPublicKey,
-      isActive: true
+      isActive: true,
+      isPersonalChat: true
     });
 
     // Populate members

@@ -8,6 +8,7 @@ export interface IChatGroup extends Document {
   projectId?: mongoose.Types.ObjectId;
   encryptionPublicKey: string; // Group's public key for encryption
   isActive: boolean;
+  isPersonalChat: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +49,11 @@ const chatGroupSchema = new Schema<IChatGroup>(
     isActive: {
       type: Boolean,
       default: true
+    },
+    isPersonalChat: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   {

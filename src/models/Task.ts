@@ -62,6 +62,7 @@ export interface ITask extends Document {
   createdAt: Date;
   updatedAt: Date;
   // Soft-delete fields
+  likes: mongoose.Types.ObjectId[];
   isDeleted?: boolean;
   deletedAt?: Date;
   deletedBy?: mongoose.Types.ObjectId;
@@ -197,6 +198,7 @@ const TaskSchema = new Schema<ITask>({
       uploadedAt: { type: Date, default: Date.now }
     }]
   }],
+  likes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   order: { type: Number, default: 0 },
   isDeleted: { type: Boolean, default: false, index: true },
   deletedAt: { type: Date },

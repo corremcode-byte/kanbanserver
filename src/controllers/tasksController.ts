@@ -12,6 +12,7 @@ import { createNotification } from './notificationController';
 interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
+    id?: string;
     email: string;
     displayName: string;
     role: string;
@@ -1540,3 +1541,31 @@ function extractChanges(metadata: any): any {
 
   return changes;
 }
+
+// Toggle like on a task (add if not liked, remove if already liked)
+export const toggleLike = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id || req.user.id;
+
+    const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!task) {
+      return notFoundResponse(res, 'Task not found');
+    }
+
+    const alreadyLiked = task.likes.some((likeId: any) => likeId.toString() === userId.toString());
+    const update = alreadyLiked
+      ? { $pull: { likes: userId } }
+      : { $addToSet: { likes: userId } };
+
+    const updated = await Task.findByIdAndUpdate(id, update, { new: true });
+    return successResponse(res, alreadyLiked ? 'Like removed' : 'Task liked', {
+      likes: updated?.likes ?? [],
+      likeCount: updated?.likes?.length ?? 0,
+      liked: !alreadyLiked,
+    });
+  } catch (error) {
+    logger.error('Error toggling task like:', error);
+    return internalServerErrorResponse(res, 'Failed to toggle like');
+  }
+};
