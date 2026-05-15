@@ -66,9 +66,6 @@ router.get('/debug/storage', async (_req, res) => {
 
 // Debug endpoint to test file upload without Firebase
 router.post('/groups/:groupId/upload-test', upload.single('file'), (req, res) => {
-  console.log('🧪 Test upload endpoint hit');
-  console.log('File:', req.file ? req.file.originalname : 'No file');
-  console.log('Group ID:', req.params.groupId);
 
   if (!req.file) {
     res.status(400).json({ message: 'No file received' });

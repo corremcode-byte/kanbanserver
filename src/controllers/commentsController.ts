@@ -37,20 +37,31 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
-    // Get project to verify permissions
-    const project = await Project.findById(task.projectId);
-    if (!project) {
-      return notFoundResponse(res, 'Project not found');
-    }
-
-    // Check if user is owner, manager, or member
     const userId = req.user!._id.toString();
-    const isOwner = project.ownerId.toString() === userId;
-    const isMember = project.members.some((m: any) => m.toString() === userId);
-    const isManager = project.managers?.some((m: any) => m.toString() === userId);
 
-    if (!isOwner && !isMember && !isManager) {
-      return errorResponse(res, 'Only project members can comment', 403);
+    // Standalone task (no project): allow creator/assignee/assigner to comment
+    if (!task.projectId) {
+      const isCreator = task.createdBy?.toString() === userId;
+      const assigneeIds = Array.isArray(task.assignees)
+        ? task.assignees.map((a: any) => a?._id ? a._id.toString() : a.toString())
+        : [];
+      const isAssignee = assigneeIds.includes(userId);
+      const isAssigner = task.assignedBy?.toString() === userId;
+      if (!isCreator && !isAssignee && !isAssigner) {
+        return errorResponse(res, 'Access denied', 403);
+      }
+    } else {
+      // Get project to verify permissions
+      const project = await Project.findById(task.projectId);
+      if (!project) {
+        return notFoundResponse(res, 'Project not found');
+      }
+      const isOwner = project.ownerId.toString() === userId;
+      const isMember = project.members.some((m: any) => m.toString() === userId);
+      const isManager = project.managers?.some((m: any) => m.toString() === userId);
+      if (!isOwner && !isMember && !isManager) {
+        return errorResponse(res, 'Only project members can comment', 403);
+      }
     }
 
     // Create comment
@@ -70,34 +81,38 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
 
     // Log audit action
     try {
-      await AuditLog.logAction({
-        projectId: task.projectId.toString(),
-        userId: req.user!._id,
-        action: 'comment_added',
-        entityType: 'task',
-        entityId: task._id.toString(),
-        metadata: {
-          taskTitle: task.title,
-          commentId: comment.id,
-          commentText: text.substring(0, 100) // Log first 100 chars
-        }
-      });
+      if (task.projectId) {
+        await AuditLog.logAction({
+          projectId: task.projectId.toString(),
+          userId: req.user!._id,
+          action: 'comment_added',
+          entityType: 'task',
+          entityId: task._id.toString(),
+          metadata: {
+            taskTitle: task.title,
+            commentId: comment.id,
+            commentText: text.substring(0, 100)
+          }
+        });
+      }
     } catch (auditError) {
       logger.error('Failed to log audit action:', auditError);
     }
 
-    // Broadcast to project room via socket
-    const io = getIO();
-    broadcastToProject(io, task.projectId.toString(), 'comment:added', {
-      taskId: task._id,
-      comment,
-      createdBy: {
-        id: req.user!._id,
-        name: req.user!.displayName,
-        email: req.user!.email
-      },
-      timestamp: new Date()
-    });
+    // Broadcast to project room via socket (only for project tasks)
+    if (task.projectId) {
+      const io = getIO();
+      broadcastToProject(io, task.projectId.toString(), 'comment:added', {
+        taskId: task._id,
+        comment,
+        createdBy: {
+          id: req.user!._id,
+          name: req.user!.displayName,
+          email: req.user!.email
+        },
+        timestamp: new Date()
+      });
+    }
 
     logger.info(`Comment added to task ${task.title} by ${req.user!.displayName}`);
 
@@ -209,21 +224,25 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
       return notFoundResponse(res, 'Comment not found');
     }
 
-    // Get project to check permissions
-    const project = await Project.findById(task.projectId);
-    if (!project) {
-      return notFoundResponse(res, 'Project not found');
-    }
-
-    // Check permissions: owner, manager, or comment creator can delete
-    // Note: Admin role no longer bypasses permission checks
     const userId = req.user!._id.toString();
-    const isOwner = project.ownerId.toString() === userId;
-    const isManager = project.managers?.some((m: any) => m.toString() === userId);
     const isCommentCreator = comment.createdBy.toString() === userId;
 
-    if (!isOwner && !isManager && !isCommentCreator) {
-      return errorResponse(res, 'Only project owner, manager, or comment creator can delete comments', 403);
+    if (!task.projectId) {
+      // Standalone task: only comment creator can delete
+      if (!isCommentCreator) {
+        return errorResponse(res, 'Only the comment creator can delete this comment', 403);
+      }
+    } else {
+      // Project task: owner, manager, or comment creator can delete
+      const project = await Project.findById(task.projectId);
+      if (!project) {
+        return notFoundResponse(res, 'Project not found');
+      }
+      const isOwner = project.ownerId.toString() === userId;
+      const isManager = project.managers?.some((m: any) => m.toString() === userId);
+      if (!isOwner && !isManager && !isCommentCreator) {
+        return errorResponse(res, 'Only project owner, manager, or comment creator can delete comments', 403);
+      }
     }
 
     // Remove comment
@@ -232,33 +251,37 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
 
     // Log audit action
     try {
-      await AuditLog.logAction({
-        projectId: task.projectId.toString(),
-        userId: req.user!._id,
-        action: 'comment_deleted',
-        entityType: 'task',
-        entityId: task._id.toString(),
-        metadata: {
-          taskTitle: task.title,
-          commentId: comment.id
-        }
-      });
+      if (task.projectId) {
+        await AuditLog.logAction({
+          projectId: task.projectId.toString(),
+          userId: req.user!._id,
+          action: 'comment_deleted',
+          entityType: 'task',
+          entityId: task._id.toString(),
+          metadata: {
+            taskTitle: task.title,
+            commentId: comment.id
+          }
+        });
+      }
     } catch (auditError) {
       logger.error('Failed to log audit action:', auditError);
     }
 
-    // Broadcast to project room via socket
-    const io = getIO();
-    broadcastToProject(io, task.projectId.toString(), 'comment:deleted', {
-      taskId: task._id,
-      commentId,
-      deletedBy: {
-        id: req.user!._id,
-        name: req.user!.displayName,
-        email: req.user!.email
-      },
-      timestamp: new Date()
-    });
+    // Broadcast to project room via socket (only for project tasks)
+    if (task.projectId) {
+      const io = getIO();
+      broadcastToProject(io, task.projectId.toString(), 'comment:deleted', {
+        taskId: task._id,
+        commentId,
+        deletedBy: {
+          id: req.user!._id,
+          name: req.user!.displayName,
+          email: req.user!.email
+        },
+        timestamp: new Date()
+      });
+    }
 
     logger.info(`Comment deleted from task ${task.title}`);
     return successResponse(res, 'Comment deleted successfully');
@@ -269,11 +292,43 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
 };
 
 /**
+ * Get comment counts for multiple task IDs in one query
+ */
+export const getCommentCounts = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const raw = (req.query.ids as string) || '';
+    const { Types } = await import('mongoose');
+    const ids = raw.split(',').map(s => s.trim()).filter(id => Types.ObjectId.isValid(id));
+    if (ids.length === 0) return successResponse(res, 'Comment counts retrieved', {});
+
+    const tasks = await Task.find(
+      { _id: { $in: ids } },
+      { _id: 1, 'comments': 1 },
+    ).lean();
+
+    const counts: Record<string, number> = {};
+    tasks.forEach((t: any) => {
+      counts[t._id.toString()] = Array.isArray(t.comments) ? t.comments.length : 0;
+    });
+
+    return successResponse(res, 'Comment counts retrieved', counts);
+  } catch (error) {
+    logger.error('Error getting comment counts:', error);
+    return internalServerErrorResponse(res, 'Failed to get comment counts');
+  }
+};
+
+/**
  * Get all comments for a task
  */
 export const getComments = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { taskId } = req.params;
+
+    const { Types } = await import('mongoose');
+    if (!Types.ObjectId.isValid(taskId)) {
+      return successResponse(res, 'Comments retrieved successfully', []);
+    }
 
     // Find task
     const task = await Task.findById(taskId)

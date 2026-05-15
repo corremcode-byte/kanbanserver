@@ -13,7 +13,6 @@ export const authenticate = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  console.log('Auth debug - Authentication middleware called for:', req.url);
   try {
     // Try to get token from cookie first, fallback to Authorization header
     let token = req.cookies?.auth_token;
@@ -26,24 +25,18 @@ export const authenticate = async (
     }
 
     if (!token) {
-      console.log('Auth debug - No token found in cookie or authorization header');
       errorResponse(res, 'Authorization token required', 401);
       return;
     }
 
     const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 
-    console.log('Auth debug - Token received from', req.cookies?.auth_token ? 'cookie' : 'header', ', verifying...');
-    console.log('Auth debug - Token preview:', token.substring(0, 50) + '...');
-    console.log('Auth debug - Using JWT_SECRET:', secret === process.env.JWT_SECRET ? 'from .env' : 'fallback');
 
     // Verify JWT token
     const decoded = jwt.verify(token, secret) as { userId: string };
 
-    console.log('Auth debug - Token decoded:', decoded);
 
     if (!decoded || !decoded.userId) {
-      console.log('Auth error: Invalid token or missing userId');
       errorResponse(res, 'Invalid token', 401);
       return;
     }
@@ -51,13 +44,11 @@ export const authenticate = async (
     // Find user in database
     const user = await User.findById(decoded.userId);
     if (!user) {
-      console.log('Auth error: User not found in database:', decoded.userId);
       errorResponse(res, 'User not found', 404);
       return;
     }
 
     if (!user.isActive) {
-      console.log('Auth error: User account is deactivated:', user.email);
       errorResponse(res, 'Account is deactivated', 403);
       return;
     }
@@ -71,12 +62,6 @@ export const authenticate = async (
       isManager: ['manager', 'admin', 'superadmin'].includes(user.role),
       isSuperAdmin: user.role === 'superadmin'
     };
-
-    console.log('Auth debug - Token verified, user found:', {
-      userId: user._id.toString(),
-      email: user.email,
-      isActive: user.isActive
-    });
 
     next();
   } catch (error) {

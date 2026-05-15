@@ -180,7 +180,7 @@ export const getTaskNotificationDetails = async (req: AuthenticatedRequest, res:
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'task_chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder';
   title: string;
   message: string;
   metadata?: {
@@ -252,7 +252,7 @@ export const createNotification = async (data: {
           noteId: data.metadata?.noteId?.toString(),
         },
         tag: `${data.type}-${notification._id}`,
-        requireInteraction: ['project_invitation', 'task_assigned', 'chat_message'].includes(data.type),
+        requireInteraction: ['project_invitation', 'task_assigned', 'chat_message', 'task_chat_message'].includes(data.type),
       });
 
       logger.info(`Push notification sent for user ${data.userId}: ${data.title}`);
@@ -265,6 +265,53 @@ export const createNotification = async (data: {
   } catch (error) {
     logger.error('Error creating notification:', error);
     throw error;
+  }
+};
+
+// Get unread task-chat notification counts grouped by taskId (for card badges)
+export const getTaskChatBadges = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return errorResponse(res, 'User not authenticated', 401);
+
+    const notifications = await Notification.find({
+      userId,
+      type: 'task_chat_message',
+      read: false,
+      'metadata.taskId': { $exists: true },
+    }).lean();
+
+    const badges: Record<string, number> = {};
+    notifications.forEach((n) => {
+      const taskId = n.metadata?.taskId?.toString();
+      if (taskId) badges[taskId] = (badges[taskId] || 0) + 1;
+    });
+
+    return successResponse(res, 'Task chat badges retrieved', badges);
+  } catch (error) {
+    logger.error('Error getting task chat badges:', error);
+    return internalServerErrorResponse(res, 'Failed to get task chat badges');
+  }
+};
+
+// Mark all unread task-chat notifications for a specific task as read
+export const markTaskChatRead = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return errorResponse(res, 'User not authenticated', 401);
+
+    const { taskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId)) return errorResponse(res, 'Invalid task ID', 400);
+
+    await Notification.updateMany(
+      { userId, type: 'task_chat_message', read: false, 'metadata.taskId': new mongoose.Types.ObjectId(taskId) },
+      { read: true, readAt: new Date() },
+    );
+
+    return successResponse(res, 'Task chat notifications marked as read');
+  } catch (error) {
+    logger.error('Error marking task chat as read:', error);
+    return internalServerErrorResponse(res, 'Failed to mark task chat as read');
   }
 };
 

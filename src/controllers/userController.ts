@@ -394,55 +394,43 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
       // Project permissions
       if (user.permissions.modules.projects) {
         const projectPerms = user.permissions.modules.projects;
-        console.log('🔧 Mapping project permissions from modules (single user):', projectPerms);
 
         if (projectPerms.createProjects !== undefined) {
           user.permissions.canCreateProjects = projectPerms.createProjects;
-          console.log('✅ Set canCreateProjects =', projectPerms.createProjects);
         }
         if (projectPerms.deleteProjects !== undefined) {
           user.permissions.canDeleteProjects = projectPerms.deleteProjects;
-          console.log('✅ Set canDeleteProjects =', projectPerms.deleteProjects);
         }
         if (projectPerms.editProjects !== undefined) {
           user.permissions.canManageAllProjects = projectPerms.editProjects;
-          console.log('✅ Set canManageAllProjects =', projectPerms.editProjects);
         }
         if (projectPerms.viewProjects !== undefined) {
           user.permissions.canViewAllProjects = projectPerms.viewProjects;
-          console.log('✅ Set canViewAllProjects =', projectPerms.viewProjects);
         }
         if (projectPerms.personalProjects !== undefined) {
           user.permissions.canCreatePersonalProjects = projectPerms.personalProjects;
-          console.log('✅ Set canCreatePersonalProjects =', projectPerms.personalProjects);
         }
         if (projectPerms.manageMembers !== undefined) {
           // Note: manageMembers is project-level, but we store it in modules for consistency
           // The actual check happens at project level via ProjectPermission
-          console.log('✅ Set manageMembers module permission =', projectPerms.manageMembers);
         }
       }
 
       // My Tasks permissions
       if (user.permissions.modules.myTasks) {
         const taskPerms = user.permissions.modules.myTasks;
-        console.log('🔧 Mapping task permissions from modules (single user):', taskPerms);
 
         if (taskPerms.createTasks !== undefined) {
           user.permissions.canCreateTasks = taskPerms.createTasks;
-          console.log('✅ Set canCreateTasks =', taskPerms.createTasks);
         }
         if (taskPerms.editTasks !== undefined) {
           user.permissions.canEditTasks = taskPerms.editTasks;
-          console.log('✅ Set canEditTasks =', taskPerms.editTasks);
         }
         if (taskPerms.deleteTasks !== undefined) {
           user.permissions.canDeleteTasks = taskPerms.deleteTasks;
-          console.log('✅ Set canDeleteTasks =', taskPerms.deleteTasks);
         }
         if (taskPerms.assignTasks !== undefined) {
           user.permissions.canAssignTasks = taskPerms.assignTasks;
-          console.log('✅ Set canAssignTasks =', taskPerms.assignTasks);
         }
       }
     }
@@ -465,13 +453,6 @@ export const updateUserPermissions = async (req: AuthenticatedRequest, res: Resp
     
     // Verify what was saved
     const savedUser = await User.findById(userId);
-    console.log('✅ User permissions saved. Verification:', {
-      userId,
-      canCreatePersonalProjects: savedUser?.permissions?.canCreatePersonalProjects,
-      modulesProjects: savedUser?.permissions?.modules?.projects,
-      personalProjectsModule: savedUser?.permissions?.modules?.projects?.personalProjects
-    });
-
     logger.info(`Admin ${req.user.email} updated permissions for user ${user.email}`);
 
     return successResponse(res, 'User permissions updated successfully', { user });
@@ -558,77 +539,52 @@ export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: 
           // Projects
           if (permissionsToApply.modules.projects) {
             const projectPerms = permissionsToApply.modules.projects;
-            console.log('🔧 Mapping project permissions from modules:', projectPerms);
 
             if (projectPerms.createProjects !== undefined) {
               user.permissions.canCreateProjects = projectPerms.createProjects;
-              console.log('✅ Set canCreateProjects =', projectPerms.createProjects);
             }
             if (projectPerms.deleteProjects !== undefined) {
               user.permissions.canDeleteProjects = projectPerms.deleteProjects;
-              console.log('✅ Set canDeleteProjects =', projectPerms.deleteProjects);
             }
             if (projectPerms.editProjects !== undefined) {
               user.permissions.canManageAllProjects = projectPerms.editProjects;
-              console.log('✅ Set canManageAllProjects =', projectPerms.editProjects);
             }
             if (projectPerms.viewProjects !== undefined) {
               user.permissions.canViewAllProjects = projectPerms.viewProjects;
-              console.log('✅ Set canViewAllProjects =', projectPerms.viewProjects);
             }
             if (projectPerms.personalProjects !== undefined) {
               user.permissions.canCreatePersonalProjects = projectPerms.personalProjects;
-              console.log('✅ Set canCreatePersonalProjects =', projectPerms.personalProjects);
             }
             if (projectPerms.manageMembers !== undefined) {
               // Note: manageMembers is project-level, but we store it in modules for consistency
               // The actual check happens at project level via ProjectPermission
-              console.log('✅ Set manageMembers module permission =', projectPerms.manageMembers);
             }
           }
 
           // My Tasks
           if (permissionsToApply.modules.myTasks) {
             const taskPerms = permissionsToApply.modules.myTasks;
-            console.log('🔧 Mapping task permissions from modules:', taskPerms);
 
             if (taskPerms.createTasks !== undefined) {
               user.permissions.canCreateTasks = taskPerms.createTasks;
-              console.log('✅ Set canCreateTasks =', taskPerms.createTasks);
             }
             if (taskPerms.editTasks !== undefined) {
               user.permissions.canEditTasks = taskPerms.editTasks;
-              console.log('✅ Set canEditTasks =', taskPerms.editTasks);
             }
             if (taskPerms.deleteTasks !== undefined) {
               user.permissions.canDeleteTasks = taskPerms.deleteTasks;
-              console.log('✅ Set canDeleteTasks =', taskPerms.deleteTasks);
             }
             if (taskPerms.assignTasks !== undefined) {
               user.permissions.canAssignTasks = taskPerms.assignTasks;
-              console.log('✅ Set canAssignTasks =', taskPerms.assignTasks);
             }
           }
-
-          console.log('🔧 User permissions after mapping:', {
-            canDeleteProjects: user.permissions.canDeleteProjects,
-            canManageAllProjects: user.permissions.canManageAllProjects,
-            canViewAllProjects: user.permissions.canViewAllProjects,
-            canCreateTasks: user.permissions.canCreateTasks,
-            canEditTasks: user.permissions.canEditTasks,
-            canDeleteTasks: user.permissions.canDeleteTasks,
-            canAssignTasks: user.permissions.canAssignTasks
-          });
-
           delete permissionsToApply.modules;
         }
 
-        console.log('🔧 Applying remaining permissions:', permissionsToApply);
 
         // Update other permissions (excluding modules which we already handled)
         Object.assign(user.permissions, permissionsToApply);
 
-        console.log('🔧 Final user.permissions before save:', user.permissions);
 
         // Mark permissions as modified for Mongoose
         user.markModified('permissions');
@@ -641,14 +597,6 @@ export const updateBulkUserPermissions = async (req: AuthenticatedRequest, res: 
 
         // Verify what was actually saved
         const savedUser = await User.findById(userId);
-        console.log('✅ User saved. Verification check:', {
-          userId,
-          canCreateProjects: savedUser?.permissions?.canCreateProjects,
-          canDeleteProjects: savedUser?.permissions?.canDeleteProjects,
-          canManageAllProjects: savedUser?.permissions?.canManageAllProjects,
-          canViewAllProjects: savedUser?.permissions?.canViewAllProjects
-        });
-
         updatedUsers.push({
           userId: user._id,
           email: user.email,

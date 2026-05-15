@@ -8,6 +8,8 @@ import {
   getUnreadCount,
   getTaskNotificationStats,
   getTaskNotificationDetails,
+  getTaskChatBadges,
+  markTaskChatRead,
 } from '../controllers/notificationController';
 
 const router = express.Router();
@@ -26,6 +28,12 @@ router.get('/stats/task/:taskId', getTaskNotificationStats);
 
 // Get individual notification records for a task
 router.get('/details/task/:taskId', getTaskNotificationDetails);
+
+// Task-chat badge counts grouped by taskId
+router.get('/task-chat-badges', getTaskChatBadges);
+
+// Mark all unread task-chat notifications for a task as read
+router.patch('/mark-task-chat-read/:taskId', markTaskChatRead);
 
 // Mark notification as read
 router.patch('/:notificationId/read', markNotificationAsRead);

@@ -12,6 +12,7 @@ router.use(authenticate);
  * @desc    Get all comments for a task
  * @access  Private (project members)
  */
+router.get('/counts', commentsController.getCommentCounts);
 router.get('/task/:taskId', commentsController.getComments);
 
 /**

@@ -116,27 +116,16 @@ export const checkPermission = (permission: Permission) => {
       const User = (await import('../models/User')).User;
       const user = await User.findById(userId);
 
-      console.log('🔍 checkPermission middleware:', {
-        permission,
-        userId,
-        projectId,
-        hasCanManageAllProjects: user?.permissions?.canManageAllProjects,
-        userPermissions: user?.permissions
-      });
-
       // If user has global canManageAllProjects permission, allow all project operations
       if (user?.permissions?.canManageAllProjects === true) {
-        console.log('✅ User has global canManageAllProjects permission - allowing', permission);
         return next();
       }
 
       // Check specific global task permissions
       if (permission === 'canCreateTasks' && user?.permissions?.canCreateTasks === true) {
-        console.log('✅ User has global canCreateTasks permission - allowing');
         return next();
       }
       if (permission === 'canAssignTasks' && user?.permissions?.canAssignTasks === true) {
-        console.log('✅ User has global canAssignTasks permission - allowing');
         return next();
       }
 
@@ -144,17 +133,14 @@ export const checkPermission = (permission: Permission) => {
       if (permission === 'canManageMembers') {
         // If global manageMembers is explicitly FALSE, deny immediately
         if (user?.permissions?.modules?.projects?.manageMembers === false) {
-          console.log('❌ User has manageMembers explicitly set to false in global permissions - denying');
           return errorResponse(res, 'You don\'t have permission to manage members', 403);
         }
         // If global manageMembers is TRUE, allow
         if (user?.permissions?.modules?.projects?.manageMembers === true) {
-          console.log('✅ User has manageMembers module permission in projects - allowing');
           return next();
         }
         // If global manageMembers is undefined (not set), deny access
         // User must have explicit global permission to manage members
-        console.log('❌ User does not have manageMembers global permission - denying');
         return errorResponse(res, 'You don\'t have permission to manage members. This permission must be granted in your user permissions.', 403);
       }
 
@@ -244,7 +230,6 @@ export const checkCanEditTask = async (req: AuthenticatedRequest, res: Response,
     const User = (await import('../models/User')).User;
     const user = await User.findById(userId);
     if (user?.permissions?.canEditTasks === true) {
-      console.log('✅ User has global canEditTasks permission - allowing');
       return next();
     }
 
@@ -338,7 +323,6 @@ export const checkCanDeleteTask = async (req: AuthenticatedRequest, res: Respons
     const User = (await import('../models/User')).User;
     const user = await User.findById(userId);
     if (user?.permissions?.canDeleteTasks === true) {
-      console.log('✅ User has global canDeleteTasks permission - allowing');
       return next();
     }
 
@@ -384,25 +368,6 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
                       req.body.isPersonal === 'true' || 
                       req.body.isPersonal === 1 ||
                       String(req.body.isPersonal).toLowerCase() === 'true';
-
-    console.log('🔍 Create project - Global permission check:', {
-      userId,
-      userFound: !!user,
-      userEmail: user?.email,
-      userRole: user?.role,
-      reqUserRole: req.user?.role,
-      hasPermissionsField: !!user?.permissions,
-      allPermissions: user?.permissions,
-      canCreateProjects: user?.permissions?.canCreateProjects,
-      canCreatePersonalProjects: user?.permissions?.canCreatePersonalProjects,
-      hasModules: !!user?.permissions?.modules,
-      modulesProjects: user?.permissions?.modules?.projects,
-      personalProjectsModule: user?.permissions?.modules?.projects?.personalProjects,
-      isPersonal,
-      reqBodyIsPersonal: req.body.isPersonal,
-      reqBodyKeys: Object.keys(req.body || {})
-    });
-
     // Note: Admin/manager role no longer bypasses permission checks.
     // All users must have explicit permissions granted.
 
@@ -410,36 +375,26 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
     if (isPersonal) {
       // Check global canCreatePersonalProjects permission
       if (user && user.permissions && user.permissions.canCreatePersonalProjects === true) {
-        console.log('✅ User has canCreatePersonalProjects permission and creating personal project - allowing');
         return next();
       }
       
       // Check module-level personalProjects permission
       const hasModulePersonalProjects = user?.permissions?.modules?.projects?.personalProjects === true;
       if (hasModulePersonalProjects) {
-        console.log('✅ User has personalProjects module permission and creating personal project - allowing');
         return next();
       }
       
       // Do NOT allow canCreateProjects to create personal projects
       // Personal projects require explicit personalProjects permission
-      console.log('❌ User does NOT have personalProjects permission for personal project - denying');
-      console.log('❌ User permissions:', {
-        canCreatePersonalProjects: user?.permissions?.canCreatePersonalProjects,
-        modulePersonalProjects: user?.permissions?.modules?.projects?.personalProjects,
-        canCreateProjects: user?.permissions?.canCreateProjects
-      });
       return errorResponse(res, 'You don\'t have permission to create personal projects. This permission must be explicitly granted.', 403);
     }
 
     // For regular (non-personal) projects, check canCreateProjects permission
     if (user && user.permissions && user.permissions.canCreateProjects === true) {
-      console.log('✅ User has global canCreateProjects permission - allowing');
       return next();
     }
 
     // If no global permission, deny by default (user needs the permission to create projects)
-    console.log('❌ User does NOT have canCreateProjects permission - denying');
     return errorResponse(res, 'You don\'t have permission to create projects', 403);
   } catch (error) {
     console.error('Create project check error:', error);
@@ -456,13 +411,11 @@ export const checkCanDeleteProject = async (req: AuthenticatedRequest, res: Resp
     const projectId = req.params.id;
 
     if (!userId || !projectId) {
-      console.log('❌ Delete project check - Invalid request');
       return errorResponse(res, 'Invalid request', 400);
     }
 
     const project = await Project.findById(projectId);
     if (!project) {
-      console.log('❌ Delete project check - Project not found');
       return errorResponse(res, 'Project not found', 404);
     }
 
@@ -476,18 +429,8 @@ export const checkCanDeleteProject = async (req: AuthenticatedRequest, res: Resp
       const owId = typeof owner === 'object' && owner._id ? owner._id.toString() : owner.toString();
       return owId === userId;
     });
-
-    console.log('🔍 Delete project check:', {
-      userId,
-      projectId,
-      projectName: project.name,
-      isOwner,
-      isInOwners
-    });
-
     // Only main/original owner can delete project
     if (isOwner) {
-      console.log('✅ User is main owner - allowing delete');
       return next();
     }
 
@@ -495,19 +438,11 @@ export const checkCanDeleteProject = async (req: AuthenticatedRequest, res: Resp
     const User = (await import('../models/User')).User;
     const user = await User.findById(userId);
 
-    console.log('🔍 Delete project - Global permission check:', {
-      hasPermissionsField: !!user?.permissions,
-      canDeleteProjects: user?.permissions?.canDeleteProjects,
-      canDeleteProjectsType: typeof user?.permissions?.canDeleteProjects
-    });
-
     // Check if user has global permission to delete any project (admin feature)
     if (user && user.permissions && user.permissions.canDeleteProjects === true) {
-      console.log('✅ User has global canDeleteProjects permission - allowing delete');
       return next();
     }
 
-    console.log('❌ User does NOT have permission to delete this project');
     return errorResponse(res, 'You don\'t have permission to delete this project', 403);
   } catch (error) {
     console.error('❌ Delete project check error:', error);

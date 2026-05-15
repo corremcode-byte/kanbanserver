@@ -8,10 +8,6 @@ const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
 const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@example.com';
 
 // Debug logging
-console.log('🔑 VAPID Configuration:');
-console.log('  - Public Key:', vapidPublicKey ? `${vapidPublicKey.substring(0, 20)}...` : 'NOT SET');
-console.log('  - Private Key:', vapidPrivateKey ? `${vapidPrivateKey.substring(0, 20)}...` : 'NOT SET');
-console.log('  - Email:', vapidEmail);
 
 if (!vapidPublicKey || !vapidPrivateKey) {
   logger.warn('⚠️  VAPID keys not configured. Push notifications will not work.');

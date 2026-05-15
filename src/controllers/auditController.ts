@@ -370,9 +370,6 @@ const generateMockAuditLogs = (limit: number = 20): any[] => {
  */
 export const getAuditLogs = async (req: any, res: Response) => {
   try {
-    console.log('Audit logs endpoint called');
-    console.log('Query params:', req.query);
-    console.log('User:', req.user);
 
     // Extract query parameters
     const {
@@ -387,7 +384,6 @@ export const getAuditLogs = async (req: any, res: Response) => {
 
     // Validate and parse limit - allow up to 10000 records to show all logs
     const parsedLimit = Math.min(parseInt(limit as string, 10) || 50, 10000);
-    console.log('Fetching audit logs with limit:', parsedLimit);
 
     // Build query
     const query: any = {};
@@ -423,7 +419,6 @@ export const getAuditLogs = async (req: any, res: Response) => {
       }
     }
 
-    console.log('Query:', JSON.stringify(query));
 
     // Fetch audit logs from database
     let auditLogs = await AuditLog.find(query)
@@ -455,7 +450,6 @@ export const getAuditLogs = async (req: any, res: Response) => {
     
     auditLogs = activeLogs;
 
-    console.log('Found audit logs:', auditLogs.length);
 
     // Transform audit logs to frontend format
     let transformedLogs = auditLogs.map((log: any) => {
@@ -502,7 +496,6 @@ export const getAuditLogs = async (req: any, res: Response) => {
     }
 
     // Return audit logs
-    console.log('Returning audit logs, count:', transformedLogs.length);
     return res.status(200).json({
       success: true,
       message: 'Audit logs retrieved successfully',
@@ -538,12 +531,10 @@ export const getAuditLogs = async (req: any, res: Response) => {
  */
 export const deleteAllAuditLogs = async (req: any, res: Response) => {
   try {
-    console.log('Delete all audit logs endpoint called by user:', req.user?.email);
 
     // Delete all audit logs
     const result = await AuditLog.deleteMany({});
 
-    console.log(`Deleted ${result.deletedCount} audit logs`);
 
     return res.status(200).json({
       success: true,
@@ -570,12 +561,10 @@ export const deleteAllAuditLogs = async (req: any, res: Response) => {
  */
 export const cleanupDeletedUsers = async (req: any, res: Response) => {
   try {
-    console.log('Cleanup audit logs for deleted users endpoint called by user:', req.user?.email);
 
     // Run cleanup
     const result = await AuditLog.cleanupDeletedUsers();
 
-    console.log(`Cleaned up ${result.deletedCount} audit logs for deleted/inactive users`);
 
     return res.status(200).json({
       success: true,

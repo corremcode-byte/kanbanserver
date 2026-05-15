@@ -66,18 +66,15 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded files statically - MUST be before database connection middleware
 // Log uploads directory path
 const uploadsPath = path.join(process.cwd(), 'uploads');
-console.log('📁 Serving static files from:', uploadsPath);
 
 // Add logging middleware for uploads route
 app.use('/uploads', (req, res, next) => {
-  console.log('🔍 Static file request:', req.method, req.url);
   next();
 });
 
 // Use setHeaders to ensure CORS headers are set for static files
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders: (res, filePath) => {
-    console.log('📤 Serving file:', filePath);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     // Tell browsers to display the file inline instead of downloading it

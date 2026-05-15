@@ -22,7 +22,6 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
-    console.log('Login attempt for:', email);
 
     if (!email || !password) {
       return errorResponse(res, 'Username/Email and password are required', 400);
@@ -34,7 +33,6 @@ export const login = async (req: Request, res: Response) => {
     // Determine if input is email (contains @) or username
     const isEmail = normalizedInput.includes('@');
     
-    console.log('Searching for user with:', isEmail ? 'email' : 'username', normalizedInput);
     
     // Search by email or username
     const user = await User.findOne({
@@ -46,25 +44,20 @@ export const login = async (req: Request, res: Response) => {
     }).select('+password');
 
     if (!user) {
-      console.log('User not found or inactive:', normalizedInput);
       return errorResponse(res, 'Invalid username/email or password', 401);
     }
 
-    console.log('User found:', user.email, 'Username:', user.username, 'Password field exists:', !!user.password);
 
     // Compare password
     const isPasswordValid = await user.comparePassword(password);
 
     if (!isPasswordValid) {
-      console.log('Password validation failed for user:', user.email);
       return errorResponse(res, 'Invalid username/email or password', 401);
     }
 
-    console.log('Password validated successfully for user:', user.email);
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
-    console.log('Login debug - Using JWT_SECRET:', jwtSecret === process.env.JWT_SECRET ? 'from .env' : 'fallback');
     const token = jwt.sign(
       {
         userId: user._id.toString(),
@@ -74,7 +67,6 @@ export const login = async (req: Request, res: Response) => {
       jwtSecret,
       { expiresIn: '7d' }
     );
-    console.log('Login debug - Generated token preview:', token.substring(0, 50) + '...');
 
     // Update last login
     user.lastLoginAt = new Date();
@@ -218,14 +210,6 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
     if (!user.isActive) {
       return errorResponse(res, 'Account is deactivated', 403);
     }
-
-    console.log('🔍 getCurrentUser - User permissions:', {
-      userId: user._id,
-      email: user.email,
-      role: user.role,
-      hasPermissionsField: !!user.permissions,
-      permissions: user.permissions
-    });
 
     // Convert photoURL to absolute URL for client consumption
     const userData = user.toObject();

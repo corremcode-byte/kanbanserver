@@ -141,25 +141,12 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
         userRole = coOwnerPerm === 'edit' ? 'co-owner' as any : 'co-owner-view' as any;
       } else if (isInManagers) {
         userRole = 'manager';
-      }
-
-      console.log(`Project "${projectObj.name}" role determination:`, {
-        projectId: projectObj._id,
-        userId,
-        ownerId,
-        isOwner,
-        isInOwners,
-        isInManagers,
-        userRole
-      });
-
-      return {
+      }      return {
         ...projectObj,
         userRole
       };
     });
 
-    console.log(`Returning ${projectsWithRole.length} projects with roles`);
 
     return successResponse(res, 'Projects retrieved successfully', {
       projects: projectsWithRole,
@@ -180,10 +167,8 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
-    console.log('getProject called with:', { id, user: req.user, headers: req.headers.authorization });
 
     if (!req.user) {
-      console.log('Auth error: No user object found on request');
       return errorResponse(res, 'User not authenticated', 401);
     }
 
@@ -196,13 +181,6 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
       .populate('owners', 'name email avatar displayName photoURL')
       .populate('members', 'name email avatar displayName photoURL')
       .populate('managers', 'name email avatar displayName photoURL');
-
-    console.log('Project found:', project ? {
-      id: project._id,
-      owner: project.ownerId,
-      members: project.members.map(m => m._id)
-    } : 'null');
-
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
@@ -220,57 +198,7 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
           : member.toString();
         return memberId === req.user._id;
       });
-
-    // Debug logging for troubleshooting
-    console.log('Project access debug:', {
-      projectId: id,
-      projectOwner: ownerId,
-      projectOwners: project.owners ? project.owners.map((owner: any) => {
-        const ownerId = typeof owner === 'object' && owner._id
-          ? owner._id.toString()
-          : owner.toString();
-        return ownerId;
-      }) : [],
-      userId: req.user._id,
-      isOwner: ownerId === req.user._id,
-      isInOwners: project.owners && project.owners.some((owner: any) => {
-        const ownerId = typeof owner === 'object' && owner._id
-          ? owner._id.toString()
-          : owner.toString();
-        return ownerId === req.user._id;
-      }),
-      isInManagers: project.managers && project.managers.some((m: any) => {
-        const managerId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
-        return managerId === req.user._id;
-      }),
-      isManager: isProjectManager(project, req.user._id),
-      members: project.members.map(m => {
-        const memberId = typeof m === 'object' && m._id ? m._id.toString() : m.toString();
-        return memberId;
-      }),
-      isMember: project.members.some(member => {
-        const memberId = typeof member === 'object' && member._id
-          ? member._id.toString()
-          : member.toString();
-        return memberId === req.user._id;
-      })
-    });
-
     if (!isOwnerOrMember) {
-      console.log('Access denied for user:', req.user._id, 'to project:', id);
-      console.log('User is not a member or owner of this project');
-      console.log('Project details:', {
-        projectOwner: project.ownerId.toString(),
-        userId: req.user._id,
-        members: project.members.map(m => m.toString()),
-        isOwner: (typeof project.ownerId === 'object' && project.ownerId._id ? project.ownerId._id.toString() : project.ownerId.toString()) === req.user._id,
-        isMember: project.members.some(member => {
-        const memberId = typeof member === 'object' && member._id
-          ? member._id.toString()
-          : member.toString();
-        return memberId === req.user._id;
-      })
-      });
       return errorResponse(res, 'Access denied to this project', 403);
     }
 

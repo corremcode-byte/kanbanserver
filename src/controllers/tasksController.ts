@@ -216,6 +216,10 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
 export const getTask = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const { Types } = await import('mongoose');
+    if (!Types.ObjectId.isValid(id)) {
+      return notFoundResponse(res, 'Task not found');
+    }
     const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('projectId', 'name')
       .populate('assignees', 'displayName email avatar photoURL')
@@ -424,15 +428,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       order
     });
 
-    await task.save();
-    if (validatedSubtasks.length > 0) {
-      console.log('[tasks] Subtasks created and saved successfully', {
-        taskId: task._id.toString(),
-        count: validatedSubtasks.length,
-        subtasks: validatedSubtasks.map((s) => ({ id: s.id, title: s.title, assigneeId: s.assigneeId }))
-      });
-    }
-    await task.populate('assignedTo', 'displayName email avatar photoURL');
+    await task.save();    await task.populate('assignedTo', 'displayName email avatar photoURL');
     await task.populate('assignees', 'displayName email avatar photoURL');
     await task.populate('assignedBy', 'displayName email avatar photoURL');
     await task.populate('projectId', 'name');
@@ -764,16 +760,6 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
-
-    if (Array.isArray(req.body.subtasks)) {
-      const st = task.subtasks || [];
-      console.log('[tasks] Subtasks saved successfully', {
-        taskId: task._id.toString(),
-        count: st.length,
-        subtasks: st.map((s: any) => ({ id: s.id, title: s.title, assigneeId: s.assigneeId }))
-      });
-    }
-
     // Log audit action
     try {
       // Determine the primary action for this update
@@ -1347,6 +1333,10 @@ export const getTaskHistory = async (req: AuthenticatedRequest, res: Response) =
     const { id } = req.params;
 
     // Verify task exists and user has access
+    const { Types } = await import('mongoose');
+    if (!Types.ObjectId.isValid(id)) {
+      return successResponse(res, 'Task history retrieved successfully', []);
+    }
     const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } }).populate('projectId');
     if (!task) {
       return notFoundResponse(res, 'Task not found');
