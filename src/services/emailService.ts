@@ -783,6 +783,78 @@ class EmailService {
       text
     });
   }
+  async sendFollowUpNotification(
+    recipients: string[],
+    data: {
+      taskTitle: string;
+      taskId: string;
+      projectName: string;
+      projectId: string;
+      requestedByName: string;
+      dueDate?: Date;
+      priority?: string;
+    }
+  ): Promise<boolean> {
+    if (recipients.length === 0) return false;
+
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const taskUrl = `${appUrl}/projects/${data.projectId}?tab=tasks`;
+
+    const dueDateText = data.dueDate
+      ? `<p><strong>Due Date:</strong> ${new Date(data.dueDate).toLocaleDateString()}</p>` : '';
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #f59e0b; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px; }
+            .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔔 Follow-Up Reminder</h1>
+            </div>
+            <div class="content">
+              <p>Hello!</p>
+              <p><strong>${data.requestedByName}</strong> is following up on your task:</p>
+              <h2>${data.taskTitle}</h2>
+              <p><strong>Project:</strong> ${data.projectName}</p>
+              ${dueDateText}
+              <a href="${taskUrl}" class="button">View Task</a>
+            </div>
+            <div class="footer">
+              <p>This is an automated notification from Kanban. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const text = `
+Follow-Up Reminder: ${data.taskTitle}
+
+${data.requestedByName} is following up on your task.
+
+Project: ${data.projectName}
+${data.dueDate ? `Due Date: ${new Date(data.dueDate).toLocaleDateString()}` : ''}
+
+View task: ${taskUrl}
+    `;
+
+    return this.sendEmail({
+      to: recipients,
+      subject: `Follow-Up: ${data.taskTitle}`,
+      html,
+      text
+    });
+  }
 }
 
 // Export singleton instance

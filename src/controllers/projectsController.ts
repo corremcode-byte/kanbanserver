@@ -1429,10 +1429,16 @@ export const reorderLists = async (req: AuthenticatedRequest, res: Response) => 
       return notFoundResponse(res, 'Project not found');
     }
 
-    // Only owner or manager can reorder lists
+    // Owner/manager can always reorder; members need canEditProject permission
     const isManager = isProjectManager(project, req.user._id);
     if (!isManager) {
-      return errorResponse(res, 'Only project owner or manager can reorder lists', 403);
+      const memberPermission = await ProjectPermission.findOne({
+        projectId: id,
+        userId: req.user._id
+      });
+      if (!memberPermission?.permissions?.canEditProject) {
+        return errorResponse(res, 'You do not have permission to reorder lists', 403);
+      }
     }
 
     // Update the order of each list

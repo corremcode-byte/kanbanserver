@@ -1543,6 +1543,86 @@ function extractChanges(metadata: any): any {
 }
 
 // Toggle like on a task (add if not liked, remove if already liked)
+export const followUpTask = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { User } = await import('../models');
+
+    const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
+      .populate('projectId', 'name _id');
+    if (!task) return notFoundResponse(res, 'Task not found');
+
+    const assigneeIds: string[] = Array.isArray(task.assignees)
+      ? task.assignees.map((a: any) => (typeof a === 'object' ? a._id?.toString() ?? a.toString() : a.toString()))
+      : [];
+
+    if (assigneeIds.length === 0) {
+      return errorResponse(res, 'Task has no assignees to follow up with', 400);
+    }
+
+    const project = task.projectId as any;
+    const projectId = project?._id?.toString() ?? project?.toString() ?? '';
+    const projectName = project?.name ?? 'Unknown Project';
+
+    const users = await User.find({ _id: { $in: assigneeIds } });
+
+    // In-app notifications
+    users
+      .filter(u => u._id.toString() !== req.user._id)
+      .forEach(u => {
+        createNotification({
+          userId: u._id.toString(),
+          type: 'task_assigned',
+          title: 'Follow-Up Reminder',
+          message: `${req.user.displayName} is following up on task "${task.title}"`,
+          metadata: {
+            projectId,
+            projectName,
+            taskId: task._id.toString(),
+            taskTitle: task.title,
+            actionBy: req.user._id,
+            actionByName: req.user.displayName,
+          },
+        }).catch(err => logger.error('Failed to create follow-up notification:', err));
+      });
+
+    // Real-time socket notifications
+    const io = getIO();
+    users
+      .filter(u => u._id.toString() !== req.user._id)
+      .forEach(u => {
+        broadcastToUser(io, u._id.toString(), 'notification:task:followup', {
+          task: { _id: task._id, title: task.title, projectId },
+          requestedBy: { displayName: req.user.displayName, email: req.user.email },
+        });
+      });
+
+    // Email notifications
+    const recipientEmails = users
+      .filter(u => u._id.toString() !== req.user._id)
+      .filter(u => u.settings?.notifications?.emailNotifications !== false)
+      .map(u => u.email);
+
+    if (recipientEmails.length > 0) {
+      await emailService.sendFollowUpNotification(recipientEmails, {
+        taskTitle: task.title,
+        taskId: task._id.toString(),
+        projectName,
+        projectId,
+        requestedByName: req.user.displayName || req.user.email,
+        dueDate: task.dueDate,
+        priority: task.priority,
+      });
+    }
+
+    logger.info(`Follow-up sent for task "${task.title}" to ${users.length} assignees`);
+    return successResponse(res, 'Follow-up notification sent', { notifiedCount: users.length });
+  } catch (error) {
+    logger.error('Error sending follow-up:', error);
+    return internalServerErrorResponse(res, 'Failed to send follow-up');
+  }
+};
+
 export const toggleLike = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;

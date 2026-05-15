@@ -23,4 +23,7 @@ router.post('/reorder', tasksController.reorderTasks);
 // Like/unlike a task
 router.post('/:id/like', tasksController.toggleLike);
 
+// Send follow-up notification to assignees
+router.post('/:id/followup', tasksController.followUpTask);
+
 export default router;
