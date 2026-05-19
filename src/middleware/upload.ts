@@ -137,6 +137,18 @@ const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.Fi
     'audio/ogg',
     'audio/wav',
     'audio/x-wav',
+    // Archives
+    'application/zip',
+    'application/x-zip',
+    'application/x-zip-compressed',
+    'application/x-compressed',
+    'application/octet-stream',
+    'application/x-rar-compressed',
+    'application/vnd.rar',
+    'application/x-7z-compressed',
+    'application/x-tar',
+    'application/gzip',
+    'application/x-gzip',
   ];
 
   // Check exact match OR prefix match (handles codec variants like audio/webm;codecs=opus)
@@ -144,7 +156,7 @@ const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.Fi
   if (allowedMimes.includes(file.mimetype) || allowedMimes.includes(baseType)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Please upload images, videos, audio, PDFs, or common document formats.'));
+    cb(new Error('Invalid file type. Please upload images, videos, audio, PDFs, documents, or archives (zip, rar, 7z).'));
   }
 };
 
