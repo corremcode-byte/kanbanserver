@@ -315,6 +315,53 @@ export const markTaskChatRead = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+// Map notification type → sidebar module path (mirrors NOTIFICATION_MODULE_MAP on the client)
+const TYPE_TO_MODULE: Record<string, string> = {
+  task_assigned:          '/my-tasks',
+  task_update:            '/my-tasks',
+  task_deadline_reminder: '/my-tasks',
+  project_invitation:     '/projects',
+  project_added:          '/projects',
+  project_update:         '/projects',
+  chat_message:           '/chat',
+  task_chat_message:      '/my-tasks',
+  group_added:            '/chat',
+  note_reminder:          '/notes',
+};
+
+// Lightweight endpoint: returns per-module unread counts + IDs (for mark-as-read)
+// Fetches only _id + type — far cheaper than loading full notification objects
+export const getModuleCounts = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return errorResponse(res, 'User not authenticated', 401);
+
+    const unread = await Notification.find({ userId, read: false })
+      .select('_id type')
+      .lean();
+
+    const counts: Record<string, number> = {};
+    // ids only includes notifications safe to bulk-mark-as-read.
+    // task_chat_message is excluded — those are cleared per-task when the user opens the chat.
+    const ids: Record<string, string[]> = {};
+
+    unread.forEach((n) => {
+      const module = TYPE_TO_MODULE[n.type];
+      if (!module) return;
+      counts[module] = (counts[module] || 0) + 1;
+      if (n.type !== 'task_chat_message') {
+        if (!ids[module]) ids[module] = [];
+        ids[module].push(String(n._id));
+      }
+    });
+
+    return successResponse(res, 'Module counts retrieved', { counts, ids });
+  } catch (error) {
+    logger.error('Error getting module counts:', error);
+    return internalServerErrorResponse(res, 'Failed to get module counts');
+  }
+};
+
 // Get unread notification count
 export const getUnreadCount = async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -6,6 +6,7 @@ import {
   markAllNotificationsAsRead,
   deleteNotification,
   getUnreadCount,
+  getModuleCounts,
   getTaskNotificationStats,
   getTaskNotificationDetails,
   getTaskChatBadges,
@@ -22,6 +23,9 @@ router.get('/', getUserNotifications);
 
 // Get unread notification count
 router.get('/unread-count', getUnreadCount);
+
+// Get per-module unread counts + IDs (lightweight — used by Sidebar badges)
+router.get('/module-counts', getModuleCounts);
 
 // Get notification stats for a task
 router.get('/stats/task/:taskId', getTaskNotificationStats);

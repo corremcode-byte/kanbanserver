@@ -40,13 +40,18 @@ const io = new Server(server, {
   }
 });
 
-// Setup Redis adapter for Socket.IO cluster support
-const pubClient = new Redis({ host: '127.0.0.1', port: 6379 });
-const subClient = new Redis({ host: '127.0.0.1', port: 6379 });
-
-
-io.adapter(createAdapter(pubClient, subClient));
-logger.info('✅ Redis adapter connected for Socket.IO');
+// Setup Redis adapter for Socket.IO cluster support (only if REDIS_URL is configured)
+const redisUrl = process.env.REDIS_URL;
+if (redisUrl) {
+  const pubClient = new Redis(redisUrl);
+  const subClient = pubClient.duplicate();
+  pubClient.on('error', (err: Error) => logger.warn('Redis pub error:', err.message));
+  subClient.on('error', (err: Error) => logger.warn('Redis sub error:', err.message));
+  io.adapter(createAdapter(pubClient, subClient));
+  logger.info('✅ Redis adapter connected for Socket.IO');
+} else {
+  logger.info('ℹ️  Redis not configured — using in-memory adapter (single-server mode)');
+}
 
 // Initialize socket handlers
 initializeSocket(io);
