@@ -121,11 +121,12 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
           projectId,
           isSubtask: { $ne: true },
           isDeleted: { $ne: true },
-        }).populate('projectId', 'name')
+        }).lean()
+          .populate('projectId', 'name')
           .populate('assignees', 'displayName email avatar photoURL')
           .populate('assignedTo', 'displayName email avatar photoURL')
           .populate('assignedBy', 'displayName email avatar photoURL')
-          .sort({ createdAt: -1 }); // Newest first
+          .sort({ createdAt: -1 });
       } else {
         // Can only view tasks assigned to them or created by them
         tasks = await Task.find({
@@ -137,11 +138,12 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
             { assignees: req.user._id },
             { assignedBy: req.user._id }
           ]
-        }).populate('projectId', 'name')
+        }).lean()
+          .populate('projectId', 'name')
           .populate('assignees', 'displayName email avatar photoURL')
           .populate('assignedTo', 'displayName email avatar photoURL')
           .populate('assignedBy', 'displayName email avatar photoURL')
-          .sort({ createdAt: -1 }); // Newest first
+          .sort({ createdAt: -1 });
       }
     } else {
       // No projectId ➜ fetch tasks based on user's role and permissions
@@ -191,19 +193,17 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         isSubtask: { $ne: true },
         isDeleted: { $ne: true },
         $or: [
-          // Tasks assigned to the user
           { assignedTo: req.user._id },
           { assignees: req.user._id },
-          // Tasks created by the user
           { assignedBy: req.user._id },
-          // ALL tasks from projects where user is owner, manager, or has canViewAllTasks permission
           { projectId: { $in: allAccessProjectIds } }
         ]
-      }).populate('projectId', 'name')
+      }).lean()
+        .populate('projectId', 'name')
         .populate('assignees', 'displayName email avatar photoURL')
         .populate('assignedTo', 'displayName email avatar photoURL')
         .populate('assignedBy', 'displayName email avatar photoURL')
-        .sort({ createdAt: -1 }); // Newest first
+        .sort({ createdAt: -1 });
     }
 
     return successResponse(res, 'Tasks retrieved successfully', tasks);
