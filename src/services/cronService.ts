@@ -184,9 +184,9 @@ class CronService {
           ? (task.projectId as any).name
           : 'Unknown Project';
 
-        const projectId = typeof task.projectId === 'object' && (task.projectId as any)._id
+        const projectId = typeof task.projectId === 'object' && task.projectId !== null && (task.projectId as any)._id
           ? (task.projectId as any)._id.toString()
-          : task.projectId.toString();
+          : task.projectId?.toString() ?? '';
 
         // Human-readable time until due (graceful when no due date)
         const dueDateObj: Date | null = task.dueDate ? new Date(task.dueDate) : null;

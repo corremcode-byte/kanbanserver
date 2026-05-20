@@ -1,16 +1,19 @@
 // Load environment variables FIRST before any other imports
 import dotenv from 'dotenv';
-import path from 'path';
-dotenv.config({ path: path.join(__dirname, '../.env') });
+dotenv.config();
 
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+//import { createClient } from 'ioredis';
+import Redis from 'ioredis';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import { initializeSocket } from './socket';
 import routes from './routes';
 import { errorHandler } from './middleware';
@@ -36,6 +39,14 @@ const io = new Server(server, {
     credentials: true
   }
 });
+
+// Setup Redis adapter for Socket.IO cluster support
+const pubClient = new Redis({ host: '127.0.0.1', port: 6379 });
+const subClient = new Redis({ host: '127.0.0.1', port: 6379 });
+
+
+io.adapter(createAdapter(pubClient, subClient));
+logger.info('✅ Redis adapter connected for Socket.IO');
 
 // Initialize socket handlers
 initializeSocket(io);
