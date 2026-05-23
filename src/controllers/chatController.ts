@@ -64,6 +64,22 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       });
     }
 
+    // If only 2 members (creator + 1 other), treat as a personal chat
+    const isPersonalChat = allMemberIds.length === 2;
+    if (isPersonalChat) {
+      const otherUserId = allMemberIds.find((id: string) => id !== userId);
+      const existing = await ChatGroup.findOne({
+        members: { $all: [userId, otherUserId], $size: 2 },
+        isActive: true,
+        isPersonalChat: true,
+      })
+        .populate('members', 'displayName email photoURL isActive')
+        .populate('createdBy', 'displayName email');
+      if (existing) {
+        return res.status(200).json(existing);
+      }
+    }
+
     // Create chat group with creator included in members
     const chatGroup = await ChatGroup.create({
       name,
@@ -71,7 +87,8 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       createdBy: req.user._id,
       members: allMemberIds,
       encryptionPublicKey,
-      isActive: true
+      isActive: true,
+      isPersonalChat,
     });
 
     // Populate members
