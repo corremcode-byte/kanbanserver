@@ -328,7 +328,21 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
       ]
     };
 
-    const [totalProjects, totalTasks, completedTasks, activeTasks, overdueTasks] = await Promise.all([
+    const assignedQuery = {
+      isDeleted: { $ne: true },
+      $or: [
+        { assigneeId: userId },
+        { assignedTo: userId },
+        { assignees: userId },
+      ]
+    };
+
+    const createdQuery = {
+      isDeleted: { $ne: true },
+      createdBy: userId,
+    };
+
+    const [totalProjects, totalTasks, completedTasks, activeTasks, overdueTasks, tasksAssigned, tasksCreated] = await Promise.all([
       // Only count projects the user actually created (as owner)
       Project.countDocuments({ ownerId: userId }),
       // All tasks related to the user
@@ -348,7 +362,11 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
         ...taskQuery,
         status: { $in: ['todo', 'in-progress'] },
         dueDate: { $lt: new Date() }
-      })
+      }),
+      // Tasks assigned to the user (not necessarily created by them)
+      Task.countDocuments(assignedQuery),
+      // Tasks created by the user
+      Task.countDocuments(createdQuery),
     ]);
 
     // Get recent activity
@@ -427,7 +445,9 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
           totalBoardsCreated: totalProjects,
           totalTasksCompleted: completedTasks,
           activeTasksCount: activeTasks,
-          overdueTasksCount: overdueTasks
+          overdueTasksCount: overdueTasks,
+          tasksAssigned,
+          tasksCreated,
         }
       },
       recentActivity: recentActivity.slice(0, 10)
