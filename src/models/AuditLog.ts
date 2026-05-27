@@ -45,7 +45,8 @@ interface IAuditLogModel extends Model<IAuditLog> {
     userId: string;
     action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
             'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
-            'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
+            'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
+            'biometric_registered';
     metadata?: IAuditLog['metadata'];
   }): Promise<IAuditLog>;
 

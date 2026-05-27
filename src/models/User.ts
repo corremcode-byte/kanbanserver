@@ -25,6 +25,13 @@ export interface IUser extends Document {
   lastLoginAt: Date;
   lastLogoutAt?: Date;
   pushSubscriptions?: IPushSubscription[];
+  webauthnCredentials?: Array<{
+    credentialID: string;
+    credentialPublicKey: string;
+    counter: number;
+    transports?: string[];
+  }>;
+  currentChallenge?: string;
   comparePassword(candidatePassword: string): Promise<boolean>;
   comparePasskey(candidatePasskey: string): Promise<boolean>;
   hasPasskey(): boolean;
@@ -173,7 +180,17 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   },
   passkey: {
     type: String,
-    select: false // Encrypted passkey for app access, don't include in normal queries
+    select: false
+  },
+  webauthnCredentials: [{
+    credentialID:        { type: String, required: true },
+    credentialPublicKey: { type: String, required: true },
+    counter:             { type: Number, default: 0 },
+    transports:          [{ type: String }],
+  }],
+  currentChallenge: {
+    type: String,
+    select: false,
   },
   displayName: {
     type: String,

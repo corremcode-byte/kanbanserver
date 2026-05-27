@@ -29,6 +29,13 @@ export const unauthorizedResponse = (res: Response, message: string = 'Unauthori
   });
 };
 
+export const internalServerErrorResponse = (res: Response, message: string = 'Internal server error') => {
+  return res.status(500).json({
+    success: false,
+    message
+  });
+};
+
 export const forbiddenResponse = (res: Response, message: string = 'Forbidden') => {
   return res.status(403).json({
     success: false,
@@ -41,13 +48,6 @@ export const validationErrorResponse = (res: Response, message: string, errors: 
     success: false,
     message,
     errors
-  });
-};
-
-export const internalServerErrorResponse = (res: Response, message: string = 'Internal server error') => {
-  return res.status(500).json({
-    success: false,
-    message
   });
 };
 

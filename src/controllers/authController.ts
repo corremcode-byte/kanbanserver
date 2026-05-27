@@ -86,12 +86,14 @@ export const login = async (req: Request, res: Response) => {
 
     // Remove password from response
     const userResponse = user.toJSON();
+    const hasBiometric = (user.webauthnCredentials?.length ?? 0) > 0;
 
     logger.info(`User logged in: ${user.email}`);
 
     return successResponse(res, 'Login successful', {
       token,
-      user: userResponse
+      user: userResponse,
+      hasBiometric,
     });
   } catch (error) {
     logger.error('Login error:', error);

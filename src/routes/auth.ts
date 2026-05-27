@@ -24,6 +24,13 @@ import {
   checkPasskeyStatus
 } from '../controllers/authController';
 import {
+  getRegisterOptions,
+  verifyRegistration,
+  getAuthOptions,
+  verifyAuthentication,
+  getBiometricStatus,
+} from '../controllers/webauthnController';
+import {
   authenticate,
   optionalAuth,
   requireManagerOrAdmin,
@@ -39,6 +46,10 @@ const router = Router();
 router.post('/login', login);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
+
+// WebAuthn public routes (no auth needed for biometric login)
+router.post('/webauthn/authenticate-options', getAuthOptions);
+router.post('/webauthn/authenticate', verifyAuthentication);
 
 // Logout route
 router.post('/logout', optionalAuth, async (req: AuthenticatedRequest, res) => {
@@ -86,6 +97,11 @@ router.get('/passkey/status', checkPasskeyStatus);
 router.post('/passkey/set', setPasskey);
 router.post('/passkey/verify', verifyPasskey);
 router.put('/passkey/change', changePasskey);
+
+// WebAuthn / Biometric routes (registration requires auth; auth routes are public)
+router.get('/webauthn/register-options', getRegisterOptions);
+router.post('/webauthn/register', verifyRegistration);
+router.get('/webauthn/status', getBiometricStatus);
 
 // Avatar upload (requires authentication and multer middleware)
 router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);

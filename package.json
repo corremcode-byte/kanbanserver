@@ -17,6 +17,7 @@
     "seed:superadmin": "ts-node src/scripts/seedSuperAdmin.ts"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "@types/multer": "^2.0.0",
     "bcryptjs": "^2.4.3",
