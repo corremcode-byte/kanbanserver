@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import authRoutes from './auth';
+import dynamicRouteRoutes from './dynamicRoutes';
 import projectsRoutes from './projects';
 import tasksRoutes from './tasks';
 import userRoutes from './user';
@@ -40,6 +41,7 @@ router.use('/notifications', notificationsRoutes);
 router.use('/notes', notesRoutes);
 router.use('/support', supportRoutes);
 router.use('/cron', cronRoutes);
+router.use('/routes', dynamicRouteRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {

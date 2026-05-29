@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { dynamicRouteStore } from '../lib/dynamicRouteStore';
 import {
   login,
   createUser,
@@ -24,12 +25,10 @@ import {
   checkPasskeyStatus
 } from '../controllers/authController';
 import {
-  getRegisterOptions,
-  verifyRegistration,
-  getAuthOptions,
-  verifyAuthentication,
-  getBiometricStatus,
-} from '../controllers/webauthnController';
+  registerFace,
+  verifyFace,
+  getFaceStatus,
+} from '../controllers/faceAuthController';
 import {
   authenticate,
   optionalAuth,
@@ -47,20 +46,23 @@ router.post('/login', login);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
-// WebAuthn public routes (no auth needed for biometric login)
-router.post('/webauthn/authenticate-options', getAuthOptions);
-router.post('/webauthn/authenticate', verifyAuthentication);
+// Face auth public routes
+router.post('/face/verify', verifyFace);
 
 // Logout route
 router.post('/logout', optionalAuth, async (req: AuthenticatedRequest, res) => {
   if (req.user) {
     try {
-      await User.findByIdAndUpdate(req.user._id, { lastLogoutAt: new Date() });
-      await AuditLog.logSystemEvent({
-        userId: req.user._id,
-        action: 'user_logout',
-        metadata: { userName: req.user.displayName, userEmail: req.user.email }
-      });
+      const userId = req.user._id?.toString();
+      await Promise.all([
+        User.findByIdAndUpdate(req.user._id, { lastLogoutAt: new Date() }),
+        userId ? dynamicRouteStore.clearUserRoutes(userId) : Promise.resolve(),
+        AuditLog.logSystemEvent({
+          userId: req.user._id,
+          action: 'user_logout',
+          metadata: { userName: req.user.displayName, userEmail: req.user.email }
+        }),
+      ]);
     } catch (err) {
       console.error('Failed to record logout:', err);
     }
@@ -98,10 +100,9 @@ router.post('/passkey/set', setPasskey);
 router.post('/passkey/verify', verifyPasskey);
 router.put('/passkey/change', changePasskey);
 
-// WebAuthn / Biometric routes (registration requires auth; auth routes are public)
-router.get('/webauthn/register-options', getRegisterOptions);
-router.post('/webauthn/register', verifyRegistration);
-router.get('/webauthn/status', getBiometricStatus);
+// Face auth protected routes
+router.post('/face/register', registerFace);
+router.get('/face/status', getFaceStatus);
 
 // Avatar upload (requires authentication and multer middleware)
 router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);

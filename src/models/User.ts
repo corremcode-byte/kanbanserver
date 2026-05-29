@@ -32,6 +32,7 @@ export interface IUser extends Document {
     transports?: string[];
   }>;
   currentChallenge?: string;
+  faceDescriptor?: number[];
   comparePassword(candidatePassword: string): Promise<boolean>;
   comparePasskey(candidatePasskey: string): Promise<boolean>;
   hasPasskey(): boolean;
@@ -190,6 +191,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   }],
   currentChallenge: {
     type: String,
+    select: false,
+  },
+  faceDescriptor: {
+    type: [Number],
     select: false,
   },
   displayName: {

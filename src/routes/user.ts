@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import * as usersController from '../controllers/userController';
+import { getAdminUserModuleData } from '../controllers/superAdminController';
 
 const router = Router();
 
@@ -22,6 +23,9 @@ router.put('/:userId/role', usersController.updateUserRole);
 router.put('/:userId/profile', usersController.updateUserProfile);
 router.get('/:userId/passkey', usersController.getUserPasskey);
 router.put('/:userId/passkey', usersController.updateUserPasskey);
+// Super admin — module data for a specific user
+router.get('/:userId/module-data', getAdminUserModuleData);
+
 router.delete('/delete-all', usersController.deleteAllUsers); // Delete all users (admin only)
 router.delete('/:userId', usersController.deleteUser);
 
