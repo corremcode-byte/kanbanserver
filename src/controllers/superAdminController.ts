@@ -6,7 +6,7 @@ import User from '../models/User';
 import Task from '../models/Task';
 import Project from '../models/Project';
 import Note from '../models/Note';
-import ChatGroup from '../models/ChatGroup';
+import { ChatGroup } from '../models/ChatGroup';
 
 export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Response) => {
   try {
