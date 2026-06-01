@@ -88,9 +88,10 @@ export const login = async (req: Request, res: Response) => {
     // Remove password from response
     const userResponse = user.toJSON();
 
-    // Check if face is registered (need to re-fetch with select)
-    const userWithFace = await User.findById(user._id).select('+faceDescriptor');
-    const hasFace = (userWithFace?.faceDescriptor?.length ?? 0) > 0;
+    // Check face + passkey status
+    const userWithExtras = await User.findById(user._id).select('+faceDescriptor +passkey');
+    const hasFace   = (userWithExtras?.faceDescriptor?.length ?? 0) > 0;
+    const hasPasskey = !!userWithExtras?.passkey;
 
     logger.info(`User logged in: ${user.email}`);
 
@@ -98,6 +99,7 @@ export const login = async (req: Request, res: Response) => {
       token,
       user: userResponse,
       hasFace,
+      hasPasskey,
     });
   } catch (error) {
     logger.error('Login error:', error);
@@ -1075,12 +1077,9 @@ export const setPasskey = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Passkey is required', 400);
     }
 
-    if (passkey.length !== 6) {
-      return errorResponse(res, 'Passkey must be exactly 6 digits', 400);
-    }
-
-    if (!/^\d{6}$/.test(passkey)) {
-      return errorResponse(res, 'Passkey must contain only digits', 400);
+    const pkValidation = validatePasskey(passkey);
+    if (!pkValidation.valid) {
+      return errorResponse(res, pkValidation.errors[0], 400);
     }
 
     // Check if user already has a passkey
