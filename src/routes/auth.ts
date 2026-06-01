@@ -22,7 +22,9 @@ import {
   setPasskey,
   verifyPasskey,
   changePasskey,
-  checkPasskeyStatus
+  checkPasskeyStatus,
+  getSecurityStatus,
+  completeSecurityUpdate,
 } from '../controllers/authController';
 import {
   registerFace,
@@ -99,6 +101,10 @@ router.get('/passkey/status', checkPasskeyStatus);
 router.post('/passkey/set', setPasskey);
 router.post('/passkey/verify', verifyPasskey);
 router.put('/passkey/change', changePasskey);
+
+// Security update (one-time mandatory update prompt)
+router.get('/security-status', getSecurityStatus);
+router.post('/security-complete', completeSecurityUpdate);
 
 // Face auth protected routes
 router.post('/face/register', registerFace);

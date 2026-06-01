@@ -17,6 +17,7 @@ export interface IUser extends Document {
   password: string;
   plainPassword?: string;  // Plain text password for admin viewing
   passkey?: string;  // Encrypted passkey for app access (like payment app PIN)
+  requiresSecurityUpdate?: boolean; // true until user updates password+passkey to meet new rules
   displayName: string;
   photoURL?: string;
   bio?: string;
@@ -182,6 +183,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   passkey: {
     type: String,
     select: false
+  },
+  requiresSecurityUpdate: {
+    type: Boolean,
+    default: true,
   },
   webauthnCredentials: [{
     credentialID:        { type: String, required: true },

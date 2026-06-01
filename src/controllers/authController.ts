@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
+import { validatePassword, validatePasskey } from '../utils/validation';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -874,10 +875,6 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'New password is required', 400);
     }
 
-    if (newPassword.length < 6) {
-      return errorResponse(res, 'New password must be at least 6 characters long', 400);
-    }
-
     // Find user (include password field which is normally excluded)
     const user = await User.findById(req.user._id).select('+password');
 
@@ -894,6 +891,12 @@ export const updatePassword = async (req: AuthenticatedRequest, res: Response) =
 
     if (currentPassword === newPassword) {
       return errorResponse(res, 'New password must be different from your current password', 400);
+    }
+
+    // Enforce strong password rules
+    const pwValidation = validatePassword(newPassword, user.email, user.displayName);
+    if (!pwValidation.valid) {
+      return errorResponse(res, pwValidation.errors[0], 400);
     }
 
     // Update password (will be hashed by pre-save middleware)
@@ -1164,12 +1167,10 @@ export const changePasskey = async (req: AuthenticatedRequest, res: Response) =>
       return errorResponse(res, 'New passkey is required', 400);
     }
 
-    if (newPasskey.length !== 6) {
-      return errorResponse(res, 'New passkey must be exactly 6 digits', 400);
-    }
-
-    if (!/^\d{6}$/.test(newPasskey)) {
-      return errorResponse(res, 'New passkey must contain only digits', 400);
+    // Enforce passkey pattern rules
+    const pkValidation = validatePasskey(newPasskey);
+    if (!pkValidation.valid) {
+      return errorResponse(res, pkValidation.errors[0], 400);
     }
 
     const user = await User.findById(req.user._id).select('+passkey');
@@ -1283,5 +1284,32 @@ export const resetPassword = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error resetting password:', error);
     return internalServerErrorResponse(res, 'Failed to reset password');
+  }
+};
+
+// ── Security update status ────────────────────────────────────────────────────
+
+export const getSecurityStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+    const user = await User.findById(req.user._id).select('requiresSecurityUpdate');
+    if (!user) return notFoundResponse(res, 'User not found');
+    // Treat undefined (old users without field) as true
+    const required = user.requiresSecurityUpdate !== false;
+    return successResponse(res, 'OK', { requiresSecurityUpdate: required });
+  } catch (error) {
+    logger.error('Error fetching security status:', error);
+    return internalServerErrorResponse(res, 'Failed to fetch security status');
+  }
+};
+
+export const completeSecurityUpdate = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+    await User.findByIdAndUpdate(req.user._id, { requiresSecurityUpdate: false });
+    return successResponse(res, 'Security update completed');
+  } catch (error) {
+    logger.error('Error completing security update:', error);
+    return internalServerErrorResponse(res, 'Failed to complete security update');
   }
 };
