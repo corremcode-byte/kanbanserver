@@ -16,8 +16,14 @@ export interface IUser extends Document {
   email: string;
   password: string;
   plainPassword?: string;  // Plain text password for admin viewing
-  passkey?: string;  // Encrypted passkey for app access (like payment app PIN)
-  requiresSecurityUpdate?: boolean; // true until user updates password+passkey to meet new rules
+  passkey?: string;
+  requiresSecurityUpdate?: boolean;
+  activeSessions?: Array<{
+    jti: string;
+    deviceType: 'mobile' | 'desktop';
+    loggedInAt: Date;
+    userAgent: string;
+  }>;
   displayName: string;
   photoURL?: string;
   bio?: string;
@@ -33,7 +39,6 @@ export interface IUser extends Document {
     transports?: string[];
   }>;
   currentChallenge?: string;
-  faceDescriptor?: number[];
   comparePassword(candidatePassword: string): Promise<boolean>;
   comparePasskey(candidatePasskey: string): Promise<boolean>;
   hasPasskey(): boolean;
@@ -188,6 +193,12 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     type: Boolean,
     default: true,
   },
+  activeSessions: [{
+    jti:        { type: String, required: true },
+    deviceType: { type: String, enum: ['mobile', 'desktop'], required: true },
+    loggedInAt: { type: Date, default: Date.now },
+    userAgent:  { type: String, default: '' },
+  }],
   webauthnCredentials: [{
     credentialID:        { type: String, required: true },
     credentialPublicKey: { type: String, required: true },
@@ -196,10 +207,6 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   }],
   currentChallenge: {
     type: String,
-    select: false,
-  },
-  faceDescriptor: {
-    type: [Number],
     select: false,
   },
   displayName: {

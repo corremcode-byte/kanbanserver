@@ -32,11 +32,10 @@ export const authenticate = async (
     const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 
 
-    // Verify JWT token
-    const decoded = jwt.verify(token, secret) as { userId: string };
+    // Verify JWT signature + expiry
+    const decoded = jwt.verify(token, secret) as { userId: string; jti?: string };
 
-
-    if (!decoded || !decoded.userId) {
+    if (!decoded?.userId) {
       errorResponse(res, 'Invalid token', 401);
       return;
     }
@@ -51,6 +50,15 @@ export const authenticate = async (
     if (!user.isActive) {
       errorResponse(res, 'Account is deactivated', 403);
       return;
+    }
+
+    // Verify this session is still active (device-limit enforcement)
+    if (decoded.jti) {
+      const sessionExists = (user.activeSessions || []).some(s => s.jti === decoded.jti);
+      if (!sessionExists) {
+        errorResponse(res, 'Session expired or logged in from another device', 401);
+        return;
+      }
     }
 
     // Attach user to request with proper _id

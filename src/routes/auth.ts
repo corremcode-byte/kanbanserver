@@ -27,42 +27,54 @@ import {
   completeSecurityUpdate,
 } from '../controllers/authController';
 import {
-  registerFace,
-  verifyFace,
-  getFaceStatus,
-} from '../controllers/faceAuthController';
-import {
   authenticate,
   optionalAuth,
   requireManagerOrAdmin,
-  AuthenticatedRequest
+  AuthenticatedRequest,
 } from '../middleware/auth';
 import { successResponse } from '../utils/responses';
 import { User, AuditLog } from '../models';
 import { uploadAvatar as uploadAvatarMiddleware } from '../middleware/upload';
+import jwt from 'jsonwebtoken';
 
 const router = Router();
 
-// Public routes (no auth required)
+// ── Public routes ─────────────────────────────────────────────────────────────
 router.post('/login', login);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
-// Face auth public routes
-router.post('/face/verify', verifyFace);
-
-// Logout route
+// ── Logout ────────────────────────────────────────────────────────────────────
 router.post('/logout', optionalAuth, async (req: AuthenticatedRequest, res) => {
   if (req.user) {
     try {
       const userId = req.user._id?.toString();
+
+      // Remove the jti of this session from activeSessions
+      const token = req.cookies?.auth_token
+        || (req.headers.authorization?.startsWith('Bearer ')
+          ? req.headers.authorization.split(' ')[1]
+          : undefined);
+
+      if (token) {
+        try {
+          const secret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+          const decoded = jwt.verify(token, secret) as { jti?: string };
+          if (decoded.jti) {
+            await User.findByIdAndUpdate(req.user._id, {
+              $pull: { activeSessions: { jti: decoded.jti } },
+            });
+          }
+        } catch { /* token may already be expired — ignore */ }
+      }
+
       await Promise.all([
         User.findByIdAndUpdate(req.user._id, { lastLogoutAt: new Date() }),
         userId ? dynamicRouteStore.clearUserRoutes(userId) : Promise.resolve(),
         AuditLog.logSystemEvent({
           userId: req.user._id,
           action: 'user_logout',
-          metadata: { userName: req.user.displayName, userEmail: req.user.email }
+          metadata: { userName: req.user.displayName, userEmail: req.user.email },
         }),
       ]);
     } catch (err) {
@@ -73,57 +85,40 @@ router.post('/logout', optionalAuth, async (req: AuthenticatedRequest, res) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/'
+    path: '/',
   });
   return successResponse(res, 'Logged out successfully');
 });
 
-
-// Protected routes (require JWT authentication)
+// ── Protected routes (require JWT) ───────────────────────────────────────────
 router.use(authenticate);
 
-// User profile routes
 router.get('/me', getCurrentUser);
 router.get('/profile', getProfile);
 router.put('/profile', updateProfile);
 router.post('/deactivate', deactivateAccount);
 
-// Settings routes
 router.get('/settings', getSettings);
 router.put('/settings', updateSettings);
 
-// Password and account management
 router.put('/password', updatePassword);
 router.delete('/account', deleteAccount);
 
-// Passkey routes
 router.get('/passkey/status', checkPasskeyStatus);
 router.post('/passkey/set', setPasskey);
 router.post('/passkey/verify', verifyPasskey);
 router.put('/passkey/change', changePasskey);
 
-// Security update (one-time mandatory update prompt)
 router.get('/security-status', getSecurityStatus);
 router.post('/security-complete', completeSecurityUpdate);
 
-// Face auth protected routes
-router.post('/face/register', registerFace);
-router.get('/face/status', getFaceStatus);
-
-// Avatar upload (requires authentication and multer middleware)
 router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);
 
-// Dashboard
 router.get('/dashboard', getDashboardData);
 
-// User management routes
 router.get('/users', getAllUsers);
 router.get('/users/search', searchUsers);
-
-// Admin only routes
 router.get('/users/with-passwords', getAllUsersWithPasswords);
-
-// Admin/Manager only routes
 router.put('/users/:userId/role', requireManagerOrAdmin, updateUserRole);
 
 export default router;

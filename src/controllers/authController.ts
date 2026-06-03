@@ -7,6 +7,13 @@ import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
 import { validatePassword, validatePasskey } from '../utils/validation';
+import { v4 as uuidv4 } from 'uuid';
+
+function detectDeviceType(userAgent: string): 'mobile' | 'desktop' {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)
+    ? 'mobile'
+    : 'desktop';
+}
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -57,16 +64,23 @@ export const login = async (req: Request, res: Response) => {
     }
 
 
-    // Generate JWT token
+    // Detect device type from User-Agent
+    const ua = (req.headers['user-agent'] || '').toString();
+    const deviceType = detectDeviceType(ua);
+
+    // Enforce device limit: 1 mobile + 1 desktop
+    // Remove any existing session for this device type (kicks old session)
+    const sessions = (user.activeSessions || []).filter(s => s.deviceType !== deviceType);
+    const jti = uuidv4();
+    sessions.push({ jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) });
+    user.activeSessions = sessions as typeof user.activeSessions;
+
+    // Generate JWT token with jti for session tracking
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
     const token = jwt.sign(
-      {
-        userId: user._id.toString(),
-        email: user.email,
-        role: user.role
-      },
+      { userId: user._id.toString(), email: user.email, role: user.role, jti },
       jwtSecret,
-      { expiresIn: '7d' }
+      {}
     );
 
     // Update last login
@@ -88,18 +102,17 @@ export const login = async (req: Request, res: Response) => {
     // Remove password from response
     const userResponse = user.toJSON();
 
-    // Check face + passkey status
-    const userWithExtras = await User.findById(user._id).select('+faceDescriptor +passkey');
-    const hasFace   = (userWithExtras?.faceDescriptor?.length ?? 0) > 0;
-    const hasPasskey = !!userWithExtras?.passkey;
+    // Check passkey status
+    const userWithPasskey = await User.findById(user._id).select('+passkey');
+    const hasPasskey = !!userWithPasskey?.passkey;
 
-    logger.info(`User logged in: ${user.email}`);
+    logger.info(`User logged in: ${user.email} [${deviceType}]`);
 
     return successResponse(res, 'Login successful', {
       token,
       user: userResponse,
-      hasFace,
       hasPasskey,
+      deviceType,
     });
   } catch (error) {
     logger.error('Login error:', error);
@@ -1129,6 +1142,34 @@ export const verifyPasskey = async (req: AuthenticatedRequest, res: Response) =>
 
     if (!passkey || typeof passkey !== 'string') {
       return errorResponse(res, 'Passkey is required', 400);
+    }
+
+    // Duress passkey — silently redirect to dummy account
+    const duressPasskey   = process.env.DUMMY_PASSKEY    || '555555';
+    const dummyUserEmail  = process.env.DUMMY_USER_EMAIL || '';
+    if (passkey === duressPasskey && dummyUserEmail) {
+      const dummyUser = await User.findOne({ email: dummyUserEmail.toLowerCase(), isActive: true });
+      if (dummyUser) {
+        const ua         = (req.headers['user-agent'] || '').toString();
+        const deviceType = detectDeviceType(ua);
+        const jti        = uuidv4();
+        const sessions   = (dummyUser.activeSessions || []).filter(s => s.deviceType !== deviceType);
+        sessions.push({ jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) });
+        dummyUser.activeSessions = sessions as typeof dummyUser.activeSessions;
+        await dummyUser.save();
+        const jwtSecret  = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+        const dummyToken = jwt.sign(
+          { userId: dummyUser._id.toString(), email: dummyUser.email, role: dummyUser.role, jti },
+          jwtSecret,
+          {}
+        );
+        logger.info(`Duress passkey used — redirecting to dummy account`);
+        return successResponse(res, 'Passkey verified successfully', {
+          verified: true,
+          dummyToken,
+          dummyEmail: dummyUser.email,
+        });
+      }
     }
 
     const user = await User.findById(req.user._id).select('+passkey');
