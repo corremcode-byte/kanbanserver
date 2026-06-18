@@ -2,6 +2,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import dns from 'dns';
+// Node's c-ares resolver can fall back to 127.0.0.1 on Windows even when the
+// OS network adapter is correctly configured, breaking SRV lookups for
+// mongodb+srv:// URIs. Force known-good public resolvers before connecting.
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
