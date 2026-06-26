@@ -215,11 +215,15 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
                           group.members[0]._id.toString() === userId?.toString() &&
                           group.name === 'Message Yourself';
 
+        const isMuted = group.mutedBy?.some(
+          (id: mongoose.Types.ObjectId) => id.toString() === userId?.toString()
+        ) ?? false;
         return {
           ...group.toObject(),
           unreadCount,
           lastMessage: lastMessage || null,
-          isSelfChat
+          isSelfChat,
+          isMuted
         };
       })
     );
@@ -266,6 +270,43 @@ export const getChatGroup = async (req: AuthenticatedRequest, res: Response) => 
   } catch (error) {
     console.error('Error fetching chat group:', error);
     return res.status(500).json({ message: 'Failed to fetch chat group' });
+  }
+};
+
+// Toggle mute/unmute notifications for a chat group
+export const muteGroup = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const chatGroup = await ChatGroup.findOne({
+      _id: groupId,
+      members: userId,
+      isActive: true
+    });
+
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found or access denied' });
+    }
+
+    const userIdStr = userId.toString();
+    const currentlyMuted = Array.isArray(chatGroup.mutedBy) &&
+      chatGroup.mutedBy.some((id) => id.toString() === userIdStr);
+
+    if (currentlyMuted) {
+      await ChatGroup.updateOne({ _id: groupId }, { $pull: { mutedBy: userId } });
+    } else {
+      await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { mutedBy: userId } });
+    }
+
+    return res.json({ isMuted: !currentlyMuted });
+  } catch (error) {
+    console.error('Error toggling mute for chat group:', error);
+    return res.status(500).json({ message: 'Failed to toggle mute' });
   }
 };
 
@@ -392,6 +433,14 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
           (r: any) => r.userId?.toString() === memberIdStr
         );
         if (alreadyRead) {
+          return;
+        }
+
+        // Skip: member has muted this group
+        const hasMuted = chatGroup.mutedBy?.some(
+          (id: mongoose.Types.ObjectId) => id.toString() === memberIdStr
+        );
+        if (hasMuted) {
           return;
         }
 
