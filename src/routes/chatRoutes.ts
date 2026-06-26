@@ -3,6 +3,7 @@ import {
   createChatGroup,
   getUserChatGroups,
   getChatGroup,
+  muteGroup,
   sendMessage,
   getGroupMessages,
   getGroupStarredMessages,
@@ -102,6 +103,7 @@ router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
 router.delete('/groups/:groupId', deleteChatGroup);
+router.post('/groups/:groupId/mute', muteGroup);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
