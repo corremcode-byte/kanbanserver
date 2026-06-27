@@ -17,6 +17,7 @@ export interface IUser extends Document {
   password: string;
   plainPassword?: string;  // Plain text password for admin viewing
   passkey?: string;
+  chatLockPasskey?: string;
   requiresSecurityUpdate?: boolean;
   activeSessions?: Array<{
     jti: string;
@@ -138,6 +139,11 @@ export interface IUser extends Document {
       autoArchiveCompleted?: boolean;
       taskSorting?: 'due_date' | 'priority' | 'alphabetical' | 'created_date';
     };
+    chatLock?: {
+      enabled?: boolean;
+      method?: 'passkey' | 'emoji';
+      emoji?: string;
+    };
   };
   createdAt: Date;
   updatedAt: Date;
@@ -186,6 +192,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     select: false // Don't include in normal queries, only for admin
   },
   passkey: {
+    type: String,
+    select: false
+  },
+  chatLockPasskey: {
     type: String,
     select: false
   },
@@ -396,6 +406,11 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
         enum: ['due_date', 'priority', 'alphabetical', 'created_date'],
         default: 'due_date'
       }
+    },
+    chatLock: {
+      enabled: { type: Boolean, default: false },
+      method: { type: String, enum: ['passkey', 'emoji'] },
+      emoji: { type: String }
     }
   }
 }, {

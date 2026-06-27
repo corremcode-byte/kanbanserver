@@ -874,6 +874,120 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+// ── Chat Lock ─────────────────────────────────────────────────────────────────
+
+export const getChatLock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+
+    const user = await User.findById(req.user._id).select('+chatLockPasskey');
+    if (!user) return notFoundResponse(res, 'User not found');
+
+    const chatLock = user.settings?.chatLock;
+    return successResponse(res, 'Chat lock retrieved', {
+      enabled: chatLock?.enabled || false,
+      method: chatLock?.method || null,
+      hasValue: chatLock?.enabled
+        ? (chatLock.method === 'passkey' ? !!user.chatLockPasskey : !!chatLock.emoji)
+        : false,
+    });
+  } catch (error) {
+    logger.error('Error getting chat lock:', error);
+    return internalServerErrorResponse(res, 'Failed to get chat lock');
+  }
+};
+
+export const setChatLock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+
+    const { enabled, method, passkey, emoji } = req.body;
+    const user = await User.findById(req.user._id).select('+chatLockPasskey');
+    if (!user) return notFoundResponse(res, 'User not found');
+
+    if (!user.settings) {
+      user.settings = {} as NonNullable<typeof user.settings>;
+    }
+    if (!user.settings.chatLock) {
+      user.settings.chatLock = {};
+    }
+
+    if (enabled === false) {
+      user.settings.chatLock.enabled = false;
+      user.settings.chatLock.method = undefined;
+      user.settings.chatLock.emoji = undefined;
+      user.chatLockPasskey = undefined;
+    } else {
+      if (!method || !['passkey', 'emoji'].includes(method)) {
+        return errorResponse(res, 'Lock method must be "passkey" or "emoji"', 400);
+      }
+
+      if (method === 'passkey') {
+        if (!passkey) return errorResponse(res, 'Passkey is required', 400);
+        if (!/^\d+$/.test(passkey)) return errorResponse(res, 'Passkey must contain digits only (0–9)', 400);
+        if (passkey.length < 4) return errorResponse(res, 'Passkey must be at least 4 digits', 400);
+        const bcrypt = require('bcryptjs');
+        user.chatLockPasskey = await bcrypt.hash(passkey, 10);
+        user.settings.chatLock.emoji = undefined;
+      } else {
+        if (!emoji || typeof emoji !== 'string' || !emoji.trim()) {
+          return errorResponse(res, 'Emoji is required', 400);
+        }
+        user.settings.chatLock.emoji = emoji.trim();
+        user.chatLockPasskey = undefined;
+      }
+
+      user.settings.chatLock.enabled = true;
+      user.settings.chatLock.method = method;
+    }
+
+    user.markModified('settings');
+    await user.save();
+
+    logger.info(`Chat lock updated for user: ${user.email}`);
+    return successResponse(res, 'Chat lock updated', {
+      enabled: user.settings.chatLock.enabled || false,
+      method: user.settings.chatLock.method || null,
+    });
+  } catch (error) {
+    logger.error('Error setting chat lock:', error);
+    return internalServerErrorResponse(res, 'Failed to update chat lock');
+  }
+};
+
+export const verifyChatLock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+
+    const { passkey, emoji } = req.body;
+    const user = await User.findById(req.user._id).select('+chatLockPasskey');
+    if (!user) return notFoundResponse(res, 'User not found');
+
+    const chatLock = user.settings?.chatLock;
+    if (!chatLock?.enabled) {
+      return successResponse(res, 'Chat lock not enabled', { verified: true });
+    }
+
+    if (chatLock.method === 'passkey') {
+      if (!passkey) return errorResponse(res, 'Passkey is required', 400);
+      if (!user.chatLockPasskey) return errorResponse(res, 'No passkey configured', 400);
+      const bcrypt = require('bcryptjs');
+      const match = await bcrypt.compare(String(passkey), user.chatLockPasskey);
+      if (!match) return errorResponse(res, 'Incorrect passkey', 401);
+    } else if (chatLock.method === 'emoji') {
+      if (!emoji) return errorResponse(res, 'Emoji is required', 400);
+      if (emoji !== chatLock.emoji) return errorResponse(res, 'Incorrect emoji', 401);
+    } else {
+      return errorResponse(res, 'Chat lock misconfigured', 400);
+    }
+
+    return successResponse(res, 'Chat lock verified', { verified: true });
+  } catch (error) {
+    logger.error('Error verifying chat lock:', error);
+    return internalServerErrorResponse(res, 'Failed to verify chat lock');
+  }
+};
+
 export const updatePassword = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user?._id) {
