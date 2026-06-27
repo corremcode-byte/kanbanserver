@@ -25,6 +25,9 @@ import {
   checkPasskeyStatus,
   getSecurityStatus,
   completeSecurityUpdate,
+  getChatLock,
+  setChatLock,
+  verifyChatLock,
 } from '../controllers/authController';
 import {
   authenticate,
@@ -111,6 +114,10 @@ router.put('/passkey/change', changePasskey);
 
 router.get('/security-status', getSecurityStatus);
 router.post('/security-complete', completeSecurityUpdate);
+
+router.get('/chat-lock', getChatLock);
+router.put('/chat-lock', setChatLock);
+router.post('/chat-lock/verify', verifyChatLock);
 
 router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);
 
