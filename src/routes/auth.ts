@@ -28,6 +28,8 @@ import {
   getChatLock,
   setChatLock,
   verifyChatLock,
+  getPerChatLockCredential,
+  setPerChatLockCredential,
 } from '../controllers/authController';
 import {
   authenticate,
@@ -118,6 +120,9 @@ router.post('/security-complete', completeSecurityUpdate);
 router.get('/chat-lock', getChatLock);
 router.put('/chat-lock', setChatLock);
 router.post('/chat-lock/verify', verifyChatLock);
+
+router.get('/per-chat-lock-credential', getPerChatLockCredential);
+router.put('/per-chat-lock-credential', setPerChatLockCredential);
 
 router.post('/avatar', authenticate, uploadAvatarMiddleware.single('avatar'), uploadAvatarController);
 

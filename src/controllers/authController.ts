@@ -988,6 +988,64 @@ export const verifyChatLock = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+export const getPerChatLockCredential = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+
+    const user = await User.findById(req.user._id).select('settings');
+    if (!user) return notFoundResponse(res, 'User not found');
+
+    const perChatLock = user.settings?.perChatLock;
+    return successResponse(res, 'Per-chat lock credential retrieved', {
+      hasCredential: !!(perChatLock?.method),
+      method: perChatLock?.method ?? null,
+    });
+  } catch (error) {
+    logger.error('Error getting per-chat lock credential:', error);
+    return internalServerErrorResponse(res, 'Failed to get credential');
+  }
+};
+
+export const setPerChatLockCredential = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return errorResponse(res, 'User not authenticated', 401);
+
+    const { method, passkey, emoji } = req.body;
+
+    if (!['passkey', 'emoji'].includes(method)) {
+      return errorResponse(res, 'Invalid method', 400);
+    }
+    if (method === 'passkey') {
+      if (!passkey || !/^\d{4}$/.test(String(passkey))) {
+        return errorResponse(res, 'Passkey must be exactly 4 numeric digits', 400);
+      }
+    } else {
+      if (!emoji) return errorResponse(res, 'Emoji is required', 400);
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return notFoundResponse(res, 'User not found');
+
+    if (!user.settings) user.settings = {};
+    if (method === 'passkey') {
+      const bcrypt = require('bcryptjs');
+      user.perChatLockPasskey = await bcrypt.hash(String(passkey), 10);
+      user.settings.perChatLock = { method };
+    } else {
+      user.settings.perChatLock = { method, emoji };
+      user.perChatLockPasskey = undefined;
+    }
+
+    user.markModified('settings');
+    await user.save();
+
+    return successResponse(res, 'Per-chat lock credential saved', { success: true, method });
+  } catch (error) {
+    logger.error('Error setting per-chat lock credential:', error);
+    return internalServerErrorResponse(res, 'Failed to set credential');
+  }
+};
+
 export const updatePassword = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user?._id) {

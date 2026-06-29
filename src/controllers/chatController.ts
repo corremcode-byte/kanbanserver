@@ -192,6 +192,10 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
       .sort({ updatedAt: -1 });
 
     // For each group, get unread count and last message
+    // Get the user's per-chat lock credential method (stored once on User, not per-chat)
+    const currentUserDoc = await User.findById(userId).select('settings');
+    const perChatLockMethod = currentUserDoc?.settings?.perChatLock?.method ?? null;
+
     const groupsWithMetadata = await Promise.all(
       chatGroups.map(async (group) => {
         // Get last message for this group
@@ -218,20 +222,32 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
         const isMuted = group.mutedBy?.some(
           (id: mongoose.Types.ObjectId) => id.toString() === userId?.toString()
         ) ?? false;
+
+        const isLockedByMe = Array.isArray(group.chatLocks) &&
+          group.chatLocks.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
+        const lockMethod = isLockedByMe ? perChatLockMethod : null;
+
+        const groupObj = group.toObject() as unknown as Record<string, unknown>;
+        delete groupObj.chatLocks;
+
         return {
-          ...group.toObject(),
+          ...groupObj,
           unreadCount,
           lastMessage: lastMessage || null,
           isSelfChat,
-          isMuted
+          isMuted,
+          isLockedByMe,
+          lockMethod,
         };
       })
     );
 
     // Sort by last message timestamp (most recent first)
     groupsWithMetadata.sort((a, b) => {
-      const aTime = a.lastMessage?.createdAt || a.updatedAt;
-      const bTime = b.lastMessage?.createdAt || b.updatedAt;
+      const aRaw = a as Record<string, unknown>;
+      const bRaw = b as Record<string, unknown>;
+      const aTime = a.lastMessage?.createdAt ?? (aRaw.updatedAt as Date | string);
+      const bTime = b.lastMessage?.createdAt ?? (bRaw.updatedAt as Date | string);
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
 
@@ -1148,6 +1164,112 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
   } catch (error) {
     console.error('Error deleting chat group:', error);
     return res.status(500).json({ message: 'Failed to delete chat group' });
+  }
+};
+
+// ==========================================
+// PER-CHAT LOCK
+// ==========================================
+
+export const lockChat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // Credential must already be set up on the user's account
+    const user = await User.findById(userId).select('settings');
+    const lockMethod = user?.settings?.perChatLock?.method;
+    if (!lockMethod) {
+      return res.status(400).json({ message: 'No lock credential set up. Please set up your lock first.' });
+    }
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { chatLocks: userId } });
+
+    return res.json({ isLockedByMe: true, lockMethod });
+  } catch (error) {
+    console.error('Error locking chat:', error);
+    return res.status(500).json({ message: 'Failed to lock chat' });
+  }
+};
+
+export const removeChatLock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    await ChatGroup.updateOne({ _id: groupId }, { $pull: { chatLocks: userId } });
+
+    // If this was the last locked chat, wipe the stored credentials so the
+    // next lock operation always requires creating a fresh passkey/emoji.
+    const remainingLocked = await ChatGroup.countDocuments({
+      chatLocks: userId,
+      isActive: true,
+    });
+
+    if (remainingLocked === 0) {
+      await User.updateOne(
+        { _id: userId },
+        { $unset: { perChatLockPasskey: 1, 'settings.perChatLock': 1 } }
+      );
+    }
+
+    return res.json({ isLockedByMe: false, credentialsCleared: remainingLocked === 0 });
+  } catch (error) {
+    console.error('Error removing chat lock:', error);
+    return res.status(500).json({ message: 'Failed to remove chat lock' });
+  }
+};
+
+export const verifyChatGroupLock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const { passkey, emoji } = req.body;
+    const userId = req.user?._id;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    const isLockedByUser = Array.isArray(chatGroup.chatLocks) &&
+      chatGroup.chatLocks.some((id: mongoose.Types.ObjectId) => id.toString() === userId.toString());
+    if (!isLockedByUser) return res.status(404).json({ message: 'No lock set for this chat' });
+
+    // Read credential from User model (stored once, shared across all locked chats)
+    const user = await User.findById(userId).select('+perChatLockPasskey settings');
+    const lockMethod = user?.settings?.perChatLock?.method;
+    if (!lockMethod) return res.status(404).json({ message: 'No lock credential found' });
+
+    let isValid = false;
+    if (lockMethod === 'passkey') {
+      if (!passkey) return res.status(400).json({ message: 'Passkey is required' });
+      const bcrypt = require('bcryptjs');
+      isValid = await bcrypt.compare(String(passkey), user?.perChatLockPasskey || '');
+    } else {
+      if (!emoji) return res.status(400).json({ message: 'Emoji is required' });
+      isValid = emoji === user?.settings?.perChatLock?.emoji;
+    }
+
+    if (!isValid) {
+      return res.status(401).json({
+        message: lockMethod === 'passkey' ? 'Incorrect passkey' : 'Incorrect emoji. Try again.'
+      });
+    }
+
+    return res.json({ verified: true });
+  } catch (error) {
+    console.error('Error verifying chat lock:', error);
+    return res.status(500).json({ message: 'Failed to verify' });
   }
 };
 
