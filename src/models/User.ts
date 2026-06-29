@@ -18,6 +18,7 @@ export interface IUser extends Document {
   plainPassword?: string;  // Plain text password for admin viewing
   passkey?: string;
   chatLockPasskey?: string;
+  perChatLockPasskey?: string;
   requiresSecurityUpdate?: boolean;
   activeSessions?: Array<{
     jti: string;
@@ -144,6 +145,10 @@ export interface IUser extends Document {
       method?: 'passkey' | 'emoji';
       emoji?: string;
     };
+    perChatLock?: {
+      method?: 'passkey' | 'emoji';
+      emoji?: string;
+    };
   };
   createdAt: Date;
   updatedAt: Date;
@@ -196,6 +201,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     select: false
   },
   chatLockPasskey: {
+    type: String,
+    select: false
+  },
+  perChatLockPasskey: {
     type: String,
     select: false
   },
@@ -409,6 +418,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     },
     chatLock: {
       enabled: { type: Boolean, default: false },
+      method: { type: String, enum: ['passkey', 'emoji'] },
+      emoji: { type: String }
+    },
+    perChatLock: {
       method: { type: String, enum: ['passkey', 'emoji'] },
       emoji: { type: String }
     }

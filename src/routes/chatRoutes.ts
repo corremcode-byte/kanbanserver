@@ -4,6 +4,9 @@ import {
   getUserChatGroups,
   getChatGroup,
   muteGroup,
+  lockChat,
+  removeChatLock,
+  verifyChatGroupLock,
   sendMessage,
   getGroupMessages,
   getGroupStarredMessages,
@@ -104,6 +107,9 @@ router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
 router.delete('/groups/:groupId', deleteChatGroup);
 router.post('/groups/:groupId/mute', muteGroup);
+router.post('/groups/:groupId/lock', lockChat);
+router.delete('/groups/:groupId/lock', removeChatLock);
+router.post('/groups/:groupId/lock/verify', verifyChatGroupLock);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
