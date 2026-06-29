@@ -227,6 +227,9 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           group.chatLocks.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
         const lockMethod = isLockedByMe ? perChatLockMethod : null;
 
+        const isFavourited = Array.isArray(group.favouritedBy) &&
+          group.favouritedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
+
         const groupObj = group.toObject() as unknown as Record<string, unknown>;
         delete groupObj.chatLocks;
 
@@ -238,6 +241,7 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           isMuted,
           isLockedByMe,
           lockMethod,
+          isFavourited,
         };
       })
     );
@@ -1270,6 +1274,32 @@ export const verifyChatGroupLock = async (req: AuthenticatedRequest, res: Respon
   } catch (error) {
     console.error('Error verifying chat lock:', error);
     return res.status(500).json({ message: 'Failed to verify' });
+  }
+};
+
+export const toggleFavourite = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    const isCurrentlyFavourited = Array.isArray(chatGroup.favouritedBy) &&
+      chatGroup.favouritedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId.toString());
+
+    if (isCurrentlyFavourited) {
+      await ChatGroup.updateOne({ _id: groupId }, { $pull: { favouritedBy: userId } });
+    } else {
+      await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { favouritedBy: userId } });
+    }
+
+    return res.json({ isFavourited: !isCurrentlyFavourited });
+  } catch (error) {
+    console.error('Error toggling favourite:', error);
+    return res.status(500).json({ message: 'Failed to toggle favourite' });
   }
 };
 
