@@ -230,6 +230,15 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
         const isFavourited = Array.isArray(group.favouritedBy) &&
           group.favouritedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
 
+        const isPinned = Array.isArray(group.pinnedBy) &&
+          group.pinnedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
+
+        const isArchived = Array.isArray(group.archivedBy) &&
+          group.archivedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
+
+        const isMarkedUnread = Array.isArray(group.markedUnreadBy) &&
+          group.markedUnreadBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId?.toString());
+
         const groupObj = group.toObject() as unknown as Record<string, unknown>;
         delete groupObj.chatLocks;
 
@@ -242,6 +251,9 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           isLockedByMe,
           lockMethod,
           isFavourited,
+          isPinned,
+          isArchived,
+          isMarkedUnread,
         };
       })
     );
@@ -1300,6 +1312,121 @@ export const toggleFavourite = async (req: AuthenticatedRequest, res: Response) 
   } catch (error) {
     console.error('Error toggling favourite:', error);
     return res.status(500).json({ message: 'Failed to toggle favourite' });
+  }
+};
+
+export const toggleGroupPin = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    const isCurrentlyPinned = Array.isArray(chatGroup.pinnedBy) &&
+      chatGroup.pinnedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId.toString());
+
+    if (isCurrentlyPinned) {
+      await ChatGroup.updateOne({ _id: groupId }, { $pull: { pinnedBy: userId } });
+    } else {
+      await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { pinnedBy: userId } });
+    }
+
+    return res.json({ isPinned: !isCurrentlyPinned });
+  } catch (error) {
+    console.error('Error toggling pin:', error);
+    return res.status(500).json({ message: 'Failed to toggle pin' });
+  }
+};
+
+export const toggleArchive = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    const isCurrentlyArchived = Array.isArray(chatGroup.archivedBy) &&
+      chatGroup.archivedBy.some((id: mongoose.Types.ObjectId) => id.toString() === userId.toString());
+
+    if (isCurrentlyArchived) {
+      await ChatGroup.updateOne({ _id: groupId }, { $pull: { archivedBy: userId } });
+    } else {
+      await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { archivedBy: userId } });
+    }
+
+    return res.json({ isArchived: !isCurrentlyArchived });
+  } catch (error) {
+    console.error('Error toggling archive:', error);
+    return res.status(500).json({ message: 'Failed to toggle archive' });
+  }
+};
+
+export const markAllRead = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    // Bulk mark all unread messages as read for this user
+    await Message.updateMany(
+      { groupId, isDeleted: false, 'readBy.userId': { $ne: userId } },
+      { $push: { readBy: { userId, readAt: new Date() } } }
+    );
+
+    // Remove from markedUnreadBy
+    await ChatGroup.updateOne({ _id: groupId }, { $pull: { markedUnreadBy: userId } });
+
+    return res.json({ unreadCount: 0, isMarkedUnread: false });
+  } catch (error) {
+    console.error('Error marking all read:', error);
+    return res.status(500).json({ message: 'Failed to mark as read' });
+  }
+};
+
+export const markUnread = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    await ChatGroup.updateOne({ _id: groupId }, { $addToSet: { markedUnreadBy: userId } });
+
+    return res.json({ isMarkedUnread: true });
+  } catch (error) {
+    console.error('Error marking as unread:', error);
+    return res.status(500).json({ message: 'Failed to mark as unread' });
+  }
+};
+
+export const clearChat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    // Soft-delete all messages in the group
+    await Message.updateMany(
+      { groupId, isDeleted: false },
+      { isDeleted: true, deletedAt: new Date() }
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing chat:', error);
+    return res.status(500).json({ message: 'Failed to clear chat' });
   }
 };
 
