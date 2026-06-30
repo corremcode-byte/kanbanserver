@@ -8,8 +8,11 @@ export interface IChatGroup extends Document {
   mutedBy: mongoose.Types.ObjectId[];
   chatLocks: mongoose.Types.ObjectId[];
   favouritedBy: mongoose.Types.ObjectId[];
+  pinnedBy: mongoose.Types.ObjectId[];
+  archivedBy: mongoose.Types.ObjectId[];
+  markedUnreadBy: mongoose.Types.ObjectId[];
   projectId?: mongoose.Types.ObjectId;
-  encryptionPublicKey: string; // Group's public key for encryption
+  encryptionPublicKey: string;
   isActive: boolean;
   isPersonalChat: boolean;
   createdAt: Date;
@@ -18,28 +21,10 @@ export interface IChatGroup extends Document {
 
 const chatGroupSchema = new Schema<IChatGroup>(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-      maxlength: 100
-    },
-    description: {
-      type: String,
-      trim: true,
-      maxlength: 500
-    },
-    createdBy: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true
-    },
-    members: [{
-      type: Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    }],
+    name: { type: String, required: true, trim: true, maxlength: 100 },
+    description: { type: String, trim: true, maxlength: 500 },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    members: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
     mutedBy: {
       type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
       default: []
@@ -52,31 +37,26 @@ const chatGroupSchema = new Schema<IChatGroup>(
       type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
       default: []
     },
-    projectId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Project',
-      index: true
+    pinnedBy: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+      default: []
     },
-    encryptionPublicKey: {
-      type: String,
-      required: true
+    archivedBy: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+      default: []
     },
-    isActive: {
-      type: Boolean,
-      default: true
+    markedUnreadBy: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+      default: []
     },
-    isPersonalChat: {
-      type: Boolean,
-      default: false,
-      index: true
-    }
+    projectId: { type: Schema.Types.ObjectId, ref: 'Project', index: true },
+    encryptionPublicKey: { type: String, required: true },
+    isActive: { type: Boolean, default: true },
+    isPersonalChat: { type: Boolean, default: false, index: true }
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true }
 );
 
-// Indexes for performance
 chatGroupSchema.index({ members: 1, isActive: 1 });
 chatGroupSchema.index({ createdBy: 1, createdAt: -1 });
 

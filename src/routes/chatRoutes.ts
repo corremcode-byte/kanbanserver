@@ -8,6 +8,11 @@ import {
   removeChatLock,
   verifyChatGroupLock,
   toggleFavourite,
+  toggleGroupPin,
+  toggleArchive,
+  markAllRead,
+  markUnread,
+  clearChat,
   sendMessage,
   getGroupMessages,
   getGroupStarredMessages,
@@ -112,6 +117,11 @@ router.post('/groups/:groupId/lock', lockChat);
 router.delete('/groups/:groupId/lock', removeChatLock);
 router.post('/groups/:groupId/lock/verify', verifyChatGroupLock);
 router.post('/groups/:groupId/favourite', toggleFavourite);
+router.post('/groups/:groupId/pin', toggleGroupPin);
+router.post('/groups/:groupId/archive', toggleArchive);
+router.post('/groups/:groupId/mark-read', markAllRead);
+router.post('/groups/:groupId/mark-unread', markUnread);
+router.delete('/groups/:groupId/messages', clearChat);
 
 // File upload route with error handling
 router.post('/groups/:groupId/upload', (req, res, next) => {
