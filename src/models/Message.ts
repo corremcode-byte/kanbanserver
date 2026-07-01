@@ -16,6 +16,8 @@ export interface IMessage extends Document {
     fileUrl: string;
     fileType: string;
     fileSize: number;
+    duration?: number;
+    mimeType?: string;
   }[];
   replyTo?: mongoose.Types.ObjectId;
   readBy: {
@@ -58,7 +60,9 @@ const messageSchema = new Schema<IMessage>(
       fileName: String,
       fileUrl: String,
       fileType: String,
-      fileSize: Number
+      fileSize: Number,
+      duration: Number,
+      mimeType: String
     }],
     replyTo: {
       type: Schema.Types.ObjectId,

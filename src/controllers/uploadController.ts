@@ -385,13 +385,21 @@ export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Respo
     logger.info(`📦 Chat file saved to disk: ${file.path}`);
     logger.info(`🔗 Public URL: ${publicUrl}`);
 
+    // Optional client-supplied duration (seconds) for voice/audio/video attachments —
+    // multer puts non-file multipart fields on req.body alongside the file.
+    const parsedDuration = parseFloat(req.body?.duration);
+
     // Return attachment info
-    const attachment = {
+    const attachment: Record<string, unknown> = {
       fileName: file.originalname,
       fileUrl: publicUrl,
       fileType: file.mimetype,
-      fileSize: file.size
+      fileSize: file.size,
+      mimeType: file.mimetype
     };
+    if (!isNaN(parsedDuration) && parsedDuration > 0) {
+      attachment.duration = parsedDuration;
+    }
 
     logger.info(`✅ Chat file uploaded successfully: ${file.filename}`);
 
