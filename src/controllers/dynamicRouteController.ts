@@ -29,7 +29,7 @@ export async function generateRoute(req: AuthenticatedRequest, res: Response): P
 // POST /api/routes/validate  — no auth (called by Next.js middleware server-to-server)
 export async function validateRoute(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { token } = req.body as { token?: string };
-  if (!token || typeof token !== 'string' || !/^[0-9a-f]{32}$/.test(token)) {
+  if (!token || typeof token !== 'string' || !/^[A-Za-z0-9_-]{24}$/.test(token)) {
     res.json({ valid: false }); return;
   }
 

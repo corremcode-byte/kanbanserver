@@ -1,7 +1,14 @@
 import Redis from 'ioredis';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 const ROUTE_TTL = 1800; // 30 minutes of inactivity
+
+// 18 random bytes → exactly 24 base64url characters (no padding), using only
+// [A-Za-z0-9_-] — URL-safe by construction, higher entropy per char than hex.
+const ROUTE_TOKEN_BYTES = 18;
+function generateToken(): string {
+  return crypto.randomBytes(ROUTE_TOKEN_BYTES).toString('base64url');
+}
 
 interface RouteEntry {
   userId: string;
@@ -56,7 +63,7 @@ const tokenSet  = (userId: string)               => `dyn_tokens:${userId}`;
 
 async function generateRoute(userId: string, destination: string): Promise<string> {
   const redis = getRedis();
-  const token = uuidv4().replace(/-/g, '');
+  const token = generateToken();
 
   if (redis) {
     // Invalidate previous token for same user + destination
@@ -154,7 +161,7 @@ async function generatePublicRoute(destination: string): Promise<string> {
   }
 
   const redis = getRedis();
-  const token = uuidv4().replace(/-/g, '');
+  const token = generateToken();
   const PUBLIC_TTL = 600; // 10 minutes
   const entry: RouteEntry = { userId: '', destination, createdAt: Date.now(), isPublic: true };
 
