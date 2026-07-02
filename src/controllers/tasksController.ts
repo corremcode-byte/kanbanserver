@@ -8,6 +8,7 @@ import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
 import { createNotification } from './notificationController';
+import { encryptField, decryptField, decryptTaskFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -206,6 +207,7 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         .sort({ createdAt: -1 });
     }
 
+    tasks.forEach((t: any) => decryptTaskFields(t));
     return successResponse(res, 'Tasks retrieved successfully', tasks);
   } catch (error) {
     logger.error('Error getting tasks:', error);
@@ -229,6 +231,8 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
+
+    decryptTaskFields(task as any);
 
     // Standalone task (no project): allow creator/assignee/assigner to view.
     if (!task.projectId) {
@@ -407,7 +411,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
 
     const task = new Task({
       title: title.trim(),
-      description: description?.trim(),
+      // description is set below (encrypted) — task._id is already assigned here by Mongoose
       projectId: projectId || undefined,
       assignedTo: validatedAssignees.length === 1 ? validatedAssignees[0] : undefined, // backward compatibility
       assignees: validatedAssignees,
@@ -428,10 +432,14 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       order
     });
 
+    task.description = encryptField(description?.trim(), task._id.toString());
+
     await task.save();    await task.populate('assignedTo', 'displayName email avatar photoURL');
     await task.populate('assignees', 'displayName email avatar photoURL');
     await task.populate('assignedBy', 'displayName email avatar photoURL');
     await task.populate('projectId', 'name');
+
+    decryptTaskFields(task as any);
 
     logger.info(`Task created: ${task.title} in project ${projectId}`);
 
@@ -542,6 +550,13 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
+    // Capture the plaintext description before encrypting it for storage, so the
+    // audit-log diff below can still show human-readable before/after text.
+    const plainDescriptionForAudit = typeof updates.description === 'string' ? updates.description : undefined;
+    if (typeof updates.description === 'string') {
+      updates.description = encryptField(updates.description.trim(), id);
+    }
+
     // Standalone task (no project): skip project-based checks entirely
     if (!existingTask.projectId) {
       const isStatusUpdateRequest =
@@ -580,6 +595,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         return notFoundResponse(res, 'Task not found');
       }
 
+      decryptTaskFields(task as any);
       logger.info(`Standalone task updated: ${task.title}`);
       return successResponse(res, 'Task updated successfully', task);
     }
@@ -760,6 +776,9 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
+
+    decryptTaskFields(task as any);
+
     // Log audit action
     try {
       // Determine the primary action for this update
@@ -829,11 +848,14 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       if (updates.title !== undefined && updates.title !== existingTask.title) {
         fieldChanges.title = { from: existingTask.title, to: updates.title };
       }
-      if (updates.description !== undefined && updates.description !== existingTask.description) {
-        fieldChanges.description = {
-          from: existingTask.description || '(none)',
-          to: updates.description || '(none)'
-        };
+      if (plainDescriptionForAudit !== undefined) {
+        const decryptedExistingDescription = decryptField(existingTask.description, id);
+        if (plainDescriptionForAudit !== decryptedExistingDescription) {
+          fieldChanges.description = {
+            from: decryptedExistingDescription || '(none)',
+            to: plainDescriptionForAudit || '(none)'
+          };
+        }
       }
       if (updates.priority !== undefined && updates.priority !== existingTask.priority) {
         fieldChanges.priority = { from: existingTask.priority, to: updates.priority };
@@ -1236,7 +1258,7 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
         listId: task.listId,
         priority: task.priority,
         dueDate: task.dueDate,
-        description: task.description,
+        description: decryptField(task.description, id),
       },
     });
 
@@ -1442,6 +1464,7 @@ export const getDeletedTasks = async (req: AuthenticatedRequest, res: Response) 
       .populate('deletedBy', 'displayName email avatar photoURL')
       .sort({ deletedAt: -1 });
 
+    tasks.forEach((t: any) => decryptTaskFields(t));
     return successResponse(res, 'Deleted tasks retrieved successfully', tasks);
   } catch (error) {
     logger.error('Error fetching deleted tasks:', error);

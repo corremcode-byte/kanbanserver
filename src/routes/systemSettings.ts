@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, requireSuperAdmin } from '../middleware/auth';
-import { getSearchAccessCode, updateSearchAccessCode, verifySearchAccessCode } from '../controllers/appSettingsController';
+import { getSearchAccessCode, updateSearchAccessCode, verifySearchAccessCode } from '../controllers/systemSettingsController';
 
 const router = Router();
 

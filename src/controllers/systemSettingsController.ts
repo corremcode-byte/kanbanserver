@@ -1,19 +1,19 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { AppSettings } from '../models/AppSettings';
+import { SystemSettings } from '../models/SystemSettings';
 import { successResponse, errorResponse } from '../utils/responses';
 
 const CODE_PATTERN = /^[A-Za-z0-9]{3,32}$/;
 
 async function getOrCreateSettings() {
-  let doc = await AppSettings.findOne({ singletonKey: 'global' });
+  let doc = await SystemSettings.findOne({ singletonKey: 'global' });
   if (!doc) {
-    doc = await AppSettings.create({ singletonKey: 'global' }); // schema default seeds searchAccessCode
+    doc = await SystemSettings.create({ singletonKey: 'global' }); // schema default seeds searchAccessCode
   }
   return doc;
 }
 
-// GET /api/app-settings/search-access-code — admin only
+// GET /api/system-settings/search-access-code — super admin only
 export async function getSearchAccessCode(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const settings = await getOrCreateSettings();
@@ -23,7 +23,7 @@ export async function getSearchAccessCode(req: AuthenticatedRequest, res: Respon
   }
 }
 
-// PUT /api/app-settings/search-access-code — admin only
+// PUT /api/system-settings/search-access-code — super admin only
 export async function updateSearchAccessCode(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { code } = req.body as { code?: string };
 
@@ -43,7 +43,7 @@ export async function updateSearchAccessCode(req: AuthenticatedRequest, res: Res
   }
 }
 
-// POST /api/app-settings/search-access-code/verify — public, no auth.
+// POST /api/system-settings/search-access-code/verify — public, no auth.
 // Returns only a boolean — the stored code itself is never exposed here.
 export async function verifySearchAccessCode(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { code } = req.body as { code?: string };
