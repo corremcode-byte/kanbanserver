@@ -7,6 +7,7 @@ import { successResponse, errorResponse, notFoundResponse, internalServerErrorRe
 import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { createNotification } from './notificationController';
+import { decryptField } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -140,15 +141,16 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
 
     if (recipientSet.size > 0) {
       const shortText = text.trim().length > 80 ? text.trim().slice(0, 80) + '…' : text.trim();
+      const taskTitlePlain = decryptField(task.title, task._id.toString());
       await Promise.all(Array.from(recipientSet).map((recipientId: string) =>
         createNotification({
           userId: recipientId,
           type: 'task_chat_message',
-          title: `New message in "${task.title}"`,
+          title: `New message in "${taskTitlePlain}"`,
           message: `${req.user!.displayName}: ${shortText}`,
           metadata: {
             taskId: task._id as any as string,
-            taskTitle: task.title,
+            taskTitle: taskTitlePlain,
             projectId: task.projectId || undefined,
             messageId: msg._id as any as string,
             actionBy: req.user!._id,

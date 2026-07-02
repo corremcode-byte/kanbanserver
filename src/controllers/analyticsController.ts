@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuditLog, Project, Task, User } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
+import { decryptField } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -616,7 +617,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
 
               tasks.push({
                 taskId: task._id.toString(),
-                taskTitle: task.title,
+                taskTitle: decryptField(task.title, task._id.toString()),
                 assignedTo: memberId,
                 assignedToName: memberData?.displayName || 'Unknown',
                 assignedAt: assignedAt,
@@ -1093,7 +1094,7 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
 
           return {
             taskId,
-            taskTitle: task.title,
+            taskTitle: decryptField(task.title, taskId),
             assignedTo: memberId,
             assignedToName: (memberData as any)?.displayName || 'Unknown',
             assignedAt,

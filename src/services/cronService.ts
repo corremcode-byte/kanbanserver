@@ -6,6 +6,7 @@ import Project from '../models/Project';
 import { emailService } from './emailService';
 import { logger } from '../utils/logger';
 import { createNotification } from '../controllers/notificationController';
+import { decryptField } from '../utils/fieldEncryption';
 
 class CronService {
   private tasks: Map<string, ScheduledTask> = new Map();
@@ -86,6 +87,8 @@ class CronService {
         .populate('createdBy', 'displayName email')
         .populate('projectId', 'name')
         .lean();
+
+      tasks.forEach((t: any) => { t.title = decryptField(t.title, t._id.toString()); });
 
       logger.info(`Found ${tasks.length} tasks to check for reminders`);
 
@@ -353,6 +356,8 @@ class CronService {
       .populate('assignedTo', 'displayName email')
       .populate('createdBy', 'displayName email')
       .lean();
+
+    tasks.forEach((t: any) => { t.title = decryptField(t.title, t._id.toString()); });
 
     const report = tasks.map(task => {
       const freq = task.reminderFrequency || 'none';
