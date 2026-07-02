@@ -95,7 +95,7 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
           entityType: 'task',
           entityId: task._id.toString(),
           metadata: {
-            taskTitle: task.title,
+            taskTitle: decryptField(task.title, taskId),
             commentId: comment.id,
             commentText: text.substring(0, 100)
           }
@@ -179,7 +179,7 @@ export const updateComment = async (req: AuthenticatedRequest, res: Response) =>
         entityType: 'task',
         entityId: task._id.toString(),
         metadata: {
-          taskTitle: task.title,
+          taskTitle: decryptField(task.title, taskId),
           commentId: comment.id
         }
       });
@@ -265,7 +265,7 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
           entityType: 'task',
           entityId: task._id.toString(),
           metadata: {
-            taskTitle: task.title,
+            taskTitle: decryptField(task.title, taskId),
             commentId: comment.id
           }
         });

@@ -65,19 +65,27 @@ export function decryptField(value: string | undefined | null, taskId: string): 
 
 interface TaskLikeForDecryption {
   _id: unknown;
+  title?: string;
   description?: string;
   comments?: Array<{ text?: string }>;
+  subtasks?: Array<{ title?: string }>;
 }
 
-/** Decrypts description + every comment's text on a task-like object, in place.
- *  Safe on both Mongoose lean objects and hydrated documents; a no-op for any
- *  field that's already plaintext (legacy data). */
+/** Decrypts title, description, every comment's text, and every subtask's title on
+ *  a task-like object, in place. Safe on both Mongoose lean objects and hydrated
+ *  documents; a no-op for any field that's already plaintext (legacy data). */
 export function decryptTaskFields<T extends TaskLikeForDecryption>(task: T): T {
   const taskId = String(task._id);
+  if (task.title) task.title = decryptField(task.title, taskId);
   if (task.description) task.description = decryptField(task.description, taskId);
   if (Array.isArray(task.comments)) {
     task.comments.forEach((c) => {
       if (c.text) c.text = decryptField(c.text, taskId);
+    });
+  }
+  if (Array.isArray(task.subtasks)) {
+    task.subtasks.forEach((s) => {
+      if (s.title) s.title = decryptField(s.title, taskId);
     });
   }
   return task;

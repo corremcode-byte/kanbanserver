@@ -411,7 +411,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
 
     const task = new Task({
       title: title.trim(),
-      // description is set below (encrypted) — task._id is already assigned here by Mongoose
+      // title/description/subtask titles are encrypted below — task._id is already assigned here by Mongoose
       projectId: projectId || undefined,
       assignedTo: validatedAssignees.length === 1 ? validatedAssignees[0] : undefined, // backward compatibility
       assignees: validatedAssignees,
@@ -432,7 +432,12 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       order
     });
 
-    task.description = encryptField(description?.trim(), task._id.toString());
+    const newTaskId = task._id.toString();
+    task.title = encryptField(title.trim(), newTaskId) as string;
+    task.description = encryptField(description?.trim(), newTaskId);
+    task.subtasks.forEach((subtask: any) => {
+      subtask.title = encryptField(subtask.title, newTaskId);
+    });
 
     await task.save();    await task.populate('assignedTo', 'displayName email avatar photoURL');
     await task.populate('assignees', 'displayName email avatar photoURL');
@@ -550,11 +555,24 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Task not found');
     }
 
-    // Capture the plaintext description before encrypting it for storage, so the
-    // audit-log diff below can still show human-readable before/after text.
+    // Capture the plaintext title/description before encrypting them for storage,
+    // so the audit-log diff below can still show human-readable before/after text.
+    const plainTitleForAudit = typeof updates.title === 'string' ? updates.title.trim() : undefined;
+    if (typeof updates.title === 'string') {
+      updates.title = encryptField(updates.title.trim(), id);
+    }
     const plainDescriptionForAudit = typeof updates.description === 'string' ? updates.description : undefined;
     if (typeof updates.description === 'string') {
       updates.description = encryptField(updates.description.trim(), id);
+    }
+    // Subtask titles are encrypted here too — normalizeEmbeddedSubtasks() below only
+    // trims/validates non-empty strings, so pre-encrypting is transparent to it.
+    if (Array.isArray(updates.subtasks)) {
+      updates.subtasks = updates.subtasks.map((subtask: any) =>
+        subtask && typeof subtask.title === 'string'
+          ? { ...subtask, title: encryptField(subtask.title.trim(), id) }
+          : subtask
+      );
     }
 
     // Standalone task (no project): skip project-based checks entirely
@@ -726,13 +744,13 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       // Stop reminders when task is completed
       updates.reminderFrequency = 'none';
       updates.lastReminderSent = null;
-      logger.info(`Task "${existingTask.title}" marked as completed by ${req.user.displayName}`);
+      logger.info(`Task "${decryptField(existingTask.title, id)}" marked as completed by ${req.user.displayName}`);
     }
 
     // Clear completedAt if task is moved back from completed/done status
     if (currentStatus && !isNowCompleted && wasCompleted) {
       updates.completedAt = undefined;
-      logger.info(`Task "${existingTask.title}" moved back from completed status`);
+      logger.info(`Task "${decryptField(existingTask.title, id)}" moved back from completed status`);
     }
 
     // Validate reminderFrequency if provided
@@ -845,8 +863,11 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
 
       // Track field-level changes (title, description, priority, dueDate)
       const fieldChanges: Record<string, { from: any; to: any }> = {};
-      if (updates.title !== undefined && updates.title !== existingTask.title) {
-        fieldChanges.title = { from: existingTask.title, to: updates.title };
+      if (plainTitleForAudit !== undefined) {
+        const decryptedExistingTitle = decryptField(existingTask.title, id);
+        if (plainTitleForAudit !== decryptedExistingTitle) {
+          fieldChanges.title = { from: decryptedExistingTitle, to: plainTitleForAudit };
+        }
       }
       if (plainDescriptionForAudit !== undefined) {
         const decryptedExistingDescription = decryptField(existingTask.description, id);
@@ -1224,7 +1245,7 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
     // For standalone tasks (no project), skip project lookup entirely
     if (!task.projectId) {
       await Task.findByIdAndDelete(id);
-      logger.info(`Standalone task deleted: ${task.title}`);
+      logger.info(`Standalone task deleted: ${decryptField(task.title, id)}`);
       return successResponse(res, 'Task deleted successfully');
     }
 
@@ -1235,7 +1256,7 @@ export const deleteTask = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const projectId = task.projectId._id ? task.projectId._id.toString() : task.projectId.toString();
-    const taskTitle = task.title;
+    const taskTitle = decryptField(task.title, id);
 
     // Soft-delete: preserve full task data for superadmin review
     await Task.findByIdAndUpdate(id, {
@@ -1564,6 +1585,8 @@ export const followUpTask = async (req: AuthenticatedRequest, res: Response) => 
     const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('projectId', 'name _id');
     if (!task) return notFoundResponse(res, 'Task not found');
+
+    decryptTaskFields(task as any);
 
     const assigneeIds: string[] = Array.isArray(task.assignees)
       ? task.assignees.map((a: any) => (typeof a === 'object' ? a._id?.toString() ?? a.toString() : a.toString()))
