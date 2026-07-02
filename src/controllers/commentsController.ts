@@ -7,6 +7,7 @@ import { successResponse, errorResponse, notFoundResponse, internalServerErrorRe
 import { AuditLog } from '../models/AuditLog';
 import { getIO } from '../socket';
 import { broadcastToProject } from '../socket/socketHandlers';
+import { encryptField, decryptField } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -64,10 +65,10 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    // Create comment
+    // Create comment (taskId here is the route param, same value as task._id)
     const comment = {
       id: uuidv4(),
-      text: text.trim(),
+      text: encryptField(text.trim(), taskId),
       createdBy: req.user!._id,
       createdAt: new Date()
     } as unknown as ITaskComment;
@@ -79,7 +80,12 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
     // Populate the createdBy field for response
     await task.populate('comments.createdBy', 'displayName email avatar photoURL');
 
-    // Log audit action
+    // Find the created comment from the populated task and decrypt it once —
+    // this same decrypted object is reused for both the broadcast and the response.
+    const createdComment = task.comments.find((c: any) => c.id === comment.id);
+    if (createdComment) createdComment.text = decryptField(createdComment.text, taskId);
+
+    // Log audit action (commentText comes from the original request `text`, already plaintext)
     try {
       if (task.projectId) {
         await AuditLog.logAction({
@@ -104,7 +110,7 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
       const io = getIO();
       broadcastToProject(io, task.projectId.toString(), 'comment:added', {
         taskId: task._id,
-        comment,
+        comment: createdComment,
         createdBy: {
           id: req.user!._id,
           name: req.user!.displayName,
@@ -115,9 +121,6 @@ export const addComment = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     logger.info(`Comment added to task ${task.title} by ${req.user!.displayName}`);
-
-    // Find the created comment from the populated task
-    const createdComment = task.comments.find((c: any) => c.id === comment.id);
 
     return successResponse(res, 'Comment added successfully', createdComment);
   } catch (error) {
@@ -158,11 +161,14 @@ export const updateComment = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     // Update comment
-    comment.text = text.trim();
+    comment.text = encryptField(text.trim(), taskId);
     comment.updatedAt = new Date();
 
     await task.save();
     await task.populate('comments.createdBy', 'displayName email avatar photoURL');
+
+    // Decrypt once — this same object is reused for both the broadcast and the response.
+    comment.text = decryptField(comment.text, taskId);
 
     // Log audit action
     try {
@@ -337,6 +343,8 @@ export const getComments = async (req: AuthenticatedRequest, res: Response) => {
     if (!task) {
       return notFoundResponse(res, 'Task not found');
     }
+
+    task.comments.forEach((c: any) => { if (c.text) c.text = decryptField(c.text, taskId); });
 
     // Standalone task (no project): allow creator/assignee/assigner.
     if (!task.projectId) {

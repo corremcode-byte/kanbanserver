@@ -19,7 +19,7 @@ import notificationsRoutes from './notifications';
 import notesRoutes from './notes';
 import supportRoutes from './support';
 import cronRoutes from './cron';
-import appSettingsRoutes from './appSettings';
+import systemSettingsRoutes from './systemSettings';
 
 const router = Router();
 
@@ -43,7 +43,7 @@ router.use('/notes', notesRoutes);
 router.use('/support', supportRoutes);
 router.use('/cron', cronRoutes);
 router.use('/routes', dynamicRouteRoutes);
-router.use('/app-settings', appSettingsRoutes);
+router.use('/system-settings', systemSettingsRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {

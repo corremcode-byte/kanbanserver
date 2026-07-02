@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-// Singleton document holding small, global (non-per-user) app configuration.
-export interface IAppSettings extends Document {
+// Singleton document holding small, global (non-per-user) system configuration.
+export interface ISystemSettings extends Document {
   singletonKey: string;
   searchAccessCode: string;
   updatedBy?: mongoose.Types.ObjectId;
@@ -9,7 +9,7 @@ export interface IAppSettings extends Document {
   updatedAt: Date;
 }
 
-const appSettingsSchema = new Schema<IAppSettings>(
+const systemSettingsSchema = new Schema<ISystemSettings>(
   {
     singletonKey: {
       type: String,
@@ -17,8 +17,6 @@ const appSettingsSchema = new Schema<IAppSettings>(
       unique: true,
       default: 'global',
     },
-    // Secret code typed into the public wallpaper page's search bar to reach sign-in.
-    // Default matches the value this replaces, so behavior is unchanged until an admin updates it.
     searchAccessCode: {
       type: String,
       required: true,
@@ -34,4 +32,4 @@ const appSettingsSchema = new Schema<IAppSettings>(
   { timestamps: true }
 );
 
-export const AppSettings = mongoose.model<IAppSettings>('AppSettings', appSettingsSchema);
+export const SystemSettings = mongoose.model<ISystemSettings>('SystemSettings', systemSettingsSchema);
