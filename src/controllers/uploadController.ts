@@ -8,6 +8,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
+import { decryptField, decryptProjectFields } from '../utils/fieldEncryption';
 
 /**
  * Get the base URL for file serving
@@ -58,7 +59,10 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
       res.status(404).json({ success: false, message: `Task not found with ID: ${taskId}` });
       return;
     }
-    logger.info(`✅ Task found: ${task.title}`);
+    // task is saved again below (adding the attachment), so its title is decrypted
+    // into a local var rather than mutated in place — mutating in place here would
+    // persist the decrypted plaintext back over the ciphertext on save.
+    logger.info(`✅ Task found: ${decryptField(task.title, taskId)}`);
 
     const project = await Project.findById(task.projectId);
     if (!project) {
@@ -66,6 +70,7 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
       res.status(404).json({ success: false, message: 'Project not found' });
       return;
     }
+    decryptProjectFields(project as any);
     logger.info(`✅ Project found: ${project.name}`);
 
     // Check if user is owner, manager, or member of the project

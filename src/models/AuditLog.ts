@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
+import { decryptProjectFields } from '../utils/fieldEncryption';
 
 export interface IAuditLog extends Document {
   projectId?: mongoose.Types.ObjectId;
@@ -172,6 +173,9 @@ AuditLogSchema.statics.logAction = async function(data: {
   await savedLog.populate('userId', 'displayName email photoURL');
   if (data.projectId) {
     await savedLog.populate('projectId', 'name');
+    if (savedLog.projectId && typeof savedLog.projectId === 'object') {
+      decryptProjectFields(savedLog.projectId as any);
+    }
   }
 
   // Emit Socket.IO event for real-time updates

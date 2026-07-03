@@ -45,15 +45,20 @@ const ReplySchema = new Schema<ISupportReply>({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   userName: { type: String, required: true },
   userEmail: { type: String, required: true },
-  message: { type: String, required: true, maxlength: 5000 },
+  // Business limit is 5,000 plaintext chars, enforced in supportController before
+  // encryption. Raised here to comfortably fit encrypted ciphertext (message is
+  // encrypted at rest — see utils/fieldEncryption.ts), which is longer than plaintext.
+  message: { type: String, required: true, maxlength: 30000 },
   attachments: { type: [AttachmentSchema], default: [] },
   createdAt: { type: Date, default: Date.now },
 });
 
 const SupportTicketSchema = new Schema<ISupportTicket>(
   {
-    title: { type: String, required: true, trim: true, maxlength: 200 },
-    description: { type: String, required: true, trim: true, maxlength: 5000 },
+    // Business limits (title 200 / description 5,000 plaintext chars) are enforced in
+    // supportController before encryption. Raised here to comfortably fit ciphertext.
+    title: { type: String, required: true, trim: true, maxlength: 2000 },
+    description: { type: String, required: true, trim: true, maxlength: 30000 },
     category: {
       type: String,
       enum: ['bug', 'feature', 'question', 'other'],

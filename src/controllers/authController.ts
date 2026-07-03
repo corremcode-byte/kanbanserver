@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
+import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
 import { validatePassword, validatePasskey } from '../utils/validation';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -402,6 +403,11 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
       .sort({ updatedAt: -1 })
       .limit(5);
 
+    // Task titles/descriptions, the populated project name, and project name/description
+    // are encrypted at rest.
+    recentTasks.forEach((t: any) => decryptTaskFields(t));
+    recentProjects.forEach((p: any) => decryptProjectFields(p));
+
     // Build activity timeline
     const recentActivity = [];
 
@@ -648,9 +654,13 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
         .populate('managers', 'name email')
     ]);
 
+    // Task titles/descriptions and the populated project name are encrypted at rest.
+    recentTasks.forEach((t: any) => decryptTaskFields(t));
+
     // Add roles information to projects
     const projectsWithRoles = projects.map(project => {
       const projectObj = project.toObject();
+      decryptProjectFields(projectObj);
       const userIdStr = userId.toString();
       const ownerIdStr = project.ownerId.toString();
       const isInOwners = projectObj.owners && projectObj.owners.some((o: any) => {

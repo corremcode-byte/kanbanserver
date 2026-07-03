@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuditLog } from '../models/AuditLog';
 import { User } from '../models/User';
+import { decryptProjectFields } from '../utils/fieldEncryption';
 
 /**
  * Audit Controller
@@ -427,6 +428,14 @@ export const getAuditLogs = async (req: any, res: Response) => {
       .sort({ createdAt: -1 })
       .limit(parsedLimit * 2) // Get more to filter out inactive users
       .lean();
+
+    // The populated project's name is encrypted at rest (metadata.projectName, used
+    // by generateDetails below, is already stored plaintext by design and untouched).
+    auditLogs.forEach((log: any) => {
+      if (log.projectId && typeof log.projectId === 'object') {
+        decryptProjectFields(log.projectId);
+      }
+    });
 
     // Filter out logs for deleted, inactive, or superadmin users
     const activeLogs: any[] = [];

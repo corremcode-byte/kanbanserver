@@ -9,6 +9,7 @@ import winston from 'winston';
 import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
+import { encryptField, decryptField, decryptProjectFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -83,29 +84,24 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
       query.status = { $ne: 'archived' };
     }
 
-    if (search && typeof search === 'string') {
-      query.$and = [{
-        $or: [
-          { name: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } }
-        ]
-      }];
-    }
+    // name/description are encrypted at rest, so search can't be done via DB-level
+    // $regex — fetch all in-scope candidates, decrypt, then filter/sort/paginate in
+    // app code. Same endpoint contract (pagination shape) as before, just computed
+    // in Node instead of in MongoDB (mirrors the same migration already done for
+    // Task search in searchController.ts).
+    const searchStr = typeof search === 'string' ? search.trim() : '';
 
-    const projects = await Project.find(query)
+    const allMatching = await Project.find(query)
       .populate('ownerId', 'name email avatar displayName photoURL')
       .populate('owners', 'name email avatar displayName photoURL')
       .populate('members', 'name email avatar displayName photoURL')
       .populate('managers', 'name email avatar displayName photoURL')
-      .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum);
+      .sort({ createdAt: -1 });
 
-    const total = await Project.countDocuments(query);
-
-    // Add userRole to each project
-    const projectsWithRole = projects.map(project => {
+    // Add userRole to each project (and decrypt name/description)
+    let projectsWithRole = allMatching.map(project => {
       const projectObj = project.toObject();
+      decryptProjectFields(projectObj);
       const userId = req.user._id;
 
       // Determine user role
@@ -147,9 +143,18 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
       };
     });
 
+    if (searchStr) {
+      const queryRegex = new RegExp(searchStr, 'i');
+      projectsWithRole = projectsWithRole.filter((p: any) =>
+        queryRegex.test(p.name) || (p.description && queryRegex.test(p.description))
+      );
+    }
+
+    const total = projectsWithRole.length;
+    const paginatedProjects = projectsWithRole.slice((pageNum - 1) * limitNum, (pageNum - 1) * limitNum + limitNum);
 
     return successResponse(res, 'Projects retrieved successfully', {
-      projects: projectsWithRole,
+      projects: paginatedProjects,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -184,6 +189,8 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    decryptProjectFields(project as any);
 
     // Check if user is a member or owner
     // Handle populated owner object vs plain ObjectId
@@ -301,10 +308,16 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
 
     const project = new Project(projectData);
 
+    const projectId = project._id.toString();
+    project.name = encryptField(name.trim(), projectId) as string;
+    project.description = encryptField(description?.trim(), projectId);
+
     await project.save();
     await project.populate('ownerId', 'name email avatar');
     await project.populate('members', 'name email avatar');
     await project.populate('managers', 'name email avatar');
+
+    decryptProjectFields(project as any);
 
     // Create ProjectPermission records for all members (excluding owner)
     const memberPermissions = uniqueMembers
@@ -467,8 +480,8 @@ export const updateProject = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     const updateData: any = {
-      ...(name !== undefined && { name: name.trim() }),
-      ...(description !== undefined && { description: description?.trim() }),
+      ...(name !== undefined && { name: encryptField(name.trim(), id) }),
+      ...(description !== undefined && { description: encryptField(description?.trim(), id) }),
       ...(members && { members: validatedMembers }),
       ...(status && { status })
     };
@@ -480,6 +493,8 @@ export const updateProject = async (req: AuthenticatedRequest, res: Response) =>
     ).populate('ownerId', 'name email avatar')
      .populate('members', 'name email avatar')
      .populate('managers', 'name email avatar');
+
+    if (updatedProject) decryptProjectFields(updatedProject as any);
 
     // Broadcast project update to project room via socket
     const io = getIO();
@@ -517,6 +532,7 @@ export const deleteProject = async (req: AuthenticatedRequest, res: Response) =>
     // Permission check is handled by middleware (checkCanDeleteProject)
     // Middleware allows: owners, users in owners array, and users with global canDeleteProjects permission
 
+    decryptProjectFields(project as any);
     const projectName = project.name;
     const memberIds = [...project.members.map(m => m.toString()), ...project.managers.map(m => m.toString())];
 
@@ -587,6 +603,12 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       return notFoundResponse(res, 'Project not found');
     }
 
+    // project is saved again below (adding the new member), so its name/description
+    // are decrypted into local plaintext vars rather than mutated in place — mutating
+    // in place here would persist the decrypted plaintext back over the ciphertext.
+    const projectNamePlain = decryptField(project.name, project._id.toString());
+    const projectDescriptionPlain = decryptField(project.description, project._id.toString());
+
     // Check if this is a personal project
     if (project.isPersonal === true) {
       return errorResponse(res, 'Cannot add members to personal projects', 403);
@@ -640,8 +662,8 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       const emailSent = await emailService.sendMemberAddedNotification(
         user.email,
         {
-          projectName: project.name,
-          projectDescription: project.description,
+          projectName: projectNamePlain,
+          projectDescription: projectDescriptionPlain,
           addedByName: req.user.displayName || req.user.email,
           role: 'Team Member (Assignee)',
           projectUrl: `${process.env.CLIENT_URL || 'http://localhost:3000'}/projects/${id}`
@@ -649,7 +671,7 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       );
 
       if (emailSent) {
-        logger.info(`Member added notification email sent to ${user.email} for project ${project.name}`);
+        logger.info(`Member added notification email sent to ${user.email} for project ${projectNamePlain}`);
       } else {
         logger.warn(`Failed to send member added notification to ${user.email}`);
       }
@@ -665,15 +687,15 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
         userId: userId.toString(),
         type: 'project_added',
         title: 'Added to Project',
-        message: `${req.user.displayName} added you to "${project.name}"`,
+        message: `${req.user.displayName} added you to "${projectNamePlain}"`,
         metadata: {
           projectId: id.toString(),
-          projectName: project.name,
+          projectName: projectNamePlain,
           actionBy: req.user._id,
           actionByName: req.user.displayName,
         },
       });
-      logger.info(`In-app notification created for user ${userId} added to project ${project.name}`);
+      logger.info(`In-app notification created for user ${userId} added to project ${projectNamePlain}`);
     } catch (notificationError) {
       logger.error('Error creating in-app notification:', notificationError);
       // Don't fail the member addition if notification fails
@@ -685,7 +707,9 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
       .populate('members', 'name email avatar')
       .populate('managers', 'name email avatar');
 
-    logger.info(`Member added to project: ${user.email} to ${project.name}`);
+    if (updatedProject) decryptProjectFields(updatedProject as any);
+
+    logger.info(`Member added to project: ${user.email} to ${projectNamePlain}`);
     return successResponse(res, 'Member added successfully', updatedProject);
   } catch (error) {
     logger.error('Error adding member:', error);
@@ -777,7 +801,9 @@ export const removeMember = async (req: AuthenticatedRequest, res: Response) => 
       .populate('members', 'name email avatar')
       .populate('managers', 'name email avatar');
 
-    logger.info(`Member removed from project: ${userId} from ${project.name}`);
+    if (updatedProject) decryptProjectFields(updatedProject as any);
+
+    logger.info(`Member removed from project: ${userId} from ${decryptField(project.name, project._id.toString())}`);
     return successResponse(res, 'Member removed successfully', updatedProject);
   } catch (error) {
     logger.error('Error removing member:', error);
@@ -1107,7 +1133,9 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
       .populate('members', 'name email avatar')
       .populate('managers', 'name email avatar');
 
-    logger.info(`Project ownership transferred from ${req.user.email} to ${newOwner.email} for project ${project.name}`);
+    if (updatedProject) decryptProjectFields(updatedProject as any);
+
+    logger.info(`Project ownership transferred from ${req.user.email} to ${newOwner.email} for project ${decryptField(project.name, project._id.toString())}`);
     return successResponse(res, 'Ownership transferred successfully', updatedProject);
   } catch (error) {
     logger.error('Error transferring ownership:', error);
@@ -1142,7 +1170,7 @@ export const leaveProject = async (req: AuthenticatedRequest, res: Response) => 
 
     await project.save();
 
-    logger.info(`User ${userId} left project ${project.name}`);
+    logger.info(`User ${userId} left project ${decryptField(project.name, project._id.toString())}`);
     return successResponse(res, 'Successfully left the project');
   } catch (error) {
     logger.error('Error leaving project:', error);
@@ -1202,7 +1230,7 @@ export const addList = async (req: AuthenticatedRequest, res: Response) => {
       timestamp: new Date()
     });
 
-    logger.info(`List "${title}" added to project ${project.name} by ${req.user.email}`);
+    logger.info(`List "${title}" added to project ${decryptField(project.name, project._id.toString())} by ${req.user.email}`);
     return successResponse(res, 'List added successfully', newList);
   } catch (error) {
     logger.error('Error adding list:', error);
@@ -1260,7 +1288,7 @@ export const updateList = async (req: AuthenticatedRequest, res: Response) => {
       timestamp: new Date()
     });
 
-    logger.info(`List "${listId}" updated in project ${project.name} by ${req.user.email}`);
+    logger.info(`List "${listId}" updated in project ${decryptField(project.name, project._id.toString())} by ${req.user.email}`);
     return successResponse(res, 'List updated successfully', project.columns![listIndex]);
   } catch (error) {
     logger.error('Error updating list:', error);
@@ -1335,7 +1363,7 @@ export const deleteList = async (req: AuthenticatedRequest, res: Response) => {
       timestamp: new Date()
     });
 
-    logger.info(`List "${listId}" deleted from project ${project.name} by ${req.user.email}`);
+    logger.info(`List "${listId}" deleted from project ${decryptField(project.name, project._id.toString())} by ${req.user.email}`);
     return successResponse(res, 'List deleted successfully');
   } catch (error) {
     logger.error('Error deleting list:', error);
@@ -1394,7 +1422,7 @@ export const reorderLists = async (req: AuthenticatedRequest, res: Response) => 
       timestamp: new Date()
     });
 
-    logger.info(`Lists reordered in project ${project.name} by ${req.user.email}`);
+    logger.info(`Lists reordered in project ${decryptField(project.name, project._id.toString())} by ${req.user.email}`);
     return successResponse(res, 'Lists reordered successfully', project.columns);
   } catch (error) {
     logger.error('Error reordering lists:', error);

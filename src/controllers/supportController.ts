@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import SupportTicket from '../models/SupportTicket';
 import { AuthenticatedRequest } from '../middleware/auth';
+import { encryptField, decryptSupportTicketFields } from '../utils/fieldEncryption';
 
 // GET /api/support/tickets
 export const getAllTickets = async (req: Request, res: Response): Promise<void> => {
@@ -22,6 +23,8 @@ export const getAllTickets = async (req: Request, res: Response): Promise<void> 
       SupportTicket.countDocuments(filter),
     ]);
 
+    tickets.forEach((t: any) => decryptSupportTicketFields(t));
+
     res.json({ success: true, data: { tickets, total, page: pageNum, totalPages: Math.ceil(total / limitNum) } });
   } catch (error) {
     console.error('getAllTickets error:', error);
@@ -34,6 +37,7 @@ export const getTicket = async (req: Request, res: Response): Promise<void> => {
   try {
     const ticket = await SupportTicket.findById(req.params.id).lean();
     if (!ticket) { res.status(404).json({ success: false, message: 'Ticket not found' }); return; }
+    decryptSupportTicketFields(ticket as any);
     res.json({ success: true, data: ticket });
   } catch (error) {
     console.error('getTicket error:', error);
@@ -53,8 +57,16 @@ export const createTicket = async (req: AuthenticatedRequest, res: Response): Pr
       res.status(400).json({ success: false, message: 'Title and description are required' });
       return;
     }
+    if (title.trim().length > 200) {
+      res.status(400).json({ success: false, message: 'Title is too long (max 200 characters)' });
+      return;
+    }
+    if (description.trim().length > 5000) {
+      res.status(400).json({ success: false, message: 'Description is too long (max 5,000 characters)' });
+      return;
+    }
 
-    const ticket = await SupportTicket.create({
+    const ticket = new SupportTicket({
       title: title.trim(),
       description: description.trim(),
       category: category || 'question',
@@ -64,6 +76,14 @@ export const createTicket = async (req: AuthenticatedRequest, res: Response): Pr
       raisedByEmail: user.email,
       attachments: attachments || [],
     });
+
+    const ticketId = ticket._id.toString();
+    ticket.title = encryptField(title.trim(), ticketId) as string;
+    ticket.description = encryptField(description.trim(), ticketId) as string;
+
+    await ticket.save();
+
+    decryptSupportTicketFields(ticket as any);
 
     res.status(201).json({ success: true, data: ticket });
   } catch (error) {
@@ -80,6 +100,10 @@ export const addReply = async (req: AuthenticatedRequest, res: Response): Promis
 
     const { message, attachments } = req.body;
     if (!message?.trim()) { res.status(400).json({ success: false, message: 'Reply message is required' }); return; }
+    if (message.trim().length > 5000) {
+      res.status(400).json({ success: false, message: 'Reply message is too long (max 5,000 characters)' });
+      return;
+    }
 
     const ticket = await SupportTicket.findById(req.params.id);
     if (!ticket) { res.status(404).json({ success: false, message: 'Ticket not found' }); return; }
@@ -89,7 +113,7 @@ export const addReply = async (req: AuthenticatedRequest, res: Response): Promis
       userId: new mongoose.Types.ObjectId(user._id),
       userName: user.displayName || user.email,
       userEmail: user.email,
-      message: message.trim(),
+      message: encryptField(message.trim(), ticket._id.toString()),
       attachments: attachments || [],
       createdAt: new Date(),
     } as any);
@@ -99,6 +123,9 @@ export const addReply = async (req: AuthenticatedRequest, res: Response): Promis
     }
 
     await ticket.save();
+
+    decryptSupportTicketFields(ticket as any);
+
     res.json({ success: true, data: ticket });
   } catch (error) {
     console.error('addReply error:', error);
@@ -125,6 +152,9 @@ export const updateStatus = async (req: AuthenticatedRequest, res: Response): Pr
 
     ticket.status = status;
     await ticket.save();
+
+    decryptSupportTicketFields(ticket as any);
+
     res.json({ success: true, data: ticket });
   } catch (error) {
     console.error('updateStatus error:', error);

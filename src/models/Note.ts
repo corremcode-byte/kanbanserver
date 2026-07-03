@@ -27,7 +27,11 @@ const NoteSchema = new Schema<INote>(
       type: String,
       required: true,
       trim: true,
-      maxlength: 200
+      // Business limit is 200 plaintext chars, enforced in notesController before
+      // encryption. Raised here to comfortably fit encrypted ciphertext (title/content
+      // are encrypted at rest — see utils/fieldEncryption.ts), which is longer than
+      // the original plaintext.
+      maxlength: 2000
     },
     description: {
       type: String,
@@ -38,7 +42,9 @@ const NoteSchema = new Schema<INote>(
     content: {
       type: String,
       required: false, // Either content or description must be present
-      maxlength: 50000 // HTML is more verbose
+      // Business limit is 50,000 plaintext chars, enforced via validateHtmlSize()
+      // in notesController before encryption. Raised here to fit ciphertext.
+      maxlength: 300000
     },
     contentType: {
       type: String,
