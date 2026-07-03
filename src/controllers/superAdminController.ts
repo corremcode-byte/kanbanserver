@@ -7,6 +7,7 @@ import Task from '../models/Task';
 import Project from '../models/Project';
 import Note from '../models/Note';
 import { ChatGroup } from '../models/ChatGroup';
+import { decryptTaskFields, decryptProjectFields, decryptNoteFields } from '../utils/fieldEncryption';
 
 export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -43,6 +44,7 @@ export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Res
           .select('title status priority dueDate createdBy assignees')
           .populate('createdBy', 'displayName')
           .lean();
+        tasks.forEach((t: any) => decryptTaskFields(t));
         return successResponse(res, 'OK', { tasks });
       }
 
@@ -55,6 +57,7 @@ export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Res
           .select('name description status ownerId owners members createdAt')
           .populate('ownerId', 'displayName')
           .lean();
+        projects.forEach((p: any) => decryptProjectFields(p));
         return successResponse(res, 'OK', { projects });
       }
 
@@ -66,6 +69,7 @@ export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Res
           .limit(50)
           .select('title content updatedAt userId')
           .lean();
+        notes.forEach((n: any) => decryptNoteFields(n));
         return successResponse(res, 'OK', { notes });
       }
 

@@ -3,7 +3,7 @@ import { logger } from '../utils/logger';
 import Task from '../models/Task';
 import Project from '../models/Project';
 import { successResponse, errorResponse, internalServerErrorResponse } from '../utils/responses';
-import { decryptTaskFields } from '../utils/fieldEncryption';
+import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -39,6 +39,9 @@ export const search = async (req: AuthenticatedRequest, res: Response) => {
     }).select('_id name description');
 
     const projectIds = userProjects.map(p => p._id);
+
+    // name/description are encrypted at rest — decrypt each candidate before matching.
+    userProjects.forEach((p: any) => decryptProjectFields(p));
 
     // Search for projects by name or description
     const projects = userProjects.filter(project =>

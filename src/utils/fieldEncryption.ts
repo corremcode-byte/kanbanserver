@@ -1,15 +1,18 @@
 import nacl from 'tweetnacl';
 
 /**
- * Field-level encryption for Task description / comment text — server-side only.
- * Reuses the exact same primitive as chat message encryption (kanbanclient's
+ * Field-level encryption for Task/Project/Note/SupportTicket text fields — server-side
+ * only. Reuses the exact same primitive as chat message encryption (kanbanclient's
  * encryptionService.ts: nacl.secretbox + a deterministic key derived from an id),
  * but unlike chat's client-side "key derived from groupId alone" (computable by
  * anyone who knows the id), the key here also mixes in a server-only secret so a
- * task's ciphertext can only be decrypted by this backend, never by someone who
- * merely learns a taskId. This is required because task descriptions/comments are
- * meant to be readable by whole project teams via the API — the server, not any
- * single client, is the one that encrypts on write and decrypts on read.
+ * document's ciphertext can only be decrypted by this backend, never by someone who
+ * merely learns its id. This is required because these fields are meant to be
+ * readable by whole project teams / the document owner via the API — the server,
+ * not any single client, is the one that encrypts on write and decrypts on read.
+ * Every field is keyed by its own owning document's `_id` (e.g. a task's comments
+ * and subtask titles are keyed by the task's id, a ticket's reply messages by the
+ * ticket's id — never by the sub-item's own id).
  */
 
 const ENCRYPTED_PREFIX = 'enc:v1:';
@@ -69,11 +72,16 @@ interface TaskLikeForDecryption {
   description?: string;
   comments?: Array<{ text?: string }>;
   subtasks?: Array<{ title?: string }>;
+  // May be a populated Project doc/subset ({ _id, name, ... }) or a plain ObjectId/string — only
+  // decrypted when it's actually populated with a `name` (i.e. someone did .populate('projectId', 'name...')).
+  projectId?: { _id?: unknown; id?: unknown; name?: string } | unknown;
 }
 
 /** Decrypts title, description, every comment's text, and every subtask's title on
- *  a task-like object, in place. Safe on both Mongoose lean objects and hydrated
- *  documents; a no-op for any field that's already plaintext (legacy data). */
+ *  a task-like object, in place. Also decrypts the populated project's `name` when
+ *  `projectId` was populated (keyed by the *project's* own id, not the task's).
+ *  Safe on both Mongoose lean objects and hydrated documents; a no-op for any
+ *  field that's already plaintext (legacy data). */
 export function decryptTaskFields<T extends TaskLikeForDecryption>(task: T): T {
   const taskId = String(task._id);
   if (task.title) task.title = decryptField(task.title, taskId);
@@ -88,5 +96,62 @@ export function decryptTaskFields<T extends TaskLikeForDecryption>(task: T): T {
       if (s.title) s.title = decryptField(s.title, taskId);
     });
   }
+  const proj = task.projectId as { _id?: unknown; id?: unknown; name?: string } | null | undefined;
+  if (proj && typeof proj === 'object' && proj.name) {
+    const projectId = String(proj._id ?? proj.id ?? '');
+    if (projectId) proj.name = decryptField(proj.name, projectId);
+  }
   return task;
+}
+
+interface ProjectLikeForDecryption {
+  _id: unknown;
+  name?: string;
+  description?: string;
+}
+
+/** Decrypts name + description on a project-like object, in place. Same
+ *  backward-compatible/no-op-on-plaintext behavior as decryptTaskFields. */
+export function decryptProjectFields<T extends ProjectLikeForDecryption>(project: T): T {
+  const projectId = String(project._id);
+  if (project.name) project.name = decryptField(project.name, projectId);
+  if (project.description) project.description = decryptField(project.description, projectId);
+  return project;
+}
+
+interface NoteLikeForDecryption {
+  _id: unknown;
+  title?: string;
+  content?: string;
+}
+
+/** Decrypts title + content on a note-like object, in place. `description` (the
+ *  legacy plaintext field) is intentionally left untouched — out of scope. */
+export function decryptNoteFields<T extends NoteLikeForDecryption>(note: T): T {
+  const noteId = String(note._id);
+  if (note.title) note.title = decryptField(note.title, noteId);
+  if (note.content) note.content = decryptField(note.content, noteId);
+  return note;
+}
+
+interface SupportTicketLikeForDecryption {
+  _id: unknown;
+  title?: string;
+  description?: string;
+  replies?: Array<{ message?: string }>;
+}
+
+/** Decrypts title, description, and every reply's message on a support-ticket-like
+ *  object, in place. Replies are keyed by the parent ticket's own id — same pattern
+ *  as Task comments (keyed by the parent task, not each comment's own id). */
+export function decryptSupportTicketFields<T extends SupportTicketLikeForDecryption>(ticket: T): T {
+  const ticketId = String(ticket._id);
+  if (ticket.title) ticket.title = decryptField(ticket.title, ticketId);
+  if (ticket.description) ticket.description = decryptField(ticket.description, ticketId);
+  if (Array.isArray(ticket.replies)) {
+    ticket.replies.forEach((r) => {
+      if (r.message) r.message = decryptField(r.message, ticketId);
+    });
+  }
+  return ticket;
 }

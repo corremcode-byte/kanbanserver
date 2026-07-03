@@ -8,7 +8,7 @@ import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
 import { createNotification } from './notificationController';
-import { encryptField, decryptField, decryptTaskFields } from '../utils/fieldEncryption';
+import { encryptField, decryptField, decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -623,6 +623,8 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    decryptProjectFields(project as any);
 
     // Check if user is a member, manager, or owner of the project
     const ownerId = typeof project.ownerId === 'object' && project.ownerId._id

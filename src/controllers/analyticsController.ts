@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { AuditLog, Project, Task, User } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
-import { decryptField } from '../utils/fieldEncryption';
+import { decryptField, decryptProjectFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -28,6 +28,8 @@ export const getProjectAnalytics = async (req: AuthenticatedRequest, res: Respon
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    decryptProjectFields(project as any);
 
     // Check if user is owner
     const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
@@ -157,6 +159,8 @@ export const getUserAnalytics = async (req: AuthenticatedRequest, res: Response)
       return notFoundResponse(res, 'Project not found');
     }
 
+    decryptProjectFields(project as any);
+
     // Check if user is owner
     const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
       ? (project.ownerId as any)._id.toString()
@@ -251,6 +255,8 @@ export const getProjectActivity = async (req: AuthenticatedRequest, res: Respons
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    decryptProjectFields(project as any);
 
     // Check if user is owner or manager
     const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id
@@ -682,6 +688,8 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    decryptProjectFields(project as any);
 
     // Check if user has access to the project
     const ownerId = typeof project.ownerId === 'object' && (project.ownerId as any)._id

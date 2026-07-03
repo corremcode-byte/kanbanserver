@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { emailService } from '../services/emailService';
 import { createNotification } from './notificationController';
 import crypto from 'crypto';
+import { decryptField, decryptProjectFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -126,6 +127,10 @@ export const sendInvitation = async (req: AuthenticatedRequest, res: Response) =
     await invitation.populate('projectId', 'name description color');
     await invitation.populate('invitedBy', 'displayName email');
 
+    // projectId is a populated reference (not invitation's own field) — safe to decrypt
+    // in place, it isn't persisted back when invitation.save() runs elsewhere.
+    decryptProjectFields(invitation.projectId as any);
+
     // Send invitation email — non-blocking: invitation is always saved regardless of email outcome
     try {
       const emailSent = await emailService.sendProjectInvitation(
@@ -232,6 +237,9 @@ export const getUserInvitations = async (req: AuthenticatedRequest, res: Respons
     const invitationsWithToken = invitations.map((inv: any) => {
       const token = inv.token; // Get token BEFORE toObject() to avoid toJSON transform
       const invObj = inv.toObject();
+      if (invObj.projectId && typeof invObj.projectId === 'object') {
+        decryptProjectFields(invObj.projectId);
+      }
       invObj.token = token; // Add it back
       invObj.id = invObj._id;
       delete invObj._id;
@@ -256,6 +264,8 @@ export const getInvitationByToken = async (req: Request, res: Response) => {
     if (!invitation) {
       return notFoundResponse(res, 'Invitation not found or expired');
     }
+
+    decryptProjectFields(invitation.projectId as any);
 
     return successResponse(res, 'Invitation retrieved successfully', {
       id: invitation._id,
@@ -294,6 +304,10 @@ export const acceptInvitation = async (req: Request, res: Response) => {
 
     if (!invitation) {
       return notFoundResponse(res, 'Invitation not found or expired');
+    }
+
+    if (invitation.projectId && typeof invitation.projectId === 'object') {
+      decryptProjectFields(invitation.projectId as any);
     }
 
     // If invitation is already accepted, return success (idempotent operation)
@@ -367,6 +381,11 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
+
+    // project is saved again below (adding the new member), so its name is decrypted
+    // into a local plaintext var rather than mutated in place — mutating in place here
+    // would persist the decrypted plaintext back over the ciphertext on save.
+    const projectNamePlain = decryptField(project.name, project._id.toString());
 
     // Check if user is already a member
     const isMember = project.members.some((member: any) => {
@@ -445,10 +464,10 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
         userId: req.user._id,
         type: 'project_added',
         title: 'Added to Project',
-        message: `You have been added to the project "${project.name}"`,
+        message: `You have been added to the project "${projectNamePlain}"`,
         metadata: {
           projectId: project._id.toString(),
-          projectName: project.name,
+          projectName: projectNamePlain,
         },
       });
     } catch (notifError) {
@@ -462,7 +481,7 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
         await emailService.sendInvitationAcceptedNotification(
           owner.email,
           {
-            projectName: project.name,
+            projectName: projectNamePlain,
             memberName: req.user.displayName,
             memberEmail: req.user.email,
             role: 'Team Member'
@@ -473,11 +492,11 @@ export const completeInvitation = async (req: AuthenticatedRequest, res: Respons
       logger.error('Failed to send acceptance notification:', emailError);
     }
 
-    logger.info(`User ${req.user.email} completed invitation to project ${project.name}`);
+    logger.info(`User ${req.user.email} completed invitation to project ${projectNamePlain}`);
 
     return successResponse(res, 'Successfully joined project', {
       projectId: project._id,
-      projectName: project.name,
+      projectName: projectNamePlain,
       role: invitation.role
     });
   } catch (error) {
@@ -574,6 +593,10 @@ export const resendInvitation = async (req: AuthenticatedRequest, res: Response)
 
     if (!invitation) {
       return notFoundResponse(res, 'Invitation not found');
+    }
+
+    if (invitation.projectId && typeof invitation.projectId === 'object') {
+      decryptProjectFields(invitation.projectId as any);
     }
 
     if (invitation.status !== 'pending') {

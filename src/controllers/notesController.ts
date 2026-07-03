@@ -3,6 +3,7 @@ import { Note } from '../models';
 import { successResponse, errorResponse, notFoundResponse, internalServerErrorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { sanitizeHTMLContent, validateHtmlSize } from '../middleware/sanitizeHtml';
+import { encryptField, decryptNoteFields } from '../utils/fieldEncryption';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -31,6 +32,8 @@ export const getNotes = async (req: AuthenticatedRequest, res: Response): Promis
     })
       .sort({ updatedAt: -1 })
       .lean();
+
+    notes.forEach((n: any) => decryptNoteFields(n));
 
     // Add permission info to each note
     const notesWithPermissions = notes.map(note => ({
@@ -70,6 +73,8 @@ export const getNote = async (req: AuthenticatedRequest, res: Response): Promise
       notFoundResponse(res, 'Note not found');
       return;
     }
+
+    decryptNoteFields(note as any);
 
     // Add permission info
     const userPermission = note.userId.toString() === req.user._id.toString()
@@ -121,6 +126,10 @@ export const createNote = async (req: AuthenticatedRequest, res: Response): Prom
       errorResponse(res, 'Title is required', 400);
       return;
     }
+    if (title.trim().length > 200) {
+      errorResponse(res, 'Title is too long (max 200 characters)', 400);
+      return;
+    }
 
     // Validate content (either content or description must be provided)
     const noteContent = content || description;
@@ -153,7 +162,13 @@ export const createNote = async (req: AuthenticatedRequest, res: Response): Prom
       customReminderMinutes: reminderFrequency === 'custom' ? Number(customReminderMinutes) : undefined
     });
 
+    const noteId = note._id.toString();
+    note.title = encryptField(title.trim(), noteId) as string;
+    note.content = encryptField(sanitizedContent, noteId);
+
     await note.save();
+
+    decryptNoteFields(note as any);
 
     successResponse(res, 'Note created successfully', { note }, 201);
   } catch (error) {
@@ -218,9 +233,15 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
+    const noteId = id;
+
     // Update title
     if (title !== undefined) {
-      note.title = title.trim();
+      if (title.trim().length > 200) {
+        errorResponse(res, 'Title is too long (max 200 characters)', 400);
+        return;
+      }
+      note.title = encryptField(title.trim(), noteId) as string;
     }
 
     // Update content
@@ -238,7 +259,7 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
         sanitizedContent = sanitizeHTMLContent(newContent);
       }
 
-      note.content = sanitizedContent;
+      note.content = encryptField(sanitizedContent, noteId);
       note.contentType = newType;
       note.description = newType === 'plain' ? sanitizedContent : undefined; // Backward compatibility
     }
@@ -263,6 +284,8 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
     }
 
     await note.save();
+
+    decryptNoteFields(note as any);
 
     successResponse(res, 'Note updated successfully', { note });
   } catch (error) {
