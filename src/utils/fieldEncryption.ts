@@ -1,8 +1,9 @@
 import nacl from 'tweetnacl';
 
 /**
- * Field-level encryption for Task/Project/Note/SupportTicket text fields — server-side
- * only. Reuses the exact same primitive as chat message encryption (kanbanclient's
+ * Field-level encryption for Task/Project/Note/SupportTicket/Message text and
+ * attachment-url fields — server-side only. Reuses the exact same primitive as
+ * chat message encryption (kanbanclient's
  * encryptionService.ts: nacl.secretbox + a deterministic key derived from an id),
  * but unlike chat's client-side "key derived from groupId alone" (computable by
  * anyone who knows the id), the key here also mixes in a server-only secret so a
@@ -71,17 +72,20 @@ interface TaskLikeForDecryption {
   title?: string;
   description?: string;
   comments?: Array<{ text?: string }>;
-  subtasks?: Array<{ title?: string }>;
+  subtasks?: Array<{ title?: string; attachments?: Array<{ url?: string }> }>;
+  attachments?: Array<{ url?: string }>;
   // May be a populated Project doc/subset ({ _id, name, ... }) or a plain ObjectId/string — only
   // decrypted when it's actually populated with a `name` (i.e. someone did .populate('projectId', 'name...')).
   projectId?: { _id?: unknown; id?: unknown; name?: string } | unknown;
 }
 
-/** Decrypts title, description, every comment's text, and every subtask's title on
- *  a task-like object, in place. Also decrypts the populated project's `name` when
- *  `projectId` was populated (keyed by the *project's* own id, not the task's).
- *  Safe on both Mongoose lean objects and hydrated documents; a no-op for any
- *  field that's already plaintext (legacy data). */
+/** Decrypts title, description, every comment's text, every subtask's title, and
+ *  every attachment's url (top-level and per-subtask) on a task-like object, in
+ *  place — all keyed by the *task's* own id, never a subtask's/attachment's own id.
+ *  Also decrypts the populated project's `name` when `projectId` was populated
+ *  (keyed by the *project's* own id, not the task's). Safe on both Mongoose lean
+ *  objects and hydrated documents; a no-op for any field that's already plaintext
+ *  (legacy data). */
 export function decryptTaskFields<T extends TaskLikeForDecryption>(task: T): T {
   const taskId = String(task._id);
   if (task.title) task.title = decryptField(task.title, taskId);
@@ -94,6 +98,16 @@ export function decryptTaskFields<T extends TaskLikeForDecryption>(task: T): T {
   if (Array.isArray(task.subtasks)) {
     task.subtasks.forEach((s) => {
       if (s.title) s.title = decryptField(s.title, taskId);
+      if (Array.isArray(s.attachments)) {
+        s.attachments.forEach((a) => {
+          if (a.url) a.url = decryptField(a.url, taskId);
+        });
+      }
+    });
+  }
+  if (Array.isArray(task.attachments)) {
+    task.attachments.forEach((a) => {
+      if (a.url) a.url = decryptField(a.url, taskId);
     });
   }
   const proj = task.projectId as { _id?: unknown; id?: unknown; name?: string } | null | undefined;
@@ -138,12 +152,14 @@ interface SupportTicketLikeForDecryption {
   _id: unknown;
   title?: string;
   description?: string;
-  replies?: Array<{ message?: string }>;
+  replies?: Array<{ message?: string; attachments?: Array<{ url?: string }> }>;
+  attachments?: Array<{ url?: string }>;
 }
 
-/** Decrypts title, description, and every reply's message on a support-ticket-like
- *  object, in place. Replies are keyed by the parent ticket's own id — same pattern
- *  as Task comments (keyed by the parent task, not each comment's own id). */
+/** Decrypts title, description, every reply's message, and every attachment's url
+ *  (top-level and per-reply) on a support-ticket-like object, in place. Replies
+ *  and their attachments are keyed by the parent ticket's own id — same pattern
+ *  as Task comments (keyed by the parent task, not each comment's/reply's own id). */
 export function decryptSupportTicketFields<T extends SupportTicketLikeForDecryption>(ticket: T): T {
   const ticketId = String(ticket._id);
   if (ticket.title) ticket.title = decryptField(ticket.title, ticketId);
@@ -151,7 +167,42 @@ export function decryptSupportTicketFields<T extends SupportTicketLikeForDecrypt
   if (Array.isArray(ticket.replies)) {
     ticket.replies.forEach((r) => {
       if (r.message) r.message = decryptField(r.message, ticketId);
+      if (Array.isArray(r.attachments)) {
+        r.attachments.forEach((a) => {
+          if (a.url) a.url = decryptField(a.url, ticketId);
+        });
+      }
+    });
+  }
+  if (Array.isArray(ticket.attachments)) {
+    ticket.attachments.forEach((a) => {
+      if (a.url) a.url = decryptField(a.url, ticketId);
     });
   }
   return ticket;
+}
+
+interface MessageLikeForDecryption {
+  _id: unknown;
+  attachments?: Array<{ fileUrl?: string }>;
+  // A populated reply-to message is itself a full message with its own id — its
+  // attachments must be decrypted keyed by ITS OWN id, not the current message's.
+  replyTo?: MessageLikeForDecryption | unknown;
+}
+
+/** Decrypts every attachment's fileUrl on a chat-message-like object, in place,
+ *  keyed by the message's own id. If `replyTo` is populated (a full message
+ *  sub-document, not just an id), it's recursively decrypted keyed by its own id. */
+export function decryptMessageFields<T extends MessageLikeForDecryption>(message: T): T {
+  const messageId = String(message._id);
+  if (Array.isArray(message.attachments)) {
+    message.attachments.forEach((a) => {
+      if (a.fileUrl) a.fileUrl = decryptField(a.fileUrl, messageId);
+    });
+  }
+  const reply = message.replyTo as MessageLikeForDecryption | null | undefined;
+  if (reply && typeof reply === 'object' && '_id' in reply) {
+    decryptMessageFields(reply);
+  }
+  return message;
 }

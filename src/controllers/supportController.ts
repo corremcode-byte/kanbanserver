@@ -80,6 +80,9 @@ export const createTicket = async (req: AuthenticatedRequest, res: Response): Pr
     const ticketId = ticket._id.toString();
     ticket.title = encryptField(title.trim(), ticketId) as string;
     ticket.description = encryptField(description.trim(), ticketId) as string;
+    ticket.attachments.forEach((a: any) => {
+      if (a.url) a.url = encryptField(a.url, ticketId);
+    });
 
     await ticket.save();
 
@@ -109,12 +112,17 @@ export const addReply = async (req: AuthenticatedRequest, res: Response): Promis
     if (!ticket) { res.status(404).json({ success: false, message: 'Ticket not found' }); return; }
     if (ticket.status === 'closed') { res.status(400).json({ success: false, message: 'Cannot reply to a closed ticket' }); return; }
 
+    const ticketIdForReply = ticket._id.toString();
+    const encryptedReplyAttachments = Array.isArray(attachments)
+      ? attachments.map((a: any) => (a?.url ? { ...a, url: encryptField(a.url, ticketIdForReply) } : a))
+      : [];
+
     ticket.replies.push({
       userId: new mongoose.Types.ObjectId(user._id),
       userName: user.displayName || user.email,
       userEmail: user.email,
-      message: encryptField(message.trim(), ticket._id.toString()),
-      attachments: attachments || [],
+      message: encryptField(message.trim(), ticketIdForReply),
+      attachments: encryptedReplyAttachments,
       createdAt: new Date(),
     } as any);
 
