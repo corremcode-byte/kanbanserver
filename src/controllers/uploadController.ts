@@ -8,7 +8,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
-import { decryptField, decryptProjectFields } from '../utils/fieldEncryption';
+import { encryptField, decryptField, decryptProjectFields } from '../utils/fieldEncryption';
 
 /**
  * Get the base URL for file serving
@@ -101,7 +101,9 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
     logger.info(`📦 File saved to disk: ${file.path}`);
     logger.info(`🔗 Public URL: ${publicUrl}`);
 
-    // Add attachment to task
+    // Add attachment to task. `attachment` (plaintext url) is what's returned to the
+    // client below; a separate copy with the url encrypted is what's persisted —
+    // this avoids ever needing to decrypt-after-save on the response object.
     const attachment = {
       id: fileId,
       name: file.originalname,
@@ -112,7 +114,7 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
       uploadedAt: new Date()
     };
 
-    task.attachments.push(attachment);
+    task.attachments.push({ ...attachment, url: encryptField(publicUrl, taskId) } as any);
     await task.save();
 
     logger.info(`✅ File uploaded successfully: ${file.filename}`);
@@ -173,8 +175,11 @@ export const deleteTaskAttachment = async (req: Request, res: Response): Promise
 
     // Delete from filesystem
     try {
-      // Extract filename from URL
-      const urlParts = attachment.url.split('/');
+      // url is encrypted at rest — decrypt into a local var before splitting it,
+      // since base64 ciphertext legitimately contains '/' characters and would
+      // otherwise silently produce a bogus filename.
+      const decryptedUrl = decryptField(attachment.url, taskId) || '';
+      const urlParts = decryptedUrl.split('/');
       const filename = urlParts[urlParts.length - 1];
       const filePath = path.join(process.cwd(), 'uploads', 'task-attachments', filename);
 
@@ -215,6 +220,10 @@ export const getTaskAttachments = async (req: Request, res: Response): Promise<v
       res.status(404).json({ success: false, message: 'Task not found' });
       return;
     }
+
+    task.attachments.forEach((a: any) => {
+      if (a.url) a.url = decryptField(a.url, taskId);
+    });
 
     res.json({
       success: true,
@@ -275,6 +284,9 @@ export const uploadSubtaskAttachment = async (req: Request, res: Response): Prom
     const baseUrl = getBaseUrl(req);
     const publicUrl = `${baseUrl}/uploads/task-attachments/${file.filename}`;
 
+    // attachment (plaintext url) is returned to the client below; the encrypted
+    // copy pushed onto the subtask is keyed by the parent TASK's id, not the
+    // subtask's own id — same convention as subtask titles/comments.
     const attachment = {
       id: fileId,
       name: file.originalname,
@@ -286,7 +298,7 @@ export const uploadSubtaskAttachment = async (req: Request, res: Response): Prom
     };
 
     if (!subtask.attachments) subtask.attachments = [];
-    subtask.attachments.push(attachment);
+    subtask.attachments.push({ ...attachment, url: encryptField(publicUrl, taskId) });
     task.markModified('subtasks');
     await task.save();
 
@@ -323,9 +335,11 @@ export const deleteSubtaskAttachment = async (req: Request, res: Response): Prom
       return;
     }
 
-    // Delete file from disk
+    // Delete file from disk — url is encrypted at rest (keyed by the parent task's
+    // id), decrypt before splitting since base64 ciphertext contains '/' characters.
     try {
-      const filename = attachment.url.split('/').pop();
+      const decryptedUrl = decryptField(attachment.url, taskId) || '';
+      const filename = decryptedUrl.split('/').pop();
       const filePath = path.join(process.cwd(), 'uploads', 'task-attachments', filename);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch { /* continue if file missing */ }

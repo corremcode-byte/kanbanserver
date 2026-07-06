@@ -9,6 +9,7 @@ import { pushNotificationService } from '../services/pushNotificationService';
 import { createNotification } from './notificationController';
 import { Notification } from '../models/Notification';
 import { convertPhotoURLsToAbsolute } from '../utils/urlHelper';
+import { encryptField, decryptMessageFields } from '../utils/fieldEncryption';
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
@@ -206,6 +207,9 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           .populate('senderId', 'displayName email photoURL')
           .sort({ createdAt: -1 })
           .lean();
+
+        // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
+        if (lastMessage) decryptMessageFields(lastMessage as any);
 
         // Count unread messages for this user in this group
         const unreadCount = await Message.countDocuments({
@@ -408,7 +412,16 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       messageData.replyTo = replyTo;
     }
 
-    const message = await Message.create(messageData);
+    // Construct first (Mongoose assigns _id synchronously) so attachment fileUrls
+    // can be encrypted keyed by this message's own id before the one-and-only save.
+    const message = new Message(messageData);
+    const messageIdStr = message._id.toString();
+    if (Array.isArray(message.attachments)) {
+      message.attachments.forEach((a: any) => {
+        if (a.fileUrl) a.fileUrl = encryptField(a.fileUrl, messageIdStr);
+      });
+    }
+    await message.save();
 
     // Populate sender info and replyTo
     await message.populate('senderId', 'displayName email photoURL');
@@ -422,6 +435,11 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     // Update group's updatedAt timestamp
     chatGroup.updatedAt = new Date();
     await chatGroup.save();
+
+    // No further save() on `message` follows in this function, so it's safe to
+    // decrypt in place here — also recursively decrypts a populated replyTo,
+    // keyed by that message's own id.
+    decryptMessageFields(message as any);
 
     // Emit to all group members via Socket.IO with absolute photoURLs
     const messageWithAbsoluteUrls = convertPhotoURLsToAbsolute(message.toObject(), req);
@@ -540,6 +558,10 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       isDeleted: false
     });
 
+    // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest —
+    // no further save() follows, so decrypting in place is safe.
+    messages.forEach((m: any) => decryptMessageFields(m));
+
     // Convert photoURLs to absolute URLs
     // convertPhotoURLsToAbsolute now handles ObjectId serialization internally
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
@@ -594,6 +616,10 @@ export const getGroupStarredMessages = async (req: AuthenticatedRequest, res: Re
       isDeleted: false,
       starredBy: userId
     });
+
+    // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest —
+    // no further save() follows, so decrypting in place is safe.
+    messages.forEach((m: any) => decryptMessageFields(m));
 
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
@@ -704,6 +730,9 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
     // Populate sender info
     await message.populate('senderId', 'displayName email photoURL');
 
+    // save() already happened above; safe to decrypt in place now.
+    decryptMessageFields(message as any);
+
     // Notify all group members via Socket.IO
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
@@ -768,6 +797,9 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
     // Populate sender info
     await message.populate('senderId', 'displayName email photoURL');
 
+    // save() already happened above; safe to decrypt in place now.
+    decryptMessageFields(message as any);
+
     // Notify all group members via Socket.IO
     chatGroup.members.forEach((memberId) => {
       io.to(`user:${memberId.toString()}`).emit('chat:message:deleted', {
@@ -827,6 +859,9 @@ export const toggleReaction = async (req: AuthenticatedRequest, res: Response) =
     await message.populate('senderId', 'displayName email photoURL');
     await message.populate('reactions.userId', 'displayName email photoURL');
 
+    // save() already happened above; safe to decrypt in place now.
+    decryptMessageFields(message as any);
+
     // Notify all group members via Socket.IO
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
@@ -861,6 +896,9 @@ export const togglePin = async (req: AuthenticatedRequest, res: Response) => {
     await message.save();
 
     await message.populate('senderId', 'displayName email photoURL');
+
+    // save() already happened above; safe to decrypt in place now.
+    decryptMessageFields(message as any);
 
     // Notify all group members via Socket.IO
     const chatGroup = await ChatGroup.findById(message.groupId);
@@ -903,6 +941,9 @@ export const toggleStar = async (req: AuthenticatedRequest, res: Response) => {
 
     await message.save();
     await message.populate('senderId', 'displayName email photoURL');
+
+    // save() already happened above; safe to decrypt in place now.
+    decryptMessageFields(message as any);
 
     return res.json({
       success: true,
@@ -1523,6 +1564,9 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
           .sort({ createdAt: -1 })
           .lean();
 
+        // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
+        if (lastMessage) decryptMessageFields(lastMessage as any);
+
         const totalMessages = await Message.countDocuments({
           groupId: group._id
         });
@@ -1596,6 +1640,9 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
 
     // Get total count (including deleted)
     const totalCount = await Message.countDocuments({ groupId });
+
+    // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest.
+    messages.forEach((m: any) => decryptMessageFields(m));
 
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
@@ -1688,6 +1735,9 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
         .populate('senderId', 'displayName email photoURL')
         .sort({ createdAt: -1 })
         .lean();
+
+      // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
+      if (lastMessage) decryptMessageFields(lastMessage as any);
 
       const unreadCount = await Message.countDocuments({
         groupId: existingPersonalChat._id,
