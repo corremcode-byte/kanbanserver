@@ -18,11 +18,15 @@ const systemSettingsSchema = new Schema<ISystemSettings>(
       default: 'global',
     },
     searchAccessCode: {
+      // Encrypted at rest (see utils/fieldEncryption.ts) — the 3-32 alphanumeric
+      // business rule is enforced on the plaintext in systemSettingsController
+      // before encryption, so it can't be validated here against the ciphertext.
+      // The plaintext default below is handled by fieldEncryption's backward-
+      // compatible passthrough (only decrypts values that look like ciphertext).
       type: String,
       required: true,
       trim: true,
       default: '1008',
-      match: [/^[A-Za-z0-9]{3,32}$/, 'Search access code must be 3-32 letters/numbers only'],
     },
     updatedBy: {
       type: Schema.Types.ObjectId,

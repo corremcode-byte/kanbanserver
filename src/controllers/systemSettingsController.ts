@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { SystemSettings } from '../models/SystemSettings';
 import { successResponse, errorResponse } from '../utils/responses';
+import { encryptField, decryptField } from '../utils/fieldEncryption';
 
 const CODE_PATTERN = /^[A-Za-z0-9]{3,32}$/;
 
@@ -17,7 +18,8 @@ async function getOrCreateSettings() {
 export async function getSearchAccessCode(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const settings = await getOrCreateSettings();
-    successResponse(res, 'Search access code retrieved', { searchAccessCode: settings.searchAccessCode });
+    const plainCode = decryptField(settings.searchAccessCode, settings._id.toString());
+    successResponse(res, 'Search access code retrieved', { searchAccessCode: plainCode });
   } catch {
     errorResponse(res, 'Failed to retrieve search access code', 500);
   }
@@ -34,10 +36,10 @@ export async function updateSearchAccessCode(req: AuthenticatedRequest, res: Res
 
   try {
     const settings = await getOrCreateSettings();
-    settings.searchAccessCode = code;
+    settings.searchAccessCode = encryptField(code, settings._id.toString()) as string;
     settings.updatedBy = req.user?._id as any;
     await settings.save();
-    successResponse(res, 'Search access code updated', { searchAccessCode: settings.searchAccessCode });
+    successResponse(res, 'Search access code updated', { searchAccessCode: code });
   } catch {
     errorResponse(res, 'Failed to update search access code', 500);
   }
@@ -55,7 +57,8 @@ export async function verifySearchAccessCode(req: AuthenticatedRequest, res: Res
 
   try {
     const settings = await getOrCreateSettings();
-    res.json({ valid: settings.searchAccessCode === code });
+    const storedPlainCode = decryptField(settings.searchAccessCode, settings._id.toString());
+    res.json({ valid: storedPlainCode === code });
   } catch {
     res.json({ valid: false });
   }
