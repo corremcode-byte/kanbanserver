@@ -31,7 +31,10 @@ import {
   getPlatformUsersForChat,
   superAdminGetAllUsers,
   superAdminGetUserChatGroups,
-  superAdminGetGroupMessages
+  superAdminGetGroupMessages,
+  getGroupMemberKeys,
+  rotateGroupKey,
+  getPublicKeysForUsers
 } from '../controllers/chatController';
 import { uploadChatAttachment } from '../controllers/uploadController';
 import { authenticate, requireSuperAdmin } from '../middleware/auth';
@@ -102,6 +105,10 @@ router.get('/superadmin/groups/:groupId/messages', requireSuperAdmin, superAdmin
 // Platform users with chat permission (for forward modal)
 router.get('/platform-users', getPlatformUsersForChat);
 
+// Chat E2E key distribution — public keys for a list of users (used before a
+// group exists, at creation time)
+router.post('/member-public-keys', getPublicKeysForUsers);
+
 // Chat group routes
 router.post('/groups', createChatGroup);
 router.post('/personal', createOrGetPersonalChat);
@@ -111,6 +118,9 @@ router.get('/groups/:groupId', getChatGroup);
 router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
+// Chat E2E key distribution (see utils/groupKeyValidation.ts / adminRecoveryKey.ts)
+router.get('/groups/:groupId/member-keys', getGroupMemberKeys);
+router.post('/groups/:groupId/rotate-key', rotateGroupKey);
 router.delete('/groups/:groupId', deleteChatGroup);
 router.post('/groups/:groupId/mute', muteGroup);
 router.post('/groups/:groupId/lock', lockChat);

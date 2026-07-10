@@ -3,6 +3,7 @@ import { User } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { decrypt, encrypt } from '../utils/encryption';
+import { isValidNaclPublicKeyB64 } from '../utils/groupKeyValidation';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -1616,5 +1617,29 @@ export const updateUserPasskey = async (req: AuthenticatedRequest, res: Response
   } catch (error) {
     logger.error('Error updating user passkey:', error);
     return internalServerErrorResponse(res, 'Failed to update user passkey');
+  }
+};
+
+// Register/update the current user's chat encryption (NaCl box) public key —
+// new endpoint for the chat E2E key-distribution upgrade (see encryptionService.ts
+// and chatController.ts getGroupMemberKeys/rotateGroupKey). Self-service only;
+// no permission gate beyond being authenticated as the user being updated.
+export const updateEncryptionPublicKey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const { encryptionPublicKey } = req.body;
+    if (!isValidNaclPublicKeyB64(encryptionPublicKey)) {
+      return errorResponse(res, 'encryptionPublicKey must be a valid base64-encoded 32-byte NaCl public key', 400);
+    }
+
+    await User.findByIdAndUpdate(userId, { encryptionPublicKey });
+    return successResponse(res, 'Encryption public key updated');
+  } catch (error) {
+    logger.error('Error updating encryption public key:', error);
+    return internalServerErrorResponse(res, 'Failed to update encryption public key');
   }
 };

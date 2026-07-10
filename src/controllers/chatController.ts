@@ -10,11 +10,14 @@ import { createNotification } from './notificationController';
 import { Notification } from '../models/Notification';
 import { convertPhotoURLsToAbsolute } from '../utils/urlHelper';
 import { encryptField, decryptMessageFields } from '../utils/fieldEncryption';
+import nacl from 'tweetnacl';
+import { getOrCreateAdminRecoveryKeyPair } from '../utils/adminRecoveryKey';
+import { validateAndBuildKeyEpoch } from '../utils/groupKeyValidation';
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, description, memberIds, encryptionPublicKey } = req.body;
+    const { name, description, memberIds, encryptionPublicKey, initialKeyEpoch } = req.body;
 
     const userId = req.user?._id?.toString();
     if (!userId) {
@@ -81,6 +84,12 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       }
     }
 
+    // If the client already generated + sealed a random group key for every
+    // initial member (the modern flow — see encryptionService.ts rotateGroupKey),
+    // validate and persist it so the group is born at v2 with no legacy phase. An
+    // older/unaware client that omits this simply gets today's v1 behavior.
+    const validatedEpoch = validateAndBuildKeyEpoch(initialKeyEpoch, 2, allMemberIds);
+
     // Create chat group with creator included in members
     const chatGroup = await ChatGroup.create({
       name,
@@ -88,6 +97,10 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       createdBy: req.user._id,
       members: allMemberIds,
       encryptionPublicKey,
+      currentKeyVersion: validatedEpoch ? 2 : 1,
+      keyEpochs: validatedEpoch
+        ? [{ version: 2, createdBy: req.user._id, memberKeys: validatedEpoch.memberKeys, adminSealedKey: validatedEpoch.adminSealedKey }]
+        : [],
       isActive: true,
       isPersonalChat,
     });
@@ -349,7 +362,7 @@ export const muteGroup = async (req: AuthenticatedRequest, res: Response) => {
 // Send a message to a group
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, encryptedContent, nonce, attachments, replyTo } = req.body;
+    const { groupId, encryptedContent, nonce, attachments, replyTo, keyVersion } = req.body;
     const senderId = req.user?._id;
     const userId = senderId?.toString();
 
@@ -403,6 +416,11 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       senderId,
       encryptedContent,
       nonce,
+      // Server never interprets this — it's the client's declaration of which of
+      // the group's keyEpochs this ciphertext was encrypted under. Validate it's a
+      // sane positive integer and default to 1 (legacy) for any client that omits
+      // it, preserving today's behavior exactly.
+      keyVersion: Number.isInteger(keyVersion) && keyVersion >= 1 ? keyVersion : 1,
       attachments: attachments || [],
       readBy: [{ userId: senderId, readAt: new Date() }]
     };
@@ -696,7 +714,7 @@ export const markMessageAsRead = async (req: AuthenticatedRequest, res: Response
 export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { messageId } = req.params;
-    const { encryptedContent, nonce } = req.body;
+    const { encryptedContent, nonce, keyVersion } = req.body;
     const userId = req.user?._id;
 
     const message = await Message.findById(messageId);
@@ -724,6 +742,11 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
     // Update message content
     message.encryptedContent = encryptedContent;
     message.nonce = nonce;
+    // Only overwrite if the client sent a sane value — an old/unaware client that
+    // omits this field leaves the message's existing keyVersion untouched.
+    if (Number.isInteger(keyVersion) && keyVersion >= 1) {
+      message.keyVersion = keyVersion;
+    }
     message.isEdited = true;
     await message.save();
 
@@ -1553,6 +1576,10 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
       .populate('createdBy', 'displayName email')
       .sort({ updatedAt: -1 });
 
+    // For v2+ groups' last-message previews, same admin-recovery server-side
+    // decryption as superAdminGetGroupMessages — see that function's comment.
+    const { privateKey: adminPrivateKey } = await getOrCreateAdminRecoveryKeyPair();
+
     // For each group, get last message and total message count
     const groupsWithMetadata = await Promise.all(
       chatGroups.map(async (group) => {
@@ -1566,6 +1593,15 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
 
         // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
         if (lastMessage) decryptMessageFields(lastMessage as any);
+
+        if (lastMessage && (lastMessage as any).keyVersion >= 2) {
+          const epoch = (group.keyEpochs || []).find((e: any) => e.version === (lastMessage as any).keyVersion);
+          const groupKeyBytes = epoch?.adminSealedKey ? openAdminSealedGroupKey(epoch.adminSealedKey, adminPrivateKey) : null;
+          if (groupKeyBytes) {
+            const plain = decryptMessageContentServerSide((lastMessage as any).encryptedContent, (lastMessage as any).nonce, groupKeyBytes);
+            if (plain !== null) (lastMessage as any).decryptedContent = plain;
+          }
+        }
 
         const totalMessages = await Message.countDocuments({
           groupId: group._id
@@ -1615,6 +1651,35 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
 };
 
 // Super Admin: Get all messages for a group (INCLUDING deleted messages)
+// Opens a group key that was nacl.box-sealed to the server-held admin-recovery
+// keypair (see utils/adminRecoveryKey.ts / models/ChatGroup.ts IKeyEpoch.adminSealedKey).
+function openAdminSealedGroupKey(
+  adminSealedKey: { encryptedKey: string; nonce: string; senderPublicKey: string },
+  adminPrivateKey: Uint8Array
+): Uint8Array | null {
+  try {
+    const ciphertext = new Uint8Array(Buffer.from(adminSealedKey.encryptedKey, 'base64'));
+    const nonceBytes = new Uint8Array(Buffer.from(adminSealedKey.nonce, 'base64'));
+    const senderPublicKeyBytes = new Uint8Array(Buffer.from(adminSealedKey.senderPublicKey, 'base64'));
+    return nacl.box.open(ciphertext, nonceBytes, senderPublicKeyBytes, adminPrivateKey);
+  } catch {
+    return null;
+  }
+}
+
+// Decrypts a message's nacl.secretbox body once the raw group key is known.
+function decryptMessageContentServerSide(encryptedContent: string, nonce: string, groupKey: Uint8Array): string | null {
+  try {
+    const ciphertext = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
+    const nonceBytes = new Uint8Array(Buffer.from(nonce, 'base64'));
+    const decrypted = nacl.secretbox.open(ciphertext, nonceBytes, groupKey);
+    if (!decrypted) return null;
+    return Buffer.from(decrypted).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
@@ -1644,7 +1709,39 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
     // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest.
     messages.forEach((m: any) => decryptMessageFields(m));
 
-    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
+    // v2+ messages use a real per-group random key the server never otherwise
+    // sees. This admin-only endpoint is the one deliberate, narrow exception:
+    // decrypt server-side using the server-held admin-recovery keypair, which
+    // every v2+ epoch's key is also sealed to (see rotateGroupKey/createChatGroup).
+    // v1 (legacy) messages are left exactly as before — the client decrypts them
+    // via the unchanged deterministic path, same as it always has.
+    const { privateKey: adminPrivateKey } = await getOrCreateAdminRecoveryKeyPair();
+    const epochKeyCache = new Map<number, Uint8Array | null>();
+    const getGroupKeyForVersion = (version: number): Uint8Array | null => {
+      if (epochKeyCache.has(version)) return epochKeyCache.get(version) as Uint8Array | null;
+      const epoch = (chatGroup.keyEpochs || []).find((e: any) => e.version === version);
+      const opened = epoch?.adminSealedKey ? openAdminSealedGroupKey(epoch.adminSealedKey, adminPrivateKey) : null;
+      epochKeyCache.set(version, opened);
+      return opened;
+    };
+
+    const decryptedContentById = new Map<string, string>();
+    messages.forEach((m: any) => {
+      const version = m.keyVersion ?? 1;
+      if (version >= 2) {
+        const groupKeyBytes = getGroupKeyForVersion(version);
+        if (groupKeyBytes) {
+          const plain = decryptMessageContentServerSide(m.encryptedContent, m.nonce, groupKeyBytes);
+          if (plain !== null) decryptedContentById.set(m._id.toString(), plain);
+        }
+      }
+    });
+
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req) as any[];
+    const messagesWithDecrypted = messagesWithAbsoluteUrls.map((m) => {
+      const decrypted = decryptedContentById.get(m._id.toString());
+      return decrypted !== undefined ? { ...m, decryptedContent: decrypted } : m;
+    });
 
     // Get group details with members
     await chatGroup.populate('members', 'displayName email photoURL isActive');
@@ -1652,7 +1749,7 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
 
     return res.json({
       group: convertPhotoURLsToAbsolute(chatGroup.toObject(), req),
-      messages: messagesWithAbsoluteUrls.reverse(),
+      messages: messagesWithDecrypted.reverse(),
       totalCount,
       hasMore: skip + limit < totalCount
     });
@@ -1757,12 +1854,20 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
     const chatName = otherUser.displayName || otherUser.email;
     const encryptionPublicKey = req.body.encryptionPublicKey || '';
 
+    // Same optional modern-flow initial epoch as createChatGroup — see comment there.
+    const personalMemberIds = [currentUserId, otherUserId];
+    const validatedEpoch = validateAndBuildKeyEpoch(req.body.initialKeyEpoch, 2, personalMemberIds);
+
     const personalChat = await ChatGroup.create({
       name: chatName,
       description: '',
       createdBy: currentUserId,
-      members: [currentUserId, otherUserId],
+      members: personalMemberIds,
       encryptionPublicKey,
+      currentKeyVersion: validatedEpoch ? 2 : 1,
+      keyEpochs: validatedEpoch
+        ? [{ version: 2, createdBy: currentUserId, memberKeys: validatedEpoch.memberKeys, adminSealedKey: validatedEpoch.adminSealedKey }]
+        : [],
       isActive: true,
       isPersonalChat: true
     });
@@ -1783,5 +1888,139 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
   } catch (error) {
     console.error('Error creating/getting personal chat:', error);
     return res.status(500).json({ message: 'Failed to create/get personal chat' });
+  }
+};
+
+// Public keys for an arbitrary list of user ids (+ the admin-recovery public
+// key) — used at group-creation time, before a ChatGroup document exists, so
+// the client can seal the group's very first real key epoch to every initial
+// member immediately (see createChatGroup/createOrGetPersonalChat). Any
+// authenticated user may call this — it only ever returns public keys.
+export const getPublicKeysForUsers = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { userIds } = req.body;
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ message: 'userIds must be a non-empty array' });
+    }
+
+    const users = await User.find({ _id: { $in: userIds } }).select('encryptionPublicKey');
+    const memberKeys = users
+      .filter((u) => !!u.encryptionPublicKey)
+      .map((u) => ({ userId: u._id.toString(), encryptionPublicKey: u.encryptionPublicKey as string }));
+
+    const { publicKey: adminRecoveryPublicKey } = await getOrCreateAdminRecoveryKeyPair();
+
+    return res.json({ memberKeys, adminRecoveryPublicKey });
+  } catch (error) {
+    console.error('Error fetching public keys for users:', error);
+    return res.status(500).json({ message: 'Failed to fetch public keys' });
+  }
+};
+
+// Get current members' public keys (+ the admin-recovery public key) so a client
+// can seal a group key to everyone during rotation/upgrade. Only callable by a
+// current member of the group — same trust boundary as reading the group itself.
+export const getGroupMemberKeys = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    const members = await User.find({ _id: { $in: chatGroup.members } })
+      .select('encryptionPublicKey');
+
+    const memberKeys = members
+      .filter((m) => !!m.encryptionPublicKey)
+      .map((m) => ({ userId: m._id.toString(), encryptionPublicKey: m.encryptionPublicKey as string }));
+
+    const { publicKey: adminRecoveryPublicKey } = await getOrCreateAdminRecoveryKeyPair();
+
+    return res.json({
+      currentKeyVersion: chatGroup.currentKeyVersion ?? 1,
+      memberKeys,
+      adminRecoveryPublicKey
+    });
+  } catch (error) {
+    console.error('Error fetching group member keys:', error);
+    return res.status(500).json({ message: 'Failed to fetch group member keys' });
+  }
+};
+
+// Rotate (or perform the first real, v1→v2) a group's encryption key. Called only
+// from an explicit client-side trigger — group creation is handled separately in
+// createChatGroup/createOrGetPersonalChat; this endpoint is for membership-change
+// rotations and the explicit "Upgrade encryption" action. Never invoked merely
+// because a group was opened/viewed. The server never sees the raw group key —
+// only pre-sealed (nacl.box) ciphertext blobs it stores verbatim.
+export const rotateGroupKey = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { expectedCurrentVersion, memberKeys, adminSealedKey } = req.body;
+    if (!Number.isInteger(expectedCurrentVersion) || expectedCurrentVersion < 1) {
+      return res.status(400).json({ message: 'expectedCurrentVersion is required' });
+    }
+
+    const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    const newVersion = expectedCurrentVersion + 1;
+    const currentMemberIds = chatGroup.members.map((m) => m.toString());
+    const validatedEpoch = validateAndBuildKeyEpoch({ memberKeys, adminSealedKey }, newVersion, currentMemberIds);
+
+    if (!validatedEpoch) {
+      return res.status(400).json({ message: 'Invalid or malformed key rotation payload' });
+    }
+
+    // Optimistic concurrency: only succeeds if nobody else rotated this group
+    // since the client last read currentKeyVersion. A losing racer gets back the
+    // winner's up-to-date group state to use instead of retrying blindly.
+    const updated = await ChatGroup.findOneAndUpdate(
+      { _id: groupId, members: userId, currentKeyVersion: expectedCurrentVersion },
+      {
+        $push: {
+          keyEpochs: {
+            version: newVersion,
+            createdBy: userId,
+            memberKeys: validatedEpoch.memberKeys,
+            adminSealedKey: validatedEpoch.adminSealedKey
+          }
+        },
+        $set: { currentKeyVersion: newVersion }
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      const current = await ChatGroup.findById(groupId).select('currentKeyVersion keyEpochs');
+      return res.status(409).json({
+        message: 'Group key version changed concurrently',
+        currentKeyVersion: current?.currentKeyVersion ?? 1,
+        keyEpochs: current?.keyEpochs ?? []
+      });
+    }
+
+    return res.json({ currentKeyVersion: updated.currentKeyVersion, keyEpochs: updated.keyEpochs });
+  } catch (error) {
+    console.error('Error rotating group key:', error);
+    return res.status(500).json({ message: 'Failed to rotate group key' });
   }
 };

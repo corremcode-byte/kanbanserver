@@ -4,6 +4,13 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface ISystemSettings extends Document {
   singletonKey: string;
   searchAccessCode: string;
+  // Server-held NaCl box keypair used to let SuperAdminChatViewer decrypt chat
+  // groups' random keys (see utils/adminRecoveryKey.ts). Public key is plaintext
+  // (safe to hand to clients for sealing); private key is encrypted at rest via
+  // the existing fieldEncryption.ts pattern, keyed by this document's own _id.
+  // Both lazily self-provisioned on first use — never set manually.
+  adminRecoveryPublicKey?: string;
+  adminRecoveryPrivateKeyEncrypted?: string;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -27,6 +34,12 @@ const systemSettingsSchema = new Schema<ISystemSettings>(
       required: true,
       trim: true,
       default: '1008',
+    },
+    adminRecoveryPublicKey: {
+      type: String,
+    },
+    adminRecoveryPrivateKeyEncrypted: {
+      type: String,
     },
     updatedBy: {
       type: Schema.Types.ObjectId,
