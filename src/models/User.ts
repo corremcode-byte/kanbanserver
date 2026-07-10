@@ -41,6 +41,11 @@ export interface IUser extends Document {
     transports?: string[];
   }>;
   currentChallenge?: string;
+  // Base64-encoded TweetNaCl (nacl.box) X25519 public key, used to seal per-group
+  // chat encryption keys to this user (see utils/groupKeyValidation.ts). Optional —
+  // not every existing user has registered one yet; group-key sealing skips members
+  // without one until they next open the chat client and register theirs.
+  encryptionPublicKey?: string;
   comparePassword(candidatePassword: string): Promise<boolean>;
   comparePasskey(candidatePasskey: string): Promise<boolean>;
   hasPasskey(): boolean;
@@ -227,6 +232,9 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
   currentChallenge: {
     type: String,
     select: false,
+  },
+  encryptionPublicKey: {
+    type: String,
   },
   displayName: {
     type: String,

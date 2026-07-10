@@ -11,6 +11,7 @@ router.use(authenticate);
 router.get('/', usersController.getUsers);
 router.get('/search', usersController.searchUsers);
 router.put('/profile', usersController.updateProfile); // Update own profile
+router.put('/me/encryption-public-key', usersController.updateEncryptionPublicKey); // Register own chat E2E public key
 
 // Admin routes for user management
 router.get('/all', usersController.getAllUsers);

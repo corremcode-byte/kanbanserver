@@ -11,6 +11,10 @@ export interface IMessage extends Document {
   senderId: mongoose.Types.ObjectId;
   encryptedContent: string; // Encrypted message content
   nonce: string; // Encryption nonce for TweetNaCl
+  // Which of the owning ChatGroup's keyEpochs this message's encryptedContent/nonce
+  // was encrypted under. Default 1 = legacy deterministic key (unchanged behavior
+  // for every message that predates this field). Never rewritten after send/edit.
+  keyVersion: number;
   attachments?: {
     fileName: string;
     fileUrl: string;
@@ -55,6 +59,10 @@ const messageSchema = new Schema<IMessage>(
     nonce: {
       type: String,
       required: true
+    },
+    keyVersion: {
+      type: Number,
+      default: 1
     },
     attachments: [{
       fileName: String,
