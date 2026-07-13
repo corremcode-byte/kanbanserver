@@ -140,7 +140,8 @@ app.get('/', (req, res) => {
         '/api/invitations',
         '/api/permissions',
         '/api/analytics',
-        '/api/audit'
+        '/api/audit',
+        '/api/remote-workspace'
       ]
     }
   });
