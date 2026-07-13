@@ -98,7 +98,7 @@ function invalidateCache(): void {
  */
 async function isReachable(): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${getBaseUrl()}/api/language`, { method: 'GET' });
+    const res = await fetchWithTimeout(`${getBaseUrl()}/api/languages`, { method: 'GET' });
     return res.ok;
   } catch {
     return false;
