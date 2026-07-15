@@ -53,6 +53,12 @@ async function finalizeLog(
 export function attachGuacTunnelProxy(server: HttpServer): void {
   const wss = new WebSocketServer({ noServer: true });
 
+  // Display/session parameters the browser is allowed to request — anything
+  // else on the incoming query string (in particular attempts to smuggle a
+  // different token/connection id) is ignored; those always come from the
+  // server-side session entry, never from the client.
+  const PASSTHROUGH_PARAMS = ['width', 'height', 'dpi', 'audio', 'video', 'image', 'timezone'];
+
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const { pathname, searchParams } = new URL(req.url || '', 'http://internal');
     if (pathname !== TUNNEL_PATH) return; // not ours — let other listeners (e.g. Socket.IO) handle it
@@ -63,8 +69,14 @@ export function attachGuacTunnelProxy(server: HttpServer): void {
       return;
     }
 
+    const displayParams = new URLSearchParams();
+    for (const key of PASSTHROUGH_PARAMS) {
+      const value = searchParams.get(key);
+      if (value) displayParams.set(key, value);
+    }
+
     wss.handleUpgrade(req, socket, head, (clientWs) => {
-      handleConnection(clientWs, sessionId).catch((error) => {
+      handleConnection(clientWs, sessionId, displayParams).catch((error) => {
         logger.error('Guacamole tunnel proxy error:', error);
         try { clientWs.close(1011, 'Internal error'); } catch { /* already closed */ }
       });
@@ -74,19 +86,27 @@ export function attachGuacTunnelProxy(server: HttpServer): void {
   logger.info(`Guacamole tunnel proxy listening on upgrade path ${TUNNEL_PATH}`);
 }
 
-async function handleConnection(clientWs: WebSocket, sessionId: string): Promise<void> {
+async function handleConnection(clientWs: WebSocket, sessionId: string, displayParams: URLSearchParams): Promise<void> {
   const entry = await remoteSessionStore.consume(sessionId);
   if (!entry) {
     clientWs.close(4001, 'Session expired or already used');
     return;
   }
 
+  // Sensible defaults if the browser didn't supply a size — matches what the
+  // stock Guacamole web client sends, so guacd doesn't fall back to a
+  // degenerate/zero-size display.
+  if (!displayParams.has('width')) displayParams.set('width', '1024');
+  if (!displayParams.has('height')) displayParams.set('height', '768');
+  if (!displayParams.has('dpi')) displayParams.set('dpi', '96');
+
   const upstreamUrl =
     `${guacamoleService.getTunnelWsBase()}/websocket-tunnel` +
     `?token=${encodeURIComponent(entry.guacToken)}` +
     `&GUAC_DATA_SOURCE=${encodeURIComponent(entry.dataSource)}` +
     `&GUAC_ID=${encodeURIComponent(entry.connectionId)}` +
-    `&GUAC_TYPE=c`;
+    `&GUAC_TYPE=c` +
+    `&${displayParams.toString()}`;
 
   const upstream = new WebSocket(upstreamUrl);
   const pending: Array<[data: Buffer, isBinary: boolean]> = [];
