@@ -89,7 +89,7 @@ async function handleConnection(clientWs: WebSocket, sessionId: string): Promise
     `&GUAC_TYPE=c`;
 
   const upstream = new WebSocket(upstreamUrl);
-  const pending: Array<string | Buffer> = [];
+  const pending: Array<[data: Buffer, isBinary: boolean]> = [];
   let upstreamOpen = false;
   let cleanClientClose = false;
 
@@ -104,12 +104,16 @@ async function handleConnection(clientWs: WebSocket, sessionId: string): Promise
   upstream.on('open', () => {
     upstreamOpen = true;
     clearTimeout(openTimer);
-    for (const msg of pending.splice(0)) upstream.send(msg);
+    for (const [msg, isBinary] of pending.splice(0)) upstream.send(msg, { binary: isBinary });
     void finalizeLog(entry.connectionLogId, 'auth_success');
   });
 
-  upstream.on('message', (data) => {
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data);
+  // The Guacamole protocol is text-based — ws's default Buffer relay would send
+  // every frame as binary regardless of the original type, and the browser-side
+  // Guacamole.WebSocketTunnel throws on receiving a Blob where it expects a string.
+  // Preserving isBinary in both directions keeps text frames as text frames.
+  upstream.on('message', (data, isBinary) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary });
   });
 
   upstream.on('close', (code) => {
@@ -127,9 +131,9 @@ async function handleConnection(clientWs: WebSocket, sessionId: string): Promise
     logger.warn('Guacamole upstream tunnel error:', error.message);
   });
 
-  clientWs.on('message', (data) => {
-    if (upstreamOpen) upstream.send(data);
-    else pending.push(data as Buffer);
+  clientWs.on('message', (data, isBinary) => {
+    if (upstreamOpen) upstream.send(data, { binary: isBinary });
+    else pending.push([data as Buffer, isBinary]);
   });
 
   clientWs.on('close', (code) => {
