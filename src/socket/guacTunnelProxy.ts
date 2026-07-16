@@ -107,10 +107,14 @@ export function attachGuacTunnelProxy(server: HttpServer): void {
       return;
     }
 
+    // getAll(), not get() — GUAC_AUDIO/GUAC_IMAGE are repeated params (one per
+    // supported mimetype, in preference order); using get() would silently
+    // drop every value after the first.
     const displayParams = new URLSearchParams();
     for (const key of PASSTHROUGH_PARAMS) {
-      const value = searchParams.get(key);
-      if (value) displayParams.set(key, value);
+      for (const value of searchParams.getAll(key)) {
+        displayParams.append(key, value);
+      }
     }
 
     wss.handleUpgrade(req, socket, head, (clientWs) => {
