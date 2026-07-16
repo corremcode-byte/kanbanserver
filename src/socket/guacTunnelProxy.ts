@@ -23,6 +23,44 @@ function logConnectionsEnabled(): boolean {
   return process.env.LOG_CONNECTIONS !== 'false';
 }
 
+// The real Guacamole webapp's tunnel endpoint only recognizes these
+// GUAC_-prefixed parameter names (see TunnelRequest.java) — the bare names
+// used on our own browser<->proxy query string mean nothing upstream.
+// Forwarding them unprefixed silently no-ops: width/height/dpi fall back to
+// Guacamole's built-in 1024x768@96dpi default, and — more importantly — the
+// client's image mimetypes stay empty, leaving guacd with no encoding it's
+// allowed to render the desktop with. That's what was producing "connects
+// fine, guacd sends sync/ping forever, then disposes every layer and
+// disconnects, having never sent a single img instruction" — the black
+// screen this fixes.
+const GUAC_PARAM_NAME: Record<string, string> = {
+  width: 'GUAC_WIDTH',
+  height: 'GUAC_HEIGHT',
+  dpi: 'GUAC_DPI',
+  audio: 'GUAC_AUDIO',
+  video: 'GUAC_VIDEO',
+  image: 'GUAC_IMAGE',
+  timezone: 'GUAC_TIMEZONE'
+};
+
+// guacamole-common-js decodes PNG/JPEG natively (hardcoded "png"/"jpeg"
+// instruction handlers) regardless of what's declared — the browser side
+// never sends GUAC_IMAGE itself, so guarantee guacd always has a usable
+// image encoding to pick from.
+const DEFAULT_IMAGE_MIMETYPES = ['image/png', 'image/jpeg'];
+
+function toUpstreamDisplayParams(displayParams: URLSearchParams): URLSearchParams {
+  const upstreamParams = new URLSearchParams();
+  for (const [key, value] of displayParams) {
+    const guacKey = GUAC_PARAM_NAME[key];
+    if (guacKey) upstreamParams.append(guacKey, value);
+  }
+  if (!upstreamParams.has('GUAC_IMAGE')) {
+    for (const mimetype of DEFAULT_IMAGE_MIMETYPES) upstreamParams.append('GUAC_IMAGE', mimetype);
+  }
+  return upstreamParams;
+}
+
 async function finalizeLog(
   connectionLogId: string,
   status: 'auth_success' | 'auth_failed' | 'timeout' | 'disconnected' | 'unexpected_disconnect',
@@ -106,7 +144,7 @@ async function handleConnection(clientWs: WebSocket, sessionId: string, displayP
     `&GUAC_DATA_SOURCE=${encodeURIComponent(entry.dataSource)}` +
     `&GUAC_ID=${encodeURIComponent(entry.connectionId)}` +
     `&GUAC_TYPE=c` +
-    `&${displayParams.toString()}`;
+    `&${toUpstreamDisplayParams(displayParams).toString()}`;
 
   const upstream = new WebSocket(upstreamUrl);
   const pending: Array<[data: Buffer, isBinary: boolean]> = [];
