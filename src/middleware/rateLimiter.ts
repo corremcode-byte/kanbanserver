@@ -155,6 +155,24 @@ export const createRateLimiter = (
   });
 };
 
+// Remote server session-creation limiter — creating a session opens a live
+// remote-desktop connection, so it gets its own tighter limit.
+export const remoteSessionLimiter = createRateLimiter(
+  60 * 1000,
+  10,
+  'Too many remote session requests, please slow down.'
+);
+
+// nginx auth_request calls for the Guacamole redirect gate — the caller here
+// is nginx itself (all traffic for every user arrives from its IP), not an
+// individual browser, so this is a coarse DoS backstop behind the shared
+// secret header, not the primary defense.
+export const remoteRedirectValidationLimiter = createRateLimiter(
+  60 * 1000,
+  120,
+  'Too many redirect validation requests.'
+);
+
 export default {
   generalLimiter,
   authLimiter,
@@ -164,5 +182,7 @@ export default {
   emailVerificationLimiter,
   searchLimiter,
   exportLimiter,
-  createRateLimiter
+  createRateLimiter,
+  remoteSessionLimiter,
+  remoteRedirectValidationLimiter
 };

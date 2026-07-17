@@ -1,18 +1,19 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
-export type ConnectionLogStatus =
-  | 'opened'              // Workspace page opened / connect initiated
+export type RemoteSessionLogStatus =
+  | 'opened'              // Session requested / connect initiated
   | 'auth_success'        // Guacamole authentication succeeded
   | 'auth_failed'         // Guacamole authentication failed
   | 'timeout'             // Connection attempt timed out
   | 'disconnected'        // Clean, user-initiated disconnect
   | 'unexpected_disconnect'; // Tunnel dropped without an explicit disconnect call
 
-export interface IConnectionLog extends Document {
+export interface IRemoteSessionLog extends Document {
+  serverId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   loginTime: Date;
   logoutTime?: Date;
-  status: ConnectionLogStatus;
+  status: RemoteSessionLogStatus;
   clientIp?: string;
   browser?: string;
   sessionDuration?: number; // seconds
@@ -21,12 +22,18 @@ export interface IConnectionLog extends Document {
   updatedAt: Date;
 }
 
-interface IConnectionLogModel extends Model<IConnectionLog> {
-  findActiveForUser(userId: string): Promise<IConnectionLog | null>;
+interface IRemoteSessionLogModel extends Model<IRemoteSessionLog> {
+  findActiveForUser(userId: string): Promise<IRemoteSessionLog | null>;
 }
 
-const ConnectionLogSchema = new Schema<IConnectionLog>(
+const RemoteSessionLogSchema = new Schema<IRemoteSessionLog>(
   {
+    serverId: {
+      type: Schema.Types.ObjectId,
+      ref: 'RemoteServer',
+      required: true,
+      index: true
+    },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -71,11 +78,12 @@ const ConnectionLogSchema = new Schema<IConnectionLog>(
   }
 );
 
-// Never persist Windows/Guacamole credentials or tokens on this model — this
-// table is an access/audit trail only (see remoteWorkspaceController).
-ConnectionLogSchema.index({ userId: 1, createdAt: -1 });
+// Never persist Guacamole/target-machine credentials or tokens on this model —
+// this table is an access/audit trail only (see remoteServerController).
+RemoteSessionLogSchema.index({ userId: 1, createdAt: -1 });
+RemoteSessionLogSchema.index({ serverId: 1, createdAt: -1 });
 
-ConnectionLogSchema.statics.findActiveForUser = function (userId: string) {
+RemoteSessionLogSchema.statics.findActiveForUser = function (userId: string) {
   return this.findOne({
     userId,
     status: { $in: ['opened', 'auth_success'] },
@@ -83,6 +91,9 @@ ConnectionLogSchema.statics.findActiveForUser = function (userId: string) {
   }).sort({ createdAt: -1 });
 };
 
-const ConnectionLog = mongoose.model<IConnectionLog, IConnectionLogModel>('ConnectionLog', ConnectionLogSchema);
+const RemoteSessionLog = mongoose.model<IRemoteSessionLog, IRemoteSessionLogModel>(
+  'RemoteSessionLog',
+  RemoteSessionLogSchema
+);
 
-export default ConnectionLog;
+export default RemoteSessionLog;

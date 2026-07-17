@@ -10,8 +10,10 @@ export interface IAuditLog extends Document {
           'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted' |
           'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
           'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
-          'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
-  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user';
+          'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
+          'remote_server_created' | 'remote_server_updated' | 'remote_server_deleted' |
+          'remote_server_permission_granted' | 'remote_server_permission_revoked';
+  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user' | 'remote_server';
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
     taskId?: string;
@@ -114,14 +116,19 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'user_password_reset',
       'user_sensitive_profile_updated',
       'user_sensitive_profile_updated_by_admin',
-      'user_passkey_updated_by_admin'
+      'user_passkey_updated_by_admin',
+      'remote_server_created',
+      'remote_server_updated',
+      'remote_server_deleted',
+      'remote_server_permission_granted',
+      'remote_server_permission_revoked'
     ],
     required: true,
     index: true
   },
   entityType: {
     type: String,
-    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group', 'user'],
+    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group', 'user', 'remote_server'],
     required: true
   },
   entityId: {

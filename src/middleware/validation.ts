@@ -236,6 +236,47 @@ export const notificationSchemas = {
   })
 };
 
+// Remote server (Guacamole-backed) validation schemas
+export const remoteServerSchemas = {
+  create: Joi.object({
+    name: Joi.string().required().trim().max(100),
+    description: Joi.string().trim().max(500).allow(''),
+    protocol: Joi.string().valid('rdp', 'vnc', 'ssh', 'telnet').required(),
+    hostname: Joi.string().required().trim().max(255),
+    port: Joi.number().integer().min(1).max(65535).required(),
+    domain: Joi.string().trim().max(255).allow(''),
+    username: Joi.string().trim().max(255).allow(''),
+    password: Joi.string().max(255).allow(''),
+    privateKey: Joi.string().max(20000).allow(''),
+    passphrase: Joi.string().max(255).allow(''),
+    protocolParams: Joi.object().pattern(Joi.string(), Joi.alternatives(Joi.string(), Joi.number(), Joi.boolean())),
+    isActive: Joi.boolean().default(true)
+  }),
+
+  update: Joi.object({
+    name: Joi.string().trim().max(100),
+    description: Joi.string().trim().max(500).allow(''),
+    protocol: Joi.string().valid('rdp', 'vnc', 'ssh', 'telnet'),
+    hostname: Joi.string().trim().max(255),
+    port: Joi.number().integer().min(1).max(65535),
+    domain: Joi.string().trim().max(255).allow(''),
+    username: Joi.string().trim().max(255).allow(''),
+    password: Joi.string().max(255).allow(''),
+    privateKey: Joi.string().max(20000).allow(''),
+    passphrase: Joi.string().max(255).allow(''),
+    protocolParams: Joi.object().pattern(Joi.string(), Joi.alternatives(Joi.string(), Joi.number(), Joi.boolean())),
+    isActive: Joi.boolean()
+  })
+};
+
+export const remoteServerPermissionSchemas = {
+  grant: Joi.object({
+    userId: objectId.required(),
+    serverId: objectId.required(),
+    canConnect: Joi.boolean().default(true)
+  })
+};
+
 // Export validation middleware for each schema
 export const validateUserUpdate = validate(userSchemas.updateProfile);
 
@@ -273,5 +314,7 @@ export default {
   teamSchemas,
   projectSchemas,
   taskSchemas,
-  notificationSchemas
+  notificationSchemas,
+  remoteServerSchemas,
+  remoteServerPermissionSchemas
 };

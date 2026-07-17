@@ -21,7 +21,6 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { initializeSocket } from './socket';
-import { attachGuacTunnelProxy } from './socket/guacTunnelProxy';
 import routes from './routes';
 import { errorHandler } from './middleware';
 import { logger } from './utils/logger';
@@ -62,11 +61,6 @@ if (redisUrl) {
 
 // Initialize socket handlers
 initializeSocket(io);
-
-// Proxies the Remote Server Workspace's Guacamole tunnel over its own upgrade
-// path — separate from Socket.IO's own upgrade listener, so both coexist on
-// the same HTTP server without conflict.
-attachGuacTunnelProxy(server);
 
 // Middleware
 app.use(cors({

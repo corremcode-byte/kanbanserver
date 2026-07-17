@@ -1,0 +1,111 @@
+# Example nginx config for the Guacamole subdomain, gated so it's only
+# reachable via a Connect click in Kanban — not by anyone who just knows the
+# hostname. Merge this into whatever server block you already wrote to
+# expose Guacamole; the parts that matter are:
+#
+#   1. /guac-entry        — consumes a one-time nonce minted by Kanban's
+#                            GET /api/remote-workspace/session/:serverId,
+#                            via auth_request against Kanban's backend.
+#                            On success, 302s the browser straight into
+#                            Guacamole's own client view and sets a
+#                            short-lived signed-by-possession "vetted" cookie.
+#   2. /                  — the Guacamole app shell's document load. Gated
+#                            behind the vetted cookie via a second
+#                            auth_request, so a random visitor hitting the
+#                            bare subdomain gets 403 before ever seeing
+#                            Guacamole's login page.
+#   3. everything else     — proxied straight through to Guacamole,
+#                            unguarded by this app. That's fine: Guacamole's
+#                            own REST/tunnel endpoints already require a
+#                            valid Guacamole auth token for anything
+#                            sensitive; static assets aren't sensitive.
+#
+# Known limitation, by design (see guacamoleApiService.ts's doc comment):
+# the token embedded in the #/client/... redirect authenticates as Kanban's
+# shared Guacamole service account. Anyone who already has a valid link
+# could edit the connection id in the URL and reach a different connection
+# that same service account can see — this config only controls who gets a
+# link in the first place, not what a token can do once issued.
+#
+# Replace every <PLACEHOLDER> below. Requires the nginx auth_request module
+# (bundled in nearly all distro/official nginx builds — check with
+# `nginx -V 2>&1 | grep -o with-http_auth_request_module` if unsure).
+
+server {
+    listen 443 ssl;
+    server_name guac.<YOUR_DOMAIN>;
+
+    # ... your existing ssl_certificate / ssl_certificate_key / etc. ...
+
+    # Kanban's public API — reachable the same way a browser reaches it,
+    # since this deployment doesn't share a private network between the two.
+    set $kanban_api "https://<YOUR_KANBAN_API_HOST>";
+
+    # Guacamole/Tomcat upstream. Adjust the path if Guacamole isn't deployed
+    # at the webapp root (e.g. keep "/guacamole" if you didn't deploy it as
+    # ROOT.war) — must match GUACAMOLE_URL's path in kanbanserver/.env.
+    set $guacamole_upstream "http://127.0.0.1:8080/guacamole";
+
+    # ── 1. Entry point: exchange a one-time nonce for a real session ────────
+    location = /guac-entry {
+        auth_request /internal/redirect-entry;
+
+        # Pulled from the auth_request response headers (see
+        # remoteServerController.validateRedirectEntry) into variables this
+        # location can use once the subrequest returns 2xx.
+        auth_request_set $guac_token $upstream_http_x_guac_token;
+        auth_request_set $guac_client_id $upstream_http_x_guac_client_id;
+        auth_request_set $vetted_cookie $upstream_http_x_vetted_cookie;
+
+        # TTL here must match remoteRedirectStore.ts's VETTED_TTL_SECONDS (600s).
+        add_header Set-Cookie "guac_vetted=$vetted_cookie; Domain=guac.<YOUR_DOMAIN>; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Lax";
+
+        return 302 /#/client/$guac_client_id?token=$guac_token;
+    }
+
+    location = /internal/redirect-entry {
+        internal;
+        proxy_pass $kanban_api/api/remote-workspace/redirect/entry;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Internal-Secret "<NGINX_INTERNAL_SECRET_FROM_KANBAN_ENV>";
+        # $arg_rid reads ?rid=... off the ORIGINAL /guac-entry request, not
+        # this subrequest's (nonexistent) query string.
+        proxy_set_header X-Redirect-Nonce $arg_rid;
+        proxy_ssl_server_name on;
+    }
+
+    # On an invalid/expired/replayed nonce, send them back to Kanban rather
+    # than a bare nginx 403 page.
+    error_page 403 = @back_to_kanban;
+    location @back_to_kanban {
+        return 302 https://<YOUR_KANBAN_APP_HOST>/remote-workspace;
+    }
+
+    # ── 2. Gate the app-shell document load behind the vetted cookie ────────
+    location = / {
+        auth_request /internal/check-vetted;
+        proxy_pass $guacamole_upstream/;
+    }
+
+    location = /internal/check-vetted {
+        internal;
+        proxy_pass $kanban_api/api/remote-workspace/redirect/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Internal-Secret "<NGINX_INTERNAL_SECRET_FROM_KANBAN_ENV>";
+        proxy_set_header X-Vetted-Cookie $cookie_guac_vetted;
+        proxy_ssl_server_name on;
+    }
+
+    # ── 3. Everything else — proxied straight through, unguarded ────────────
+    # Static assets, Guacamole's own REST API, and the websocket-tunnel.
+    # These are already protected by Guacamole's own token requirement.
+    location / {
+        proxy_pass $guacamole_upstream/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
