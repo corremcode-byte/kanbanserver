@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { RemoteServer, UserServerPermission, User } from '../models';
+import { RemoteServer, User } from '../models';
 import RemoteSessionLog from '../models/RemoteSessionLog';
 import { guacamoleApiService } from '../services/guacamoleApiService';
 import { remoteRedirectStore } from '../lib/remoteRedirectStore';
@@ -49,7 +49,16 @@ function isTrustedNginxCaller(req: Request): boolean {
   return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
 }
 
-/** GET /api/remote-workspace/servers — servers the current user may connect to */
+/**
+ * GET /api/remote-workspace/servers — servers the current user may connect to.
+ *
+ * Authorization is the module-level `remoteWorkspace.view` permission alone —
+ * anyone with it sees and can connect to every active server, regardless of
+ * role. UserServerPermission (and its admin grant/revoke endpoints) still
+ * exist and are still populated by the admin CRUD flow, but are no longer
+ * consulted here; per-server restriction was judged more friction than value
+ * for this deployment.
+ */
 export const listServers = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     if (!(await hasModuleAccess(req.user))) {
@@ -57,17 +66,7 @@ export const listServers = async (req: AuthenticatedRequest, res: Response): Pro
       return;
     }
 
-    const userId = req.user!._id;
-    const isSuperAdmin = req.user!.role === 'superadmin';
-
-    let servers;
-    if (isSuperAdmin) {
-      servers = await RemoteServer.find({ isActive: true }).sort({ name: 1 });
-    } else {
-      const grants = await UserServerPermission.find({ userId, canConnect: true }).select('serverId');
-      const serverIds = grants.map((g) => g.serverId);
-      servers = await RemoteServer.find({ _id: { $in: serverIds }, isActive: true }).sort({ name: 1 });
-    }
+    const servers = await RemoteServer.find({ isActive: true }).sort({ name: 1 });
 
     // Reflects Guacamole/guacd service reachability, not per-host reachability
     // (that would require an actual connect attempt per server).
@@ -117,15 +116,8 @@ export const createSession = async (req: AuthenticatedRequest, res: Response): P
     return;
   }
 
-  const isSuperAdmin = req.user!.role === 'superadmin';
-  if (!isSuperAdmin) {
-    const grant = await UserServerPermission.findOne({ serverId, userId, canConnect: true });
-    if (!grant) {
-      errorResponse(res, 'You do not have access to this server', 403);
-      return;
-    }
-  }
-
+  // See listServers' doc comment — module-level view access is the only
+  // gate; per-server UserServerPermission grants are no longer enforced.
   const server = await RemoteServer.findOne({ _id: serverId, isActive: true }).select('+guacamoleConnectionId +guacamoleDataSource');
   if (!server) {
     notFoundResponse(res, 'Server not found');
