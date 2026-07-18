@@ -163,16 +163,6 @@ export const remoteSessionLimiter = createRateLimiter(
   'Too many remote session requests, please slow down.'
 );
 
-// nginx auth_request calls for the Guacamole redirect gate — the caller here
-// is nginx itself (all traffic for every user arrives from its IP), not an
-// individual browser, so this is a coarse DoS backstop behind the shared
-// secret header, not the primary defense.
-export const remoteRedirectValidationLimiter = createRateLimiter(
-  60 * 1000,
-  120,
-  'Too many redirect validation requests.'
-);
-
 export default {
   generalLimiter,
   authLimiter,
@@ -183,6 +173,5 @@ export default {
   searchLimiter,
   exportLimiter,
   createRateLimiter,
-  remoteSessionLimiter,
-  remoteRedirectValidationLimiter
+  remoteSessionLimiter
 };
