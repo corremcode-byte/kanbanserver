@@ -11,9 +11,8 @@ export interface IAuditLog extends Document {
           'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
           'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
           'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
-          'remote_server_created' | 'remote_server_updated' | 'remote_server_deleted' |
-          'remote_server_permission_granted' | 'remote_server_permission_revoked';
-  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user' | 'remote_server';
+          'remote_workspace_accessed';
+  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user';
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
     taskId?: string;
@@ -49,7 +48,7 @@ interface IAuditLogModel extends Model<IAuditLog> {
     action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
             'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
             'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
-            'biometric_registered';
+            'biometric_registered' | 'remote_workspace_accessed';
     metadata?: IAuditLog['metadata'];
   }): Promise<IAuditLog>;
 
@@ -117,11 +116,7 @@ const AuditLogSchema = new Schema<IAuditLog>({
       'user_sensitive_profile_updated',
       'user_sensitive_profile_updated_by_admin',
       'user_passkey_updated_by_admin',
-      'remote_server_created',
-      'remote_server_updated',
-      'remote_server_deleted',
-      'remote_server_permission_granted',
-      'remote_server_permission_revoked'
+      'remote_workspace_accessed'
     ],
     required: true,
     index: true

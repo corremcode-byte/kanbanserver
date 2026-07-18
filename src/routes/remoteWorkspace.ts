@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import { authenticate, requireAdmin } from '../middleware/auth';
-import { validate, validateObjectId, remoteServerSchemas, remoteServerPermissionSchemas } from '../middleware/validation';
+import { authenticate } from '../middleware/auth';
 import { remoteSessionLimiter, remoteRedirectValidationLimiter } from '../middleware/rateLimiter';
 import * as remoteServerController from '../controllers/remoteServerController';
-import * as remoteServerAdminController from '../controllers/remoteServerAdminController';
 
 const router = Router();
 
@@ -16,26 +14,13 @@ router.get('/redirect/entry', remoteRedirectValidationLimiter, remoteServerContr
 router.get('/redirect/check', remoteRedirectValidationLimiter, remoteServerController.checkRedirectVetted);
 
 // ── Everything below requires Kanban authentication ──────────────────────────
-// Access to the module itself is further restricted inside the controllers
-// via the remoteWorkspace module permission and, for individual servers,
-// UserServerPermission grants.
+// Access to the module itself is gated by the remoteWorkspace module
+// permission, checked inside the controller. Once past the redirect gate,
+// Guacamole's own login page and permission model take over completely —
+// there is no per-connection concept on Kanban's side anymore.
 router.use(authenticate);
 
-// ── End-user flow ────────────────────────────────────────────────────────────
-router.get('/servers', remoteServerController.listServers);
-router.get('/session/:serverId', validateObjectId('serverId'), remoteSessionLimiter, remoteServerController.createSession);
-router.delete('/session', remoteServerController.endSession);
-
-// ── Admin flow — RemoteServer CRUD ───────────────────────────────────────────
-router.get('/admin/servers', requireAdmin, remoteServerAdminController.listAllServers);
-router.post('/admin/servers', requireAdmin, validate(remoteServerSchemas.create), remoteServerAdminController.createServer);
-router.get('/admin/servers/:serverId', requireAdmin, validateObjectId('serverId'), remoteServerAdminController.getServer);
-router.put('/admin/servers/:serverId', requireAdmin, validateObjectId('serverId'), validate(remoteServerSchemas.update), remoteServerAdminController.updateServer);
-router.delete('/admin/servers/:serverId', requireAdmin, validateObjectId('serverId'), remoteServerAdminController.deleteServer);
-router.get('/admin/servers/:serverId/permissions', requireAdmin, validateObjectId('serverId'), remoteServerAdminController.listServerPermissions);
-
-// ── Admin flow — grant/revoke per-user server access ────────────────────────
-router.post('/admin/permissions', requireAdmin, validate(remoteServerPermissionSchemas.grant), remoteServerAdminController.grantPermission);
-router.delete('/admin/permissions/:serverId/:userId', requireAdmin, remoteServerAdminController.revokePermission);
+router.get('/status', remoteServerController.getStatus);
+router.get('/session', remoteSessionLimiter, remoteServerController.createSession);
 
 export default router;

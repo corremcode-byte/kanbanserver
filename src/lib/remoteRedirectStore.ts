@@ -2,23 +2,24 @@ import Redis from 'ioredis';
 import crypto from 'crypto';
 
 /**
- * Backs the browser-redirect flow for the Remote Server Workspace: the
- * browser is sent directly to the Guacamole subdomain (nginx-fronted,
- * outside this app), so the only leverage this backend has over who reaches
- * Guacamole is a short-lived, server-side-validated handoff.
+ * Backs the browser-redirect flow for the Remote Server Workspace. Kanban
+ * doesn't manage Guacamole connections or credentials at all — its only
+ * leverage is deciding *whether* a browser gets sent to the Guacamole
+ * subdomain in the first place. Once there, Guacamole's own login page and
+ * connection list take over entirely.
  *
  * Two entry types, both validated by nginx via auth_request against this
  * app (see remoteServerController's redirect/entry and redirect/check
  * handlers):
  *
- *  - Nonce: single-use, ~30s TTL. Minted by GET /session/:serverId once a
- *    user's per-server permission has been checked; consumed exactly once
- *    when nginx's /guac-entry location validates it, in exchange for the
- *    real (shared-service-account) Guacamole token + client id.
- *  - Vetted cookie: multi-use (NOT deleted on check), ~10 min TTL. Issued
- *    at the same time as the nonce is consumed, so nginx can gate the
- *    Guacamole app-shell's document load ("/") for the lifetime of the
- *    cookie without another full authorization round-trip per asset.
+ *  - Nonce: single-use, ~30s TTL. Minted by GET /session once a user's
+ *    module permission has been checked; consumed exactly once when
+ *    nginx's /guac-entry location validates it, in exchange for the
+ *    "vetted" cookie below.
+ *  - Vetted cookie: multi-use (NOT deleted on check), ~10 min TTL. Lets
+ *    nginx gate the Guacamole app-shell's document load ("/") for the
+ *    lifetime of the cookie without another full authorization round-trip
+ *    per asset.
  *
  * Mirrors the Redis-with-in-memory-fallback pattern used by dynamicRouteStore.
  */
@@ -28,15 +29,10 @@ const VETTED_TTL_SECONDS = 10 * 60;
 
 export interface RedirectNonceEntry {
   userId: string;
-  serverId: string;
-  sessionLogId: string;
-  guacToken: string;
-  clientId: string;
 }
 
 export interface VettedCookieEntry {
   userId: string;
-  serverId: string;
 }
 
 function generateId(): string {

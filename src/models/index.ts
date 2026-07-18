@@ -7,8 +7,5 @@ export { default as ProjectPermission, IProjectPermission } from './ProjectPermi
 export { default as AuditLog, IAuditLog } from './AuditLog';
 export { Notification, INotification } from './Notification';
 export { default as Note, INote } from './Note';
-export { default as RemoteServer, IRemoteServer, RemoteServerProtocol } from './RemoteServer';
-export { default as UserServerPermission, IUserServerPermission } from './UserServerPermission';
-export { default as RemoteSessionLog, IRemoteSessionLog, RemoteSessionLogStatus } from './RemoteSessionLog';
 
 export { Types, Document } from 'mongoose';

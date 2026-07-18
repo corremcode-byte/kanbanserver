@@ -1,11 +1,10 @@
 import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { RemoteServer, User } from '../models';
-import RemoteSessionLog from '../models/RemoteSessionLog';
+import { User, AuditLog } from '../models';
 import { guacamoleApiService } from '../services/guacamoleApiService';
 import { remoteRedirectStore } from '../lib/remoteRedirectStore';
-import { successResponse, errorResponse, notFoundResponse, internalServerErrorResponse } from '../utils/responses';
+import { successResponse, errorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 
 // req.user (populated by the `authenticate` middleware) only carries role/identity
@@ -18,16 +17,6 @@ async function hasModuleAccess(user: AuthenticatedRequest['user']): Promise<bool
 
   const dbUser = await User.findById(user._id).select('permissions.modules.remoteWorkspace');
   return dbUser?.permissions?.modules?.remoteWorkspace?.view === true;
-}
-
-function logConnectionsEnabled(): boolean {
-  return process.env.LOG_CONNECTIONS !== 'false';
-}
-
-function clientIpOf(req: AuthenticatedRequest): string | undefined {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) return forwarded.split(',')[0].trim();
-  return req.socket?.remoteAddress;
 }
 
 function getGuacamolePublicUrl(): string {
@@ -49,58 +38,29 @@ function isTrustedNginxCaller(req: Request): boolean {
   return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
 }
 
-/**
- * GET /api/remote-workspace/servers — servers the current user may connect to.
- *
- * Authorization is the module-level `remoteWorkspace.view` permission alone —
- * anyone with it sees and can connect to every active server, regardless of
- * role. UserServerPermission (and its admin grant/revoke endpoints) still
- * exist and are still populated by the admin CRUD flow, but are no longer
- * consulted here; per-server restriction was judged more friction than value
- * for this deployment.
- */
-export const listServers = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+/** GET /api/remote-workspace/status — is the Guacamole webapp reachable at all */
+export const getStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     if (!(await hasModuleAccess(req.user))) {
       errorResponse(res, 'You do not have access to the remote workspace', 403);
       return;
     }
 
-    const servers = await RemoteServer.find({ isActive: true }).sort({ name: 1 });
-
-    // Reflects Guacamole/guacd service reachability, not per-host reachability
-    // (that would require an actual connect attempt per server).
     const online = await guacamoleApiService.isReachable();
-
-    successResponse(res, 'Servers retrieved successfully', {
-      servers: servers.map((s) => ({
-        id: s._id.toString(),
-        name: s.name,
-        description: s.description || '',
-        protocol: s.protocol,
-        status: online ? 'online' : 'offline'
-      }))
-    });
+    successResponse(res, 'Status retrieved successfully', { status: online ? 'online' : 'offline' });
   } catch (error) {
-    logger.error('Error in listServers:', error);
-    internalServerErrorResponse(res, 'Failed to retrieve servers');
+    logger.error('Error in getStatus:', error);
+    errorResponse(res, 'Failed to retrieve status', 500);
   }
 };
 
 /**
- * GET /api/remote-workspace/session/:serverId
- * Authenticates with Guacamole using the backend service account and mints a
- * short-lived, single-use redirect nonce. The browser is handed a URL on the
- * Guacamole subdomain's gated entry point — never the real Guacamole token
- * or client id directly (those only ever travel server-to-server, between
- * this handler, the redirect nonce store, and nginx's auth_request call to
- * validateRedirectEntry below).
- *
- * Known limitation: once the browser leaves for the Guacamole subdomain,
- * this app has no way to detect disconnects — there's no embedded page to
- * hook into anymore. RemoteSessionLog records the request but "disconnected"
- * now depends on the user (or a future admin action) calling
- * DELETE /session explicitly, or on Guacamole's own idle timeout.
+ * GET /api/remote-workspace/session
+ * Mints a short-lived, single-use redirect nonce and hands the browser a URL
+ * on the Guacamole subdomain's gated entry point. Kanban never touches
+ * Guacamole credentials, connections, or tokens here — it only decides
+ * whether this user is allowed to be sent there at all. Once through the
+ * gate, Guacamole's own login page and connection list take over completely.
  */
 export const createSession = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userId = req.user?._id;
@@ -109,98 +69,25 @@ export const createSession = async (req: AuthenticatedRequest, res: Response): P
     return;
   }
 
-  const { serverId } = req.params;
-
   if (!(await hasModuleAccess(req.user))) {
     errorResponse(res, 'You do not have access to the remote workspace', 403);
     return;
   }
 
-  // See listServers' doc comment — module-level view access is the only
-  // gate; per-server UserServerPermission grants are no longer enforced.
-  const server = await RemoteServer.findOne({ _id: serverId, isActive: true }).select('+guacamoleConnectionId +guacamoleDataSource');
-  if (!server) {
-    notFoundResponse(res, 'Server not found');
-    return;
-  }
-  if (!server.guacamoleConnectionId || !server.guacamoleDataSource) {
-    errorResponse(res, 'This server is not configured correctly. Please contact an administrator.', 502);
-    return;
-  }
-
-  let sessionLogId: string | undefined;
-
   try {
-    if (logConnectionsEnabled()) {
-      const log = await RemoteSessionLog.create({
-        serverId,
-        userId,
-        loginTime: new Date(),
-        status: 'opened',
-        clientIp: clientIpOf(req),
-        browser: req.headers['user-agent']?.toString().slice(0, 300)
-      });
-      sessionLogId = log._id.toString();
-    }
-
-    const { authToken } = await guacamoleApiService.authenticate();
-    const clientId = guacamoleApiService.buildClientId(server.guacamoleConnectionId, server.guacamoleDataSource);
-
-    const nonce = await remoteRedirectStore.createNonce({
-      userId,
-      serverId: serverId,
-      sessionLogId: sessionLogId || '',
-      guacToken: authToken,
-      clientId
-    });
-
+    const nonce = await remoteRedirectStore.createNonce({ userId });
     const redirectUrl = `${getGuacamolePublicUrl()}/guac-entry?rid=${encodeURIComponent(nonce)}`;
+
+    try {
+      await AuditLog.logSystemEvent({ userId, action: 'remote_workspace_accessed' });
+    } catch (auditError) {
+      logger.error('Failed to log remote_workspace_accessed event:', auditError);
+    }
 
     successResponse(res, 'Redirect ready', { redirectUrl });
   } catch (error) {
-    logger.error('Error creating remote server session:', error);
-
-    if (sessionLogId && logConnectionsEnabled()) {
-      await RemoteSessionLog.findByIdAndUpdate(sessionLogId, {
-        status: 'auth_failed',
-        logoutTime: new Date()
-      }).catch((): void => undefined);
-    }
-
+    logger.error('Error creating remote workspace redirect:', error);
     errorResponse(res, 'Remote workspace is currently unavailable. Please try again later.', 502);
-  }
-};
-
-/**
- * DELETE /api/remote-workspace/session
- * Best-effort, user-initiated disconnect signal — with the browser redirected
- * to Guacamole's own tab, there's no automatic hook for this anymore, so it
- * only fires if the user comes back to Kanban and explicitly ends the
- * session (e.g. a "Done" button), or a future scheduled job reaps stale
- * 'opened' logs past some max age.
- */
-export const endSession = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const userId = req.user?._id;
-  if (!userId) {
-    errorResponse(res, 'Authentication required', 401);
-    return;
-  }
-
-  try {
-    if (logConnectionsEnabled()) {
-      const log = await RemoteSessionLog.findActiveForUser(userId);
-      if (log) {
-        log.status = 'disconnected';
-        log.logoutTime = new Date();
-        log.sessionDuration = Math.max(0, Math.round((log.logoutTime.getTime() - log.loginTime.getTime()) / 1000));
-        await log.save();
-      }
-    }
-
-    successResponse(res, 'Disconnected');
-  } catch (error) {
-    logger.error('Error ending remote server session:', error);
-    internalServerErrorResponse(res, 'Failed to log disconnect');
   }
 };
 
@@ -208,10 +95,10 @@ export const endSession = async (req: AuthenticatedRequest, res: Response): Prom
  * GET /api/remote-workspace/redirect/entry — called by nginx's auth_request
  * for the Guacamole subdomain's /guac-entry location, never directly by a
  * browser. Consumes the single-use nonce minted by createSession and, on
- * success, hands nginx everything it needs (via response headers, which
- * auth_request_set can read) to 302 the browser straight into the real
- * Guacamole client view and to issue the short-lived "vetted" cookie that
- * gates the app-shell's document load (see checkRedirectVetted).
+ * success, hands nginx the "vetted" cookie value (via a response header,
+ * which auth_request_set can read) that gates the app-shell's document load
+ * (see checkRedirectVetted). nginx then redirects the browser to Guacamole's
+ * own bare login page.
  */
 export const validateRedirectEntry = async (req: Request, res: Response): Promise<void> => {
   if (!isTrustedNginxCaller(req)) {
@@ -232,13 +119,8 @@ export const validateRedirectEntry = async (req: Request, res: Response): Promis
       return;
     }
 
-    const vettedCookie = await remoteRedirectStore.createVettedCookie({
-      userId: entry.userId,
-      serverId: entry.serverId
-    });
+    const vettedCookie = await remoteRedirectStore.createVettedCookie({ userId: entry.userId });
 
-    res.set('X-Guac-Token', entry.guacToken);
-    res.set('X-Guac-Client-Id', entry.clientId);
     res.set('X-Vetted-Cookie', vettedCookie);
     res.status(200).end();
   } catch (error) {
