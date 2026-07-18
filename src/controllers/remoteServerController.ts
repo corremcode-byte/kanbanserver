@@ -102,12 +102,14 @@ export const createSession = async (req: AuthenticatedRequest, res: Response): P
  */
 export const validateRedirectEntry = async (req: Request, res: Response): Promise<void> => {
   if (!isTrustedNginxCaller(req)) {
+    logger.warn('Rejected redirect/entry: caller failed X-Internal-Secret check (missing/mismatched NGINX_INTERNAL_SECRET)');
     res.status(403).end();
     return;
   }
 
   const nonce = req.headers['x-redirect-nonce'];
   if (typeof nonce !== 'string' || !nonce) {
+    logger.warn('Rejected redirect/entry: no X-Redirect-Nonce header on the request (check nginx sets it from $arg_rid)');
     res.status(403).end();
     return;
   }
@@ -115,6 +117,7 @@ export const validateRedirectEntry = async (req: Request, res: Response): Promis
   try {
     const entry = await remoteRedirectStore.consumeNonce(nonce);
     if (!entry) {
+      logger.warn(`Rejected redirect/entry: nonce not found/expired/already used (nonce=${nonce.slice(0, 8)}...)`);
       res.status(403).end();
       return;
     }
@@ -138,18 +141,23 @@ export const validateRedirectEntry = async (req: Request, res: Response): Promis
  */
 export const checkRedirectVetted = async (req: Request, res: Response): Promise<void> => {
   if (!isTrustedNginxCaller(req)) {
+    logger.warn('Rejected redirect/check: caller failed X-Internal-Secret check (missing/mismatched NGINX_INTERNAL_SECRET)');
     res.status(403).end();
     return;
   }
 
   const cookie = req.headers['x-vetted-cookie'];
   if (typeof cookie !== 'string' || !cookie) {
+    logger.warn('Rejected redirect/check: no X-Vetted-Cookie header on the request (check nginx sets it from $cookie_guac_vetted)');
     res.status(403).end();
     return;
   }
 
   try {
     const entry = await remoteRedirectStore.checkVettedCookie(cookie);
+    if (!entry) {
+      logger.warn(`Rejected redirect/check: vetted cookie not found/expired (cookie=${cookie.slice(0, 8)}...)`);
+    }
     res.status(entry ? 200 : 403).end();
   } catch (error) {
     logger.error('Error checking remote workspace vetted cookie:', error);
