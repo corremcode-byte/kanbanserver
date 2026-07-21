@@ -120,6 +120,11 @@ export interface IUser extends Document {
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
+      remoteWorkspace?: {
+        view?: boolean;
+        edit?: boolean;
+        [key: string]: boolean | undefined;
+      };
     };
   };
   settings?: {
@@ -344,6 +349,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
         default: { view: false, edit: false } 
       },
       auditLog: {
+        type: Schema.Types.Mixed,
+        default: { view: false, edit: false }
+      },
+      remoteWorkspace: {
         type: Schema.Types.Mixed,
         default: { view: false, edit: false }
       }

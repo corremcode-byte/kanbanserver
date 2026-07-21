@@ -155,6 +155,14 @@ export const createRateLimiter = (
   });
 };
 
+// Remote server session-creation limiter — creating a session opens a live
+// remote-desktop connection, so it gets its own tighter limit.
+export const remoteSessionLimiter = createRateLimiter(
+  60 * 1000,
+  10,
+  'Too many remote session requests, please slow down.'
+);
+
 export default {
   generalLimiter,
   authLimiter,
@@ -164,5 +172,6 @@ export default {
   emailVerificationLimiter,
   searchLimiter,
   exportLimiter,
-  createRateLimiter
+  createRateLimiter,
+  remoteSessionLimiter
 };

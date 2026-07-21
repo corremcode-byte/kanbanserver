@@ -20,6 +20,7 @@ import notesRoutes from './notes';
 import supportRoutes from './support';
 import cronRoutes from './cron';
 import systemSettingsRoutes from './systemSettings';
+import remoteWorkspaceRoutes from './remoteWorkspace';
 
 const router = Router();
 
@@ -44,6 +45,7 @@ router.use('/support', supportRoutes);
 router.use('/cron', cronRoutes);
 router.use('/routes', dynamicRouteRoutes);
 router.use('/system-settings', systemSettingsRoutes);
+router.use('/remote-workspace', remoteWorkspaceRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {
