@@ -155,12 +155,12 @@ export const createRateLimiter = (
   });
 };
 
-// Remote server session-creation limiter — creating a session opens a live
-// remote-desktop connection, so it gets its own tighter limit.
-export const remoteSessionLimiter = createRateLimiter(
+// Remote workspace connect-file limiter — generating a .rdp file is cheap,
+// but it's still tied to a real network target, so it gets its own tighter limit.
+export const remoteConnectLimiter = createRateLimiter(
   60 * 1000,
   10,
-  'Too many remote session requests, please slow down.'
+  'Too many remote connection requests, please slow down.'
 );
 
 export default {
@@ -173,5 +173,5 @@ export default {
   searchLimiter,
   exportLimiter,
   createRateLimiter,
-  remoteSessionLimiter
+  remoteConnectLimiter
 };
