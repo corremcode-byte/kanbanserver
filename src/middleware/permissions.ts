@@ -391,6 +391,13 @@ export const checkCanCreateProject = async (req: AuthenticatedRequest, res: Resp
 
     // For regular (non-personal) projects, check canCreateProjects permission
     if (user && user.permissions && user.permissions.canCreateProjects === true) {
+      // If members are being added during creation, the user also needs the
+      // "Add Members" permission. Without it, the members section shouldn't be
+      // usable client-side, but enforce it here too in case it's sent directly.
+      const members = Array.isArray(req.body.members) ? req.body.members : [];
+      if (members.length > 0 && user.permissions?.modules?.projects?.addMembers !== true) {
+        return errorResponse(res, 'You don\'t have permission to add members to a project. This permission must be granted in your user permissions.', 403);
+      }
       return next();
     }
 
