@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AuditLog, Project, Task, User } from '../models';
+import { AuditLog, Project, Task } from '../models';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { decryptField, decryptProjectFields } from '../utils/fieldEncryption';

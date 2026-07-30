@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import upload, { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware } from '../middleware/upload';
+import { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware } from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,

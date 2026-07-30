@@ -5,7 +5,6 @@ import { ProjectPermission } from '../models/ProjectPermission';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { Types } from 'mongoose';
-import winston from 'winston';
 import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';

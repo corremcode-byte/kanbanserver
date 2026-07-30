@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { AuditLog } from '../models/AuditLog';
 import { User } from '../models/User';
 import { decryptProjectFields } from '../utils/fieldEncryption';

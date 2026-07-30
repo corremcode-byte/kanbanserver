@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { dynamicRouteStore } from '../lib/dynamicRouteStore';
 import {
   login,
-  createUser,
   resetPassword,
   getCurrentUser,
   getAllUsers,

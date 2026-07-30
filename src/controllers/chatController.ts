@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { ChatGroup } from '../models/ChatGroup';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
