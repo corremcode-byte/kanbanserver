@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Task, Project } from '../models';
+import { Task, Project, User } from '../models';
 import { AuditLog, IAuditLog } from '../models/AuditLog';
 import { ProjectPermission } from '../models/ProjectPermission';
 import { successResponse, errorResponse, internalServerErrorResponse, notFoundResponse } from '../utils/responses';
@@ -323,6 +323,14 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       return errorResponse(res, 'Due date is required', 400);
     }
 
+    // Assigning a task to someone requires the "Assignee" task permission
+    if ((Array.isArray(assignees) && assignees.length > 0) || assignedTo) {
+      const currentUser = await User.findById(req.user._id);
+      if (currentUser?.permissions?.modules?.myTasks?.assignee !== true) {
+        return errorResponse(res, 'You don\'t have permission to assign tasks. This permission must be granted in your user permissions.', 403);
+      }
+    }
+
     let project = null;
     let validatedListId = listId || status || 'todo';
     let allValidUserIds: string[] = [];
@@ -553,6 +561,29 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     const existingTask = await Task.findOne({ _id: id, isDeleted: { $ne: true } });
     if (!existingTask) {
       return notFoundResponse(res, 'Task not found');
+    }
+
+    // Assigning/reassigning a task requires the "Assignee" task permission.
+    // Resubmitting the same assignees the task already has (e.g. saving an
+    // unrelated field while the Assignee UI is hidden) is not a modification attempt.
+    if (updates.assignees !== undefined || updates.assignedTo !== undefined) {
+      const existingAssigneeIds = Array.isArray(existingTask.assignees) && existingTask.assignees.length > 0
+        ? existingTask.assignees.map((a: any) => a.toString())
+        : (existingTask.assignedTo ? [existingTask.assignedTo.toString()] : []);
+
+      const incomingAssigneeIds = Array.isArray(updates.assignees)
+        ? updates.assignees.map((a: any) => String(a))
+        : (updates.assignedTo ? [String(updates.assignedTo)] : []);
+
+      const isUnchanged = existingAssigneeIds.length === incomingAssigneeIds.length &&
+        existingAssigneeIds.every((assigneeId: string) => incomingAssigneeIds.includes(assigneeId));
+
+      if (!isUnchanged) {
+        const currentUser = await User.findById(req.user._id);
+        if (currentUser?.permissions?.modules?.myTasks?.assignee !== true) {
+          return errorResponse(res, 'You don\'t have permission to assign tasks. This permission must be granted in your user permissions.', 403);
+        }
+      }
     }
 
     // Capture the plaintext title/description before encrypting them for storage,
