@@ -33,6 +33,13 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(403).json({ message: 'You do not have permission to create chat groups' });
     }
 
+    // Creating a group requires being able to add members to it — without this
+    // permission the user cannot create a group at all (not even an empty one)
+    const hasAddGroupMembersPermission = user?.permissions?.modules?.chat?.addGroupMembers === true;
+    if (!hasAddGroupMembersPermission) {
+      return res.status(403).json({ message: 'You do not have permission to add group members' });
+    }
+
     // Ensure creator is included in members list
     const allMemberIds = [...new Set([req.user._id.toString(), ...memberIds])];
 
@@ -1491,6 +1498,44 @@ export const clearChat = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     console.error('Error clearing chat:', error);
     return res.status(500).json({ message: 'Failed to clear chat' });
+  }
+};
+
+// ==========================================
+// USERS FOR STARTING A PERSONAL CHAT
+// ==========================================
+
+// Get the list of users eligible to start a personal chat with (Start Personal Chat dialog).
+// Gated behind the Chat "See Chat Users" permission — callers without it get a 403.
+export const getUsersForPersonalChat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?._id;
+    if (!currentUserId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return res.status(404).json({ message: 'Current user not found' });
+    }
+
+    const hasSeeUsersPermission = currentUser.permissions?.modules?.chat?.seeUsers === true;
+    if (!hasSeeUsersPermission) {
+      return res.status(403).json({
+        message: 'You do not have permission to view users for starting a personal chat.'
+      });
+    }
+
+    const users = await User.find({ _id: { $ne: currentUserId }, isActive: true })
+      .select('_id displayName email photoURL')
+      .sort({ createdAt: -1 });
+
+    const usersWithAbsoluteUrls = convertPhotoURLsToAbsolute(users.map(u => u.toObject()), req);
+
+    return res.status(200).json({ success: true, data: usersWithAbsoluteUrls });
+  } catch (error) {
+    console.error('Error getting users for personal chat:', error);
+    return res.status(500).json({ message: 'Failed to get users' });
   }
 };
 

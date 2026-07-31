@@ -95,9 +95,11 @@ export interface IUser extends Document {
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
-      chat?: { 
-        view?: boolean; 
+      chat?: {
+        view?: boolean;
         edit?: boolean;
+        seeUsers?: boolean;
+        addGroupMembers?: boolean;
         [key: string]: boolean | undefined;
       };
       profile?: { 
