@@ -29,6 +29,7 @@ import {
   createOrGetPersonalChat,
   getOrCreateSelfChatGroup,
   getPlatformUsersForChat,
+  getUsersForPersonalChat,
   superAdminGetAllUsers,
   superAdminGetUserChatGroups,
   superAdminGetGroupMessages,
@@ -104,6 +105,9 @@ router.get('/superadmin/groups/:groupId/messages', requireSuperAdmin, superAdmin
 
 // Platform users with chat permission (for forward modal)
 router.get('/platform-users', getPlatformUsersForChat);
+
+// Users eligible to start a personal chat with (Start Personal Chat dialog) — requires Chat "See Chat Users" permission
+router.get('/personal-chat-users', getUsersForPersonalChat);
 
 // Chat E2E key distribution — public keys for a list of users (used before a
 // group exists, at creation time)
