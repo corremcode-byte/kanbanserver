@@ -21,6 +21,7 @@ import supportRoutes from './support';
 import cronRoutes from './cron';
 import systemSettingsRoutes from './systemSettings';
 import remoteWorkspaceRoutes from './remoteWorkspace';
+import dataDeletionRoutes from './dataDeletion';
 
 const router = Router();
 
@@ -46,6 +47,7 @@ router.use('/cron', cronRoutes);
 router.use('/routes', dynamicRouteRoutes);
 router.use('/system-settings', systemSettingsRoutes);
 router.use('/remote-workspace', remoteWorkspaceRoutes);
+router.use('/data-deletion', dataDeletionRoutes);
 
 // Development-only routes (remove in production)
 if (process.env.NODE_ENV !== 'production') {
