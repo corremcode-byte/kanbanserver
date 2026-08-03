@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
 import { encryptField, decryptField, decryptProjectFields } from '../utils/fieldEncryption';
+import { compressUploadedImage } from '../utils/imageCompression';
 
 /**
  * Get the base URL for file serving
@@ -395,6 +396,10 @@ export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Respo
     logger.info(`✅ Chat group found: ${chatGroup.name}`);
 
     const file = req.file;
+
+    // For images, re-encode to a resized/compressed WebP in place — only the
+    // reduced-size copy is stored, the pre-compression original is deleted.
+    await compressUploadedImage(file);
 
     // File is already saved by multer to disk
     // Construct the public URL

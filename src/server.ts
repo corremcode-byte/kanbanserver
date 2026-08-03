@@ -79,12 +79,12 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from uploads directory with no-cache headers
+// Serve static files from uploads directory. Filenames are content-unique
+// (timestamp+uuid, and now a fresh name on every re-compression), so it's
+// safe to cache them forever — this avoids re-downloading the same chat
+// image/attachment on every view.
 app.use('/uploads', (req, res, next) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.setHeader('Surrogate-Control', 'no-store');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   // Tell browsers to display the file inline instead of downloading it
   res.setHeader('Content-Disposition', 'inline');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');

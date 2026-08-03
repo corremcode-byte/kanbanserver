@@ -184,20 +184,22 @@ export function decryptSupportTicketFields<T extends SupportTicketLikeForDecrypt
 
 interface MessageLikeForDecryption {
   _id: unknown;
-  attachments?: Array<{ fileUrl?: string }>;
+  attachments?: Array<{ fileUrl?: string; thumbnailUrl?: string }>;
   // A populated reply-to message is itself a full message with its own id — its
   // attachments must be decrypted keyed by ITS OWN id, not the current message's.
   replyTo?: MessageLikeForDecryption | unknown;
 }
 
-/** Decrypts every attachment's fileUrl on a chat-message-like object, in place,
- *  keyed by the message's own id. If `replyTo` is populated (a full message
- *  sub-document, not just an id), it's recursively decrypted keyed by its own id. */
+/** Decrypts every attachment's fileUrl/thumbnailUrl on a chat-message-like object,
+ *  in place, keyed by the message's own id. If `replyTo` is populated (a full
+ *  message sub-document, not just an id), it's recursively decrypted keyed by its
+ *  own id. */
 export function decryptMessageFields<T extends MessageLikeForDecryption>(message: T): T {
   const messageId = String(message._id);
   if (Array.isArray(message.attachments)) {
     message.attachments.forEach((a) => {
       if (a.fileUrl) a.fileUrl = decryptField(a.fileUrl, messageId);
+      if (a.thumbnailUrl) a.thumbnailUrl = decryptField(a.thumbnailUrl, messageId);
     });
   }
   const reply = message.replyTo as MessageLikeForDecryption | null | undefined;

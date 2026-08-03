@@ -22,6 +22,9 @@ export interface IMessage extends Document {
     fileSize: number;
     duration?: number;
     mimeType?: string;
+    // Compressed WebP copy for fast in-chat display, when the attachment is an
+    // image. fileUrl always stays the untouched original (used for Open/Download).
+    thumbnailUrl?: string;
   }[];
   replyTo?: mongoose.Types.ObjectId;
   readBy: {
@@ -70,7 +73,8 @@ const messageSchema = new Schema<IMessage>(
       fileType: String,
       fileSize: Number,
       duration: Number,
-      mimeType: String
+      mimeType: String,
+      thumbnailUrl: String
     }],
     replyTo: {
       type: Schema.Types.ObjectId,

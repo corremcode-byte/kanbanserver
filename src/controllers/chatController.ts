@@ -204,13 +204,26 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
   try {
     const userId = req.user?._id;
 
-    const chatGroups = await ChatGroup.find({
+    const rawChatGroups = await ChatGroup.find({
       members: userId,
       isActive: true
     })
       .populate('members', 'displayName email photoURL isActive')
       .populate('createdBy', 'displayName email')
       .sort({ updatedAt: -1 });
+
+    // Sorting by a field (updatedAt) that can be concurrently mutated by other
+    // requests (new message, pin/mute toggle, etc.) can make MongoDB's cursor
+    // re-visit a document whose sort key moved mid-scan, returning it twice in
+    // one response — dedupe defensively so that never reaches the client as a
+    // duplicate chat list entry.
+    const seenGroupIds = new Set<string>();
+    const chatGroups = rawChatGroups.filter((group) => {
+      const id = group._id.toString();
+      if (seenGroupIds.has(id)) return false;
+      seenGroupIds.add(id);
+      return true;
+    });
 
     // For each group, get unread count and last message
     // Get the user's per-chat lock credential method (stored once on User, not per-chat)
@@ -444,6 +457,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     if (Array.isArray(message.attachments)) {
       message.attachments.forEach((a: any) => {
         if (a.fileUrl) a.fileUrl = encryptField(a.fileUrl, messageIdStr);
+        if (a.thumbnailUrl) a.thumbnailUrl = encryptField(a.thumbnailUrl, messageIdStr);
       });
     }
     await message.save();
