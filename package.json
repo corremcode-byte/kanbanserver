@@ -38,6 +38,7 @@
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.10",
     "sanitize-html": "^2.17.0",
+    "sharp": "^0.35.3",
     "socket.io": "^4.7.2",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
