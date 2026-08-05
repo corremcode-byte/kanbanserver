@@ -55,7 +55,7 @@ class PushNotificationService {
     try {
       const pushPayload = JSON.stringify(payload);
 
-      await webpush.sendNotification(subscription, pushPayload);
+      await webpush.sendNotification(subscription, pushPayload, { urgency: 'high' });
 
       logger.info('Push notification sent successfully', {
         endpoint: subscription.endpoint.substring(0, 50) + '...'

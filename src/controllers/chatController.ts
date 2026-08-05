@@ -13,6 +13,7 @@ import { encryptField, decryptMessageFields } from '../utils/fieldEncryption';
 import nacl from 'tweetnacl';
 import { getOrCreateAdminRecoveryKeyPair } from '../utils/adminRecoveryKey';
 import { validateAndBuildKeyEpoch } from '../utils/groupKeyValidation';
+import { AuditLog } from '../models/AuditLog';
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
@@ -115,6 +116,22 @@ export const createChatGroup = async (req: AuthenticatedRequest, res: Response) 
     // Populate members
     await chatGroup.populate('members', 'displayName email photoURL isActive');
     await chatGroup.populate('createdBy', 'displayName email');
+
+    try {
+      await AuditLog.logAction({
+        userId,
+        action: 'chat_group_created',
+        entityType: 'chat_group',
+        entityId: (chatGroup._id as mongoose.Types.ObjectId).toString(),
+        metadata: {
+          groupName: chatGroup.name,
+          memberCount: allMemberIds.length,
+          isPersonalChat,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to create audit log for chat group creation:', error);
+    }
 
     // Notify all members via Socket.IO (including creator)
     allMemberIds.forEach((memberId: string) => {
@@ -461,6 +478,23 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
     await message.save();
+
+    try {
+      await AuditLog.logAction({
+        userId,
+        action: 'message_sent',
+        entityType: 'message',
+        entityId: messageIdStr,
+        metadata: {
+          groupId: chatGroup._id.toString(),
+          groupName: chatGroup.name,
+          hasAttachment: Array.isArray(message.attachments) && message.attachments.length > 0,
+          isReply: !!replyTo,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to create audit log for message:', error);
+    }
 
     // Populate sender info and replyTo
     await message.populate('senderId', 'displayName email photoURL');
@@ -1255,6 +1289,20 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
     // Soft delete
     chatGroup.isActive = false;
     await chatGroup.save();
+
+    try {
+      await AuditLog.logAction({
+        userId,
+        action: 'chat_group_deleted',
+        entityType: 'chat_group',
+        entityId: (chatGroup._id as mongoose.Types.ObjectId).toString(),
+        metadata: {
+          groupName: chatGroup.name,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to create audit log for chat group deletion:', error);
+    }
 
     // Notify all members
     chatGroup.members.forEach((memberId) => {

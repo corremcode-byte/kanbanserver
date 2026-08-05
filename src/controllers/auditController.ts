@@ -24,6 +24,8 @@ const actionToEventMap: Record<string, string> = {
   'comment_added': 'comment.added',
   'chat_group_created': 'chat_group.created',
   'chat_group_deleted': 'chat_group.deleted',
+  'message_sent': 'message.sent',
+  'task_message_sent': 'task_message.sent',
   'user_login': 'user.login',
   'user_logout': 'user.logout',
   'user_created': 'user.created'
@@ -68,6 +70,10 @@ const generateDetails = (log: any): string => {
       return `Created chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` in project "${metadata.projectName}"` : ''}`;
     case 'chat_group_deleted':
       return `Deleted chat group "${metadata.groupName || 'Untitled Group'}"${metadata.projectName ? ` from project "${metadata.projectName}"` : ''}`;
+    case 'message_sent':
+      return `Sent a message in "${metadata.groupName || 'a chat'}"`;
+    case 'task_message_sent':
+      return `Sent a message on task "${metadata.taskTitle || 'Untitled'}"`;
     case 'user_login':
       return `User logged in`;
     case 'user_logout':
@@ -474,7 +480,7 @@ export const getAuditLogs = async (req: any, res: Response) => {
           email: user.email || 'unknown@email.com',
         },
         event: actionToEventMap[log.action] || log.action,
-        resource: log.metadata?.taskTitle || project?.name || log.metadata?.userName || log.metadata?.userEmail || log.entityType || 'System',
+        resource: log.metadata?.taskTitle || log.metadata?.groupName || project?.name || log.metadata?.userName || log.metadata?.userEmail || log.entityType || 'System',
         details: generateDetails(log),
         source: 'Web App', // Default to Web App for now
         metadata: {

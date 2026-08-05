@@ -1,18 +1,36 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { decryptProjectFields } from '../utils/fieldEncryption';
 
+// Single source of truth for allowed actions/entity types — previously this list was
+// duplicated across the TS union, the logSystemEvent union, and the schema enum, and
+// they had drifted (e.g. 'biometric_registered' was typed but never in the schema
+// enum, so using it would have failed at runtime).
+export const AUDIT_ACTIONS = [
+  'task_created', 'task_updated', 'task_deleted', 'task_assigned',
+  'task_status_changed', 'task_completed',
+  'member_added', 'member_removed',
+  'permission_changed', 'project_updated', 'time_logged',
+  'comment_added', 'comment_updated', 'comment_deleted',
+  'chat_group_created', 'chat_group_deleted',
+  'message_sent', 'task_message_sent',
+  'user_login', 'user_logout', 'user_created', 'user_password_updated', 'user_passkey_set',
+  'user_passkey_changed', 'user_password_reset', 'user_sensitive_profile_updated',
+  'user_sensitive_profile_updated_by_admin', 'user_passkey_updated_by_admin', 'biometric_registered',
+  'remote_workspace_accessed',
+] as const;
+export type AuditAction = typeof AUDIT_ACTIONS[number];
+
+export const AUDIT_ENTITY_TYPES = [
+  'task', 'project', 'member', 'permission', 'comment', 'time_log',
+  'chat_group', 'message', 'user', 'remote_server',
+] as const;
+export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];
+
 export interface IAuditLog extends Document {
   projectId?: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
-  action: 'task_created' | 'task_updated' | 'task_deleted' | 'task_assigned' |
-          'task_status_changed' | 'task_completed' | 'member_added' | 'member_removed' |
-          'permission_changed' | 'project_updated' | 'time_logged' | 'comment_added' |
-          'comment_updated' | 'comment_deleted' | 'chat_group_created' | 'chat_group_deleted' |
-          'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
-          'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
-          'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
-          'remote_workspace_accessed';
-  entityType: 'task' | 'project' | 'member' | 'permission' | 'comment' | 'time_log' | 'chat_group' | 'user';
+  action: AuditAction;
+  entityType: AuditEntityType;
   entityId?: mongoose.Types.ObjectId;
   metadata?: {
     taskId?: string;
@@ -28,6 +46,12 @@ export interface IAuditLog extends Document {
     userAgent?: string;
     userName?: string;
     userEmail?: string;
+    groupId?: string;
+    groupName?: string;
+    messageId?: string;
+    mentionCount?: number;
+    hasAttachment?: boolean;
+    isReply?: boolean;
     [key: string]: any;
   };
   createdAt: Date;
@@ -37,18 +61,15 @@ interface IAuditLogModel extends Model<IAuditLog> {
   logAction(data: {
     projectId?: string;
     userId: string;
-    action: IAuditLog['action'];
-    entityType: IAuditLog['entityType'];
+    action: AuditAction;
+    entityType: AuditEntityType;
     entityId?: string;
     metadata?: IAuditLog['metadata'];
   }): Promise<IAuditLog>;
 
   logSystemEvent(data: {
     userId: string;
-    action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
-            'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
-            'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin' |
-            'biometric_registered' | 'remote_workspace_accessed';
+    action: AuditAction;
     metadata?: IAuditLog['metadata'];
   }): Promise<IAuditLog>;
 
@@ -89,41 +110,13 @@ const AuditLogSchema = new Schema<IAuditLog>({
   },
   action: {
     type: String,
-    enum: [
-      'task_created',
-      'task_updated',
-      'task_deleted',
-      'task_assigned',
-      'task_status_changed',
-      'task_completed',
-      'member_added',
-      'member_removed',
-      'permission_changed',
-      'project_updated',
-      'time_logged',
-      'comment_added',
-      'comment_updated',
-      'comment_deleted',
-      'chat_group_created',
-      'chat_group_deleted',
-      'user_login',
-      'user_logout',
-      'user_created',
-      'user_password_updated',
-      'user_passkey_set',
-      'user_passkey_changed',
-      'user_password_reset',
-      'user_sensitive_profile_updated',
-      'user_sensitive_profile_updated_by_admin',
-      'user_passkey_updated_by_admin',
-      'remote_workspace_accessed'
-    ],
+    enum: [...AUDIT_ACTIONS],
     required: true,
     index: true
   },
   entityType: {
     type: String,
-    enum: ['task', 'project', 'member', 'permission', 'comment', 'time_log', 'chat_group', 'user', 'remote_server'],
+    enum: [...AUDIT_ENTITY_TYPES],
     required: true
   },
   entityId: {
@@ -200,9 +193,7 @@ AuditLogSchema.statics.logAction = async function(data: {
 // Static method to log system-level events (login, user creation, etc.)
 AuditLogSchema.statics.logSystemEvent = async function(data: {
   userId: string;
-  action: 'user_login' | 'user_logout' | 'user_created' | 'user_password_updated' | 'user_passkey_set' |
-          'user_passkey_changed' | 'user_password_reset' | 'user_sensitive_profile_updated' |
-          'user_sensitive_profile_updated_by_admin' | 'user_passkey_updated_by_admin';
+  action: AuditAction;
   metadata?: IAuditLog['metadata'];
 }): Promise<IAuditLog> {
   const log = new this({

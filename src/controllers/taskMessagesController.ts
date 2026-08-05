@@ -8,6 +8,7 @@ import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { createNotification } from './notificationController';
 import { decryptField } from '../utils/fieldEncryption';
+import { AuditLog } from '../models/AuditLog';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -100,6 +101,23 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       { path: 'sentBy',   select: 'displayName email avatar photoURL' },
       { path: 'mentions', select: 'displayName email' },
     ]);
+
+    try {
+      await AuditLog.logAction({
+        projectId: task.projectId ? task.projectId.toString() : undefined,
+        userId,
+        action: 'task_message_sent',
+        entityType: 'message',
+        entityId: (msg._id as any).toString(),
+        metadata: {
+          taskId: task._id.toString(),
+          taskTitle: decryptField(task.title, task._id.toString()),
+          mentionCount: Array.isArray(mentions) ? mentions.length : 0,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to create audit log for task message:', error);
+    }
 
     // Collect all participants (assignees + legacy assignedTo + createdBy + sender)
     const participantSet = new Set<string>([userId]); // always include sender so they see their own message

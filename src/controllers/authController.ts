@@ -69,12 +69,12 @@ export const login = async (req: Request, res: Response) => {
     const ua = (req.headers['user-agent'] || '').toString();
     const deviceType = detectDeviceType(ua);
 
-    // Enforce device limit: 1 mobile + 1 desktop
-    // Remove any existing session for this device type (kicks old session)
-    const sessions = (user.activeSessions || []).filter(s => s.deviceType !== deviceType);
+    // Enforce single active session per account: a new login invalidates
+    // any existing session, regardless of device type.
     const jti = uuidv4();
-    sessions.push({ jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) });
-    user.activeSessions = sessions as typeof user.activeSessions;
+    user.activeSessions = [
+      { jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) }
+    ] as typeof user.activeSessions;
 
     // Generate JWT token with jti for session tracking
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
@@ -1335,9 +1335,9 @@ export const verifyPasskey = async (req: AuthenticatedRequest, res: Response) =>
         const ua         = (req.headers['user-agent'] || '').toString();
         const deviceType = detectDeviceType(ua);
         const jti        = uuidv4();
-        const sessions   = (dummyUser.activeSessions || []).filter(s => s.deviceType !== deviceType);
-        sessions.push({ jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) });
-        dummyUser.activeSessions = sessions as typeof dummyUser.activeSessions;
+        dummyUser.activeSessions = [
+          { jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) }
+        ] as typeof dummyUser.activeSessions;
         await dummyUser.save();
         const jwtSecret  = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
         const dummyToken = jwt.sign(

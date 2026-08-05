@@ -74,7 +74,9 @@ app.use('/uploads', (req, res, next) => {
 
 // Use setHeaders to ensure CORS headers are set for static files
 app.use('/uploads', express.static(uploadsPath, {
+  maxAge: '30d',
   setHeaders: (res, filePath) => {
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     // Tell browsers to display the file inline instead of downloading it
