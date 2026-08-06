@@ -193,6 +193,40 @@ export const requireSuperAdmin = (
   next();
 };
 
+// Delete All Data is an irreversible whole-database wipe. Super admins always have
+// access; everyone else needs the explicit permissions.modules.dataDeletion.execute
+// flag, granted the same way as any other module permission (see PermissionsTable.tsx).
+export const requireDataDeletionPermission = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  if (!req.user) {
+    errorResponse(res, 'Authentication required', 401);
+    return;
+  }
+
+  if (req.user.role === 'superadmin') {
+    next();
+    return;
+  }
+
+  try {
+    const user = await User.findById(req.user._id).select('permissions.modules.dataDeletion');
+    const hasExecutePermission = user?.permissions?.modules?.dataDeletion?.execute === true;
+
+    if (!hasExecutePermission) {
+      errorResponse(res, 'You do not have permission to manage Delete All Data', 403);
+      return;
+    }
+
+    next();
+  } catch (error) {
+    logger.error('Error checking Delete All Data permission:', error);
+    errorResponse(res, 'Failed to verify permissions', 500);
+  }
+};
+
 // Additional middleware functions that might be referenced
 export const authorize = (roles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {

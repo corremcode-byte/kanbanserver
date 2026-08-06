@@ -127,6 +127,14 @@ export interface IUser extends Document {
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
+      // "execute" (not "edit") since this permission runs an irreversible whole-database
+      // wipe, not an edit of a record. Role 'superadmin' always has access regardless of
+      // this flag (see requireDataDeletionPermission) — this only grants access to others.
+      dataDeletion?: {
+        view?: boolean;
+        execute?: boolean;
+        [key: string]: boolean | undefined;
+      };
     };
   };
   settings?: {
@@ -357,6 +365,10 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       remoteWorkspace: {
         type: Schema.Types.Mixed,
         default: { view: false, edit: false }
+      },
+      dataDeletion: {
+        type: Schema.Types.Mixed,
+        default: { view: false, execute: false }
       }
     }
   },

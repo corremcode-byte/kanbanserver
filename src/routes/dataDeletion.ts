@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireSuperAdmin } from '../middleware/auth';
+import { authenticate, requireDataDeletionPermission } from '../middleware/auth';
 import {
   getDataDeletionStatus,
   setDataDeletionPassword,
@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-router.use(authenticate, requireSuperAdmin);
+router.use(authenticate, requireDataDeletionPermission);
 
 router.get('/status', getDataDeletionStatus);
 router.post('/password', setDataDeletionPassword);
