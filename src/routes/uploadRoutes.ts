@@ -21,9 +21,12 @@ router.use(authenticate);
 const handleMulterError = (err: any, req: Request, res: Response, next: NextFunction): void => {
   if (err instanceof MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
+      // Chat allows larger files (videos) than task/support attachments — keep in
+      // sync with the fileSize limits configured in middleware/upload.ts.
+      const maxSizeLabel = req.path.startsWith('/chat/') ? '500MB' : '50MB';
       res.status(400).json({
         success: false,
-        message: 'File size must be less than 50MB'
+        message: `File size must be less than ${maxSizeLabel}`
       });
       return;
     }
