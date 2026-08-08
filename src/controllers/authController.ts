@@ -16,6 +16,22 @@ function detectDeviceType(userAgent: string): 'mobile' | 'desktop' {
     : 'desktop';
 }
 
+// Adds a session for `deviceType`, replacing only a prior session of that SAME
+// device type (if any) so a mobile login never kicks out an active desktop
+// session and vice versa — one concurrent session per device type, up to 2 total.
+function upsertActiveSession(
+  user: { activeSessions?: Array<{ jti: string; deviceType: 'mobile' | 'desktop'; loggedInAt: Date; userAgent: string }> },
+  deviceType: 'mobile' | 'desktop',
+  jti: string,
+  ua: string
+) {
+  const otherDeviceSessions = (user.activeSessions || []).filter((s) => s.deviceType !== deviceType);
+  user.activeSessions = [
+    ...otherDeviceSessions,
+    { jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) }
+  ] as typeof user.activeSessions;
+}
+
 export interface AuthenticatedRequest extends Request {
   user?: {
     _id: string;
@@ -69,12 +85,10 @@ export const login = async (req: Request, res: Response) => {
     const ua = (req.headers['user-agent'] || '').toString();
     const deviceType = detectDeviceType(ua);
 
-    // Enforce single active session per account: a new login invalidates
-    // any existing session, regardless of device type.
+    // Allow up to 2 concurrent sessions per account: one desktop + one mobile.
+    // A new login only replaces an existing session of the SAME device type.
     const jti = uuidv4();
-    user.activeSessions = [
-      { jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) }
-    ] as typeof user.activeSessions;
+    upsertActiveSession(user, deviceType, jti, ua);
 
     // Generate JWT token with jti for session tracking
     const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
@@ -1335,9 +1349,7 @@ export const verifyPasskey = async (req: AuthenticatedRequest, res: Response) =>
         const ua         = (req.headers['user-agent'] || '').toString();
         const deviceType = detectDeviceType(ua);
         const jti        = uuidv4();
-        dummyUser.activeSessions = [
-          { jti, deviceType, loggedInAt: new Date(), userAgent: ua.slice(0, 200) }
-        ] as typeof dummyUser.activeSessions;
+        upsertActiveSession(dummyUser, deviceType, jti, ua);
         await dummyUser.save();
         const jwtSecret  = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
         const dummyToken = jwt.sign(
