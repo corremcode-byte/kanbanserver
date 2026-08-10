@@ -11,6 +11,11 @@ export interface IMessage extends Document {
   senderId: mongoose.Types.ObjectId;
   encryptedContent: string; // Encrypted message content
   nonce: string; // Encryption nonce for TweetNaCl
+  // System messages (e.g. "X left the group") are generated server-side, not
+  // E2E-encrypted client content — they carry plain text instead and skip the
+  // encryptedContent/nonce requirement entirely.
+  isSystemMessage: boolean;
+  systemMessageText?: string;
   // Which of the owning ChatGroup's keyEpochs this message's encryptedContent/nonce
   // was encrypted under. Default 1 = legacy deterministic key (unchanged behavior
   // for every message that predates this field). Never rewritten after send/edit.
@@ -57,11 +62,20 @@ const messageSchema = new Schema<IMessage>(
     },
     encryptedContent: {
       type: String,
-      required: true
+      required: function (this: IMessage) { return !this.isSystemMessage; },
+      default: ''
     },
     nonce: {
       type: String,
-      required: true
+      required: function (this: IMessage) { return !this.isSystemMessage; },
+      default: ''
+    },
+    isSystemMessage: {
+      type: Boolean,
+      default: false
+    },
+    systemMessageText: {
+      type: String
     },
     keyVersion: {
       type: Number,
