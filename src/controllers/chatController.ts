@@ -1115,6 +1115,37 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
       io.to(`user:${memberId.toString()}`).emit('chat:group:updated', chatGroup);
     });
 
+    // Post a system message ("X joined the group") for each newly added
+    // member — mirrors leaveGroup's "X left the group" message. Plain text,
+    // not E2E encrypted, since the server generates it directly.
+    const memberNameById = new Map(members.map((m) => [m._id.toString(), m.displayName || m.email]));
+    const systemMessages = await Promise.all(
+      newMemberIds.map(async (memberId: string) => {
+        const name = memberNameById.get(memberId) || 'Someone';
+        const systemMessage = new Message({
+          groupId,
+          senderId: memberId,
+          isSystemMessage: true,
+          systemMessageText: `${name} joined the group`,
+          readBy: [{ userId: memberId, readAt: new Date() }]
+        });
+        await systemMessage.save();
+        await systemMessage.populate('senderId', 'displayName email photoURL');
+        return systemMessage;
+      })
+    );
+
+    // Broadcast each join message to every current member, including the new ones
+    chatGroup.members.forEach((memberId) => {
+      const memberIdStr = memberId.toString();
+      systemMessages.forEach((systemMessage) => {
+        io.to(`user:${memberIdStr}`).emit('chat:message:new', {
+          groupId,
+          message: convertPhotoURLsToAbsolute(systemMessage.toObject(), req)
+        });
+      });
+    });
+
     // Send push notifications to new members
     const currentUser = await User.findById(userId);
     const adderName = currentUser?.displayName || currentUser?.email || 'Someone';
@@ -1201,6 +1232,75 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
+// Leave a group (any current member, except the creator)
+export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const chatGroup = await ChatGroup.findById(groupId);
+
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    const isMember = chatGroup.members.some((m) => m.toString() === userId);
+    if (!isMember) {
+      return res.status(400).json({ message: 'You are not a member of this group' });
+    }
+
+    if (chatGroup.createdBy.toString() === userId) {
+      return res.status(400).json({ message: 'Group creator cannot leave the group. Delete the group instead.' });
+    }
+
+    const leavingUser = await User.findById(userId);
+    const leavingUserName = leavingUser?.displayName || leavingUser?.email || 'Someone';
+
+    chatGroup.members = chatGroup.members.filter(
+      (m) => m.toString() !== userId
+    );
+    await chatGroup.save();
+
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
+    await chatGroup.populate('createdBy', 'displayName email photoURL');
+
+    // Post a system message ("X left the group") so it shows inline in the
+    // chat history, WhatsApp-style — plain text, not E2E encrypted, since the
+    // server (not a member's client) is the one generating it.
+    const systemMessage = new Message({
+      groupId,
+      senderId: userId,
+      isSystemMessage: true,
+      systemMessageText: `${leavingUserName} left the group`,
+      readBy: [{ userId, readAt: new Date() }]
+    });
+    await systemMessage.save();
+    await systemMessage.populate('senderId', 'displayName email photoURL');
+
+    // Notify the leaving user's other sessions so the group disappears locally
+    io.to(`user:${userId}`).emit('chat:group:removed', { groupId, reason: 'left' });
+
+    // Notify remaining members
+    chatGroup.members.forEach((memberId) => {
+      const memberIdStr = memberId.toString();
+      io.to(`user:${memberIdStr}`).emit('chat:group:updated', chatGroup);
+      io.to(`user:${memberIdStr}`).emit('chat:message:new', {
+        groupId,
+        message: convertPhotoURLsToAbsolute(systemMessage.toObject(), req)
+      });
+    });
+
+    return res.json({ message: 'Left group successfully' });
+  } catch (error) {
+    console.error('Error leaving group:', error);
+    return res.status(500).json({ message: 'Failed to leave group' });
+  }
+};
+
 // Update a chat group (Admin, group creator, or user with editGroups permission)
 export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1254,7 +1354,7 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// Delete a chat group (Admin, group creator, or user with deleteGroups permission)
+// Delete a chat group (group creator only; personal chats keep the old creator-or-permission rule)
 export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
@@ -1270,20 +1370,24 @@ export const deleteChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is the group creator or has deleteGroups permission
-    // Note: Admin role no longer bypasses permission checks
     const isCreator = chatGroup.createdBy.toString() === userId;
 
-    let hasDeleteGroupsPermission = false;
-    if (!isCreator) {
-      const user = await User.findById(userId);
-      if (user?.permissions?.modules?.chat?.deleteGroups === true) {
-        hasDeleteGroupsPermission = true;
+    if (chatGroup.isPersonalChat) {
+      // Personal chats aren't "created" by either party in a meaningful sense —
+      // keep allowing either the creator record or a user with deleteGroups permission.
+      let hasDeleteGroupsPermission = false;
+      if (!isCreator) {
+        const user = await User.findById(userId);
+        if (user?.permissions?.modules?.chat?.deleteGroups === true) {
+          hasDeleteGroupsPermission = true;
+        }
       }
-    }
-
-    if (!isCreator && !hasDeleteGroupsPermission) {
-      return res.status(403).json({ message: 'You do not have permission to delete chat groups' });
+      if (!isCreator && !hasDeleteGroupsPermission) {
+        return res.status(403).json({ message: 'You do not have permission to delete this chat' });
+      }
+    } else if (!isCreator) {
+      // Group chats: only the creator can delete.
+      return res.status(403).json({ message: 'Only the group creator can delete this group' });
     }
 
     // Soft delete
