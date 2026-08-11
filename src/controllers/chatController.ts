@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { ChatGroup } from '../models/ChatGroup';
+import { ChatGroup, IChatGroup } from '../models/ChatGroup';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
 import { AuthenticatedRequest } from '../middleware/auth';
@@ -14,6 +14,15 @@ import nacl from 'tweetnacl';
 import { getOrCreateAdminRecoveryKeyPair } from '../utils/adminRecoveryKey';
 import { validateAndBuildKeyEpoch } from '../utils/groupKeyValidation';
 import { AuditLog } from '../models/AuditLog';
+
+// The group creator is always an admin implicitly (never stored in `admins`
+// itself — see IChatGroup.admins), so admin status is always creator-or-listed.
+const isGroupAdmin = (chatGroup: IChatGroup, userId: string): boolean => {
+  if (chatGroup.createdBy.toString() === userId) {
+    return true;
+  }
+  return chatGroup.admins.some((adminId) => adminId.toString() === userId);
+};
 
 // Create a new chat group (Admin or user with createGroups permission)
 export const createChatGroup = async (req: AuthenticatedRequest, res: Response) => {
@@ -1051,19 +1060,19 @@ export const addMembersToGroup = async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is the group creator or has manageGroupMembers permission
+    // Check if user is the group creator/admin or has manageGroupMembers permission
     // Note: Admin role no longer bypasses permission checks
-    const isCreator = chatGroup.createdBy.toString() === userId;
+    const isAdmin = isGroupAdmin(chatGroup, userId);
 
     let hasManagePermission = false;
-    if (!isCreator) {
+    if (!isAdmin) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
         hasManagePermission = true;
       }
     }
 
-    if (!isCreator && !hasManagePermission) {
+    if (!isAdmin && !hasManagePermission) {
       return res.status(403).json({ message: 'You do not have permission to add members to this group' });
     }
 
@@ -1192,25 +1201,28 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
       return res.status(404).json({ message: 'Chat group not found' });
     }
 
-    // Check if user is the group creator or has manageGroupMembers permission
+    // Check if user is the group creator/admin or has manageGroupMembers permission
     // Note: Admin role no longer bypasses permission checks
-    const isCreator = chatGroup.createdBy.toString() === userId;
+    const isAdmin = isGroupAdmin(chatGroup, userId);
 
     let hasManagePermission = false;
-    if (!isCreator) {
+    if (!isAdmin) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.manageGroupMembers === true) {
         hasManagePermission = true;
       }
     }
 
-    if (!isCreator && !hasManagePermission) {
+    if (!isAdmin && !hasManagePermission) {
       return res.status(403).json({ message: 'You do not have permission to remove members from this group' });
     }
 
-    // Remove member
+    // Remove member (and their admin status, if any — they're no longer in the group)
     chatGroup.members = chatGroup.members.filter(
       (m) => m.toString() !== memberToRemoveId
+    );
+    chatGroup.admins = chatGroup.admins.filter(
+      (a) => a.toString() !== memberToRemoveId
     );
     await chatGroup.save();
 
@@ -1229,6 +1241,117 @@ export const removeMemberFromGroup = async (req: AuthenticatedRequest, res: Resp
   } catch (error) {
     console.error('Error removing member:', error);
     return res.status(500).json({ message: 'Failed to remove member' });
+  }
+};
+
+// Same "can manage this group" rule used by add/remove-member and update-group:
+// the group creator/admin, or a user holding the editGroups/manageGroupMembers
+// permission. Keeps group-admin management consistent with the rest of Manage Group.
+const canManageGroupAdmins = async (chatGroup: IChatGroup, userId: string): Promise<boolean> => {
+  if (isGroupAdmin(chatGroup, userId)) {
+    return true;
+  }
+  const user = await User.findById(userId);
+  return user?.permissions?.modules?.chat?.editGroups === true
+    || user?.permissions?.modules?.chat?.manageGroupMembers === true;
+};
+
+// Promote an existing group member to group-admin (group creator/admin, or a user
+// with the editGroups/manageGroupMembers permission)
+export const promoteGroupAdmin = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const { userId: userIdToPromote } = req.body;
+
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (!userIdToPromote) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    const chatGroup = await ChatGroup.findById(groupId);
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    if (chatGroup.isPersonalChat) {
+      return res.status(400).json({ message: 'Admin management does not apply to personal chats' });
+    }
+
+    if (!(await canManageGroupAdmins(chatGroup, userId))) {
+      return res.status(403).json({ message: 'You do not have permission to manage group admins' });
+    }
+
+    const isMember = chatGroup.members.some((m) => m.toString() === userIdToPromote);
+    if (!isMember) {
+      return res.status(400).json({ message: 'User is not a member of this group' });
+    }
+
+    if (!isGroupAdmin(chatGroup, userIdToPromote)) {
+      chatGroup.admins.push(new mongoose.Types.ObjectId(userIdToPromote));
+      await chatGroup.save();
+    }
+
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
+    await chatGroup.populate('createdBy', 'displayName email photoURL');
+
+    chatGroup.members.forEach((memberId) => {
+      io.to(`user:${memberId.toString()}`).emit('chat:group:updated', chatGroup);
+    });
+
+    return res.json(chatGroup);
+  } catch (error) {
+    console.error('Error promoting group admin:', error);
+    return res.status(500).json({ message: 'Failed to promote group admin' });
+  }
+};
+
+// Demote a group admin back to a regular member (group creator/admin, or a user with
+// the editGroups/manageGroupMembers permission). The original group creator is always
+// an admin and can never be demoted.
+export const demoteGroupAdmin = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId, userId: userIdToDemote } = req.params;
+
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const chatGroup = await ChatGroup.findById(groupId);
+    if (!chatGroup) {
+      return res.status(404).json({ message: 'Chat group not found' });
+    }
+
+    if (chatGroup.isPersonalChat) {
+      return res.status(400).json({ message: 'Admin management does not apply to personal chats' });
+    }
+
+    if (!(await canManageGroupAdmins(chatGroup, userId))) {
+      return res.status(403).json({ message: 'You do not have permission to manage group admins' });
+    }
+
+    if (chatGroup.createdBy.toString() === userIdToDemote) {
+      return res.status(400).json({ message: 'The group creator cannot be removed as admin' });
+    }
+
+    chatGroup.admins = chatGroup.admins.filter((a) => a.toString() !== userIdToDemote);
+    await chatGroup.save();
+
+    await chatGroup.populate('members', 'displayName email photoURL isActive');
+    await chatGroup.populate('createdBy', 'displayName email photoURL');
+
+    chatGroup.members.forEach((memberId) => {
+      io.to(`user:${memberId.toString()}`).emit('chat:group:updated', chatGroup);
+    });
+
+    return res.json(chatGroup);
+  } catch (error) {
+    console.error('Error demoting group admin:', error);
+    return res.status(500).json({ message: 'Failed to demote group admin' });
   }
 };
 
@@ -1262,6 +1385,9 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
 
     chatGroup.members = chatGroup.members.filter(
       (m) => m.toString() !== userId
+    );
+    chatGroup.admins = chatGroup.admins.filter(
+      (a) => a.toString() !== userId
     );
     await chatGroup.save();
 
@@ -1318,19 +1444,19 @@ export const updateChatGroup = async (req: AuthenticatedRequest, res: Response) 
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Check if user is the group creator or has editGroups permission
+    // Check if user is the group creator/admin or has editGroups permission
     // Note: Admin role no longer bypasses permission checks
-    const isCreator = chatGroup.createdBy.toString() === userId;
+    const isAdmin = isGroupAdmin(chatGroup, userId);
 
     let hasEditGroupsPermission = false;
-    if (!isCreator) {
+    if (!isAdmin) {
       const user = await User.findById(userId);
       if (user?.permissions?.modules?.chat?.editGroups === true) {
         hasEditGroupsPermission = true;
       }
     }
 
-    if (!isCreator && !hasEditGroupsPermission) {
+    if (!isAdmin && !hasEditGroupsPermission) {
       return res.status(403).json({ message: 'You do not have permission to update chat groups' });
     }
 
@@ -1653,6 +1779,14 @@ export const clearChat = async (req: AuthenticatedRequest, res: Response) => {
 
     const chatGroup = await ChatGroup.findOne({ _id: groupId, members: userId, isActive: true });
     if (!chatGroup) return res.status(404).json({ message: 'Chat not found or access denied' });
+
+    // Clear Chat wipes messages for every member, not just the caller — restrict it
+    // in real groups to group admins (creator/promoted) only. Personal (1:1) chats
+    // have no admin concept, so either side can still clear it, unchanged from
+    // prior behavior.
+    if (!chatGroup.isPersonalChat && !isGroupAdmin(chatGroup, userId.toString())) {
+      return res.status(403).json({ message: 'You do not have permission to clear this chat' });
+    }
 
     // Soft-delete all messages in the group
     await Message.updateMany(

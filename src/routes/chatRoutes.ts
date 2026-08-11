@@ -24,6 +24,8 @@ import {
   toggleStar,
   addMembersToGroup,
   removeMemberFromGroup,
+  promoteGroupAdmin,
+  demoteGroupAdmin,
   leaveGroup,
   updateChatGroup,
   deleteChatGroup,
@@ -123,6 +125,8 @@ router.get('/groups/:groupId', getChatGroup);
 router.put('/groups/:groupId', updateChatGroup);
 router.post('/groups/:groupId/members', addMembersToGroup);
 router.delete('/groups/:groupId/members/:userId', removeMemberFromGroup);
+router.post('/groups/:groupId/admins', promoteGroupAdmin);
+router.delete('/groups/:groupId/admins/:userId', demoteGroupAdmin);
 router.post('/groups/:groupId/leave', leaveGroup);
 // Chat E2E key distribution (see utils/groupKeyValidation.ts / adminRecoveryKey.ts)
 router.get('/groups/:groupId/member-keys', getGroupMemberKeys);
