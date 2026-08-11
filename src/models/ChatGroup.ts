@@ -31,6 +31,9 @@ export interface IChatGroup extends Document {
   description?: string;
   createdBy: mongoose.Types.ObjectId;
   members: mongoose.Types.ObjectId[];
+  // Members promoted to group-admin. The creator is always an admin implicitly
+  // (checked separately wherever this is read) and is never added here.
+  admins: mongoose.Types.ObjectId[];
   mutedBy: mongoose.Types.ObjectId[];
   chatLocks: mongoose.Types.ObjectId[];
   favouritedBy: mongoose.Types.ObjectId[];
@@ -59,6 +62,10 @@ const chatGroupSchema = new Schema<IChatGroup>(
     description: { type: String, trim: true, maxlength: 500 },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     members: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
+    admins: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+      default: []
+    },
     mutedBy: {
       type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
       default: []
