@@ -35,6 +35,15 @@ export async function compressUploadedImage(file: Express.Multer.File): Promise<
 
   try {
     await sharp(originalPath)
+      // Mobile camera photos are frequently stored as landscape pixels with an
+      // EXIF Orientation tag telling viewers to rotate them for display. sharp
+      // strips output metadata by default and never auto-rotates unless asked,
+      // so without this the tag was silently discarded and portrait/landscape
+      // photos came out sideways. `.rotate()` with no args reads the source's
+      // EXIF Orientation and physically rotates/flips the pixels to match
+      // before any further processing, so the re-encoded file needs no
+      // orientation tag at all — it just looks correct.
+      .rotate()
       .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: WEBP_QUALITY })
       .toFile(webpPath);
