@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
 import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
 import { validatePassword, validatePasskey } from '../utils/validation';
+import { summarizeOutOfOffice } from '../utils/outOfOffice';
 import { v4 as uuidv4 } from 'uuid';
 
 function detectDeviceType(userAgent: string): 'mobile' | 'desktop' {
@@ -489,7 +490,8 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
           overdueTasksCount: overdueTasks,
           tasksAssigned,
           tasksCreated,
-        }
+        },
+        outOfOffice: summarizeOutOfOffice(user.outOfOfficePeriods)
       },
       recentActivity: recentActivity.slice(0, 10)
     };
@@ -563,6 +565,121 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     return internalServerErrorResponse(res, 'Failed to update profile');
+  }
+};
+
+// Validates and normalizes a start/end date pair for an Out of Office period.
+// Dates are widened to full-day boundaries so a period set for "25 Aug - 30 Aug"
+// covers those entire calendar days regardless of what time of day it was submitted.
+function parseOutOfOfficeRange(startDateRaw: unknown, endDateRaw: unknown, reasonRaw: unknown) {
+  const startDate = new Date(startDateRaw as string);
+  const endDate = new Date(endDateRaw as string);
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return { error: 'A valid start date and end date are required' };
+  }
+
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(23, 59, 59, 999);
+
+  if (startDate > endDate) {
+    return { error: 'Start date must be before or equal to the end date' };
+  }
+
+  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().slice(0, 300) : undefined;
+
+  return { startDate, endDate, reason };
+}
+
+export const addOutOfOffice = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const parsed = parseOutOfOfficeRange(req.body?.startDate, req.body?.endDate, req.body?.reason);
+    if ('error' in parsed) {
+      return errorResponse(res, parsed.error, 400);
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    user.outOfOfficePeriods = user.outOfOfficePeriods || [];
+    user.outOfOfficePeriods.push({
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      reason: parsed.reason,
+      createdAt: new Date(),
+    } as any);
+    await user.save();
+
+    return successResponse(res, 'Out of Office period added', summarizeOutOfOffice(user.outOfOfficePeriods));
+  } catch (error) {
+    logger.error('Error adding Out of Office period:', error);
+    return internalServerErrorResponse(res, 'Failed to add Out of Office period');
+  }
+};
+
+export const updateOutOfOffice = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const parsed = parseOutOfOfficeRange(req.body?.startDate, req.body?.endDate, req.body?.reason);
+    if ('error' in parsed) {
+      return errorResponse(res, parsed.error, 400);
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    const period = (user.outOfOfficePeriods || []).find((p: any) => p._id?.toString() === req.params.periodId);
+    if (!period) {
+      return notFoundResponse(res, 'Out of Office period not found');
+    }
+
+    period.startDate = parsed.startDate;
+    period.endDate = parsed.endDate;
+    period.reason = parsed.reason;
+    await user.save();
+
+    return successResponse(res, 'Out of Office period updated', summarizeOutOfOffice(user.outOfOfficePeriods));
+  } catch (error) {
+    logger.error('Error updating Out of Office period:', error);
+    return internalServerErrorResponse(res, 'Failed to update Out of Office period');
+  }
+};
+
+export const deleteOutOfOffice = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?._id) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return notFoundResponse(res, 'User not found');
+    }
+
+    const before = (user.outOfOfficePeriods || []).length;
+    user.outOfOfficePeriods = (user.outOfOfficePeriods || []).filter((p: any) => p._id?.toString() !== req.params.periodId);
+
+    if (user.outOfOfficePeriods.length === before) {
+      return notFoundResponse(res, 'Out of Office period not found');
+    }
+
+    await user.save();
+
+    return successResponse(res, 'Out of Office period removed', summarizeOutOfOffice(user.outOfOfficePeriods));
+  } catch (error) {
+    logger.error('Error removing Out of Office period:', error);
+    return internalServerErrorResponse(res, 'Failed to remove Out of Office period');
   }
 };
 

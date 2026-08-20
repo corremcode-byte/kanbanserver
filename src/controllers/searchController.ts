@@ -57,8 +57,8 @@ export const search = async (req: AuthenticatedRequest, res: Response) => {
     const queryRegex = new RegExp(query, 'i');
     const candidateTasks = await Task.find({ projectId: { $in: projectIds } })
       .populate('projectId', 'name')
-      .populate('assignees', 'displayName email avatar photoURL')
-      .populate('assignedTo', 'displayName email avatar photoURL')
+      .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+      .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
       .sort({ updatedAt: -1 })
       .lean();
 

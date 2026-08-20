@@ -91,10 +91,10 @@ export const getProjects = async (req: AuthenticatedRequest, res: Response) => {
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allMatching = await Project.find(query)
-      .populate('ownerId', 'name email avatar displayName photoURL')
-      .populate('owners', 'name email avatar displayName photoURL')
-      .populate('members', 'name email avatar displayName photoURL')
-      .populate('managers', 'name email avatar displayName photoURL')
+      .populate('ownerId', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('owners', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('members', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('managers', 'name email avatar displayName photoURL outOfOfficePeriods')
       .sort({ createdAt: -1 });
 
     // Add userRole to each project (and decrypt name/description)
@@ -181,10 +181,10 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const project = await Project.findById(id)
-      .populate('ownerId', 'name email avatar displayName photoURL')
-      .populate('owners', 'name email avatar displayName photoURL')
-      .populate('members', 'name email avatar displayName photoURL')
-      .populate('managers', 'name email avatar displayName photoURL');
+      .populate('ownerId', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('owners', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('members', 'name email avatar displayName photoURL outOfOfficePeriods')
+      .populate('managers', 'name email avatar displayName photoURL outOfOfficePeriods');
     if (!project) {
       return notFoundResponse(res, 'Project not found');
     }
@@ -312,9 +312,9 @@ export const createProject = async (req: AuthenticatedRequest, res: Response) =>
     project.description = encryptField(description?.trim(), projectId);
 
     await project.save();
-    await project.populate('ownerId', 'name email avatar');
-    await project.populate('members', 'name email avatar');
-    await project.populate('managers', 'name email avatar');
+    await project.populate('ownerId', 'name email avatar outOfOfficePeriods');
+    await project.populate('members', 'name email avatar outOfOfficePeriods');
+    await project.populate('managers', 'name email avatar outOfOfficePeriods');
 
     decryptProjectFields(project as any);
 
@@ -489,9 +489,9 @@ export const updateProject = async (req: AuthenticatedRequest, res: Response) =>
       id,
       updateData,
       { new: true, runValidators: true }
-    ).populate('ownerId', 'name email avatar')
-     .populate('members', 'name email avatar')
-     .populate('managers', 'name email avatar');
+    ).populate('ownerId', 'name email avatar outOfOfficePeriods')
+     .populate('members', 'name email avatar outOfOfficePeriods')
+     .populate('managers', 'name email avatar outOfOfficePeriods');
 
     if (updatedProject) decryptProjectFields(updatedProject as any);
 
@@ -701,10 +701,10 @@ export const addMember = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     if (updatedProject) decryptProjectFields(updatedProject as any);
 
@@ -795,10 +795,10 @@ export const removeMember = async (req: AuthenticatedRequest, res: Response) => 
     await project.save();
 
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     if (updatedProject) decryptProjectFields(updatedProject as any);
 
@@ -874,10 +874,10 @@ export const updateMemberRole = async (req: AuthenticatedRequest, res: Response)
 
     // Return populated project data
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     logger.info(`Project member role updated: ${userId} -> ${role}`);
     return successResponse(res, 'Member role updated successfully', updatedProject);
@@ -966,10 +966,10 @@ export const addOwner = async (req: AuthenticatedRequest, res: Response) => {
     await project.save();
 
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     logger.info(`Project owner added: ${userId} to project ${id}`);
     return successResponse(res, 'Owner added successfully', updatedProject);
@@ -1040,10 +1040,10 @@ export const removeOwner = async (req: AuthenticatedRequest, res: Response) => {
     await project.save();
 
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     logger.info(`Project owner removed: ${userId} from project ${id}`);
     return successResponse(res, 'Owner removed successfully', updatedProject);
@@ -1127,10 +1127,10 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
     await project.save();
 
     const updatedProject = await Project.findById(id)
-      .populate('ownerId', 'name email avatar')
-      .populate('owners', 'name email avatar')
-      .populate('members', 'name email avatar')
-      .populate('managers', 'name email avatar');
+      .populate('ownerId', 'name email avatar outOfOfficePeriods')
+      .populate('owners', 'name email avatar outOfOfficePeriods')
+      .populate('members', 'name email avatar outOfOfficePeriods')
+      .populate('managers', 'name email avatar outOfOfficePeriods');
 
     if (updatedProject) decryptProjectFields(updatedProject as any);
 

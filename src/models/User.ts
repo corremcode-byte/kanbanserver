@@ -29,6 +29,13 @@ export interface IUser extends Document {
   displayName: string;
   photoURL?: string;
   bio?: string;
+  outOfOfficePeriods?: Array<{
+    _id?: mongoose.Types.ObjectId;
+    startDate: Date;
+    endDate: Date;
+    reason?: string;
+    createdAt: Date;
+  }>;
   role: 'superadmin' | 'admin' | 'manager' | 'member';
   isActive: boolean;
   lastLoginAt: Date;
@@ -268,6 +275,12 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     trim: true,
     maxlength: 500
   },
+  outOfOfficePeriods: [{
+    startDate: { type: Date, required: true },
+    endDate:   { type: Date, required: true },
+    reason:    { type: String, trim: true, maxlength: 300 },
+    createdAt: { type: Date, default: Date.now },
+  }],
   role: {
     type: String,
     enum: ['superadmin', 'admin', 'manager', 'member'],
@@ -518,7 +531,7 @@ userSchema.statics.searchUsers = function(query: string, limit: number = 10): Pr
       }
     ]
   })
-  .select('username email displayName photoURL role lastLoginAt')
+  .select('username email displayName photoURL role lastLoginAt outOfOfficePeriods')
   .limit(limit)
   .exec();
 };
