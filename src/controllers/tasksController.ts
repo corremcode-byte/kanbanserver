@@ -124,8 +124,8 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
           isDeleted: { $ne: true },
         }).lean()
           .populate('projectId', 'name')
-          .populate('assignees', 'displayName email avatar photoURL')
-          .populate('assignedTo', 'displayName email avatar photoURL')
+          .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+          .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
           .populate('assignedBy', 'displayName email avatar photoURL')
           .sort({ createdAt: -1 });
       } else {
@@ -141,8 +141,8 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
           ]
         }).lean()
           .populate('projectId', 'name')
-          .populate('assignees', 'displayName email avatar photoURL')
-          .populate('assignedTo', 'displayName email avatar photoURL')
+          .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+          .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
           .populate('assignedBy', 'displayName email avatar photoURL')
           .sort({ createdAt: -1 });
       }
@@ -201,8 +201,8 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         ]
       }).lean()
         .populate('projectId', 'name')
-        .populate('assignees', 'displayName email avatar photoURL')
-        .populate('assignedTo', 'displayName email avatar photoURL')
+        .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+        .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
         .populate('assignedBy', 'displayName email avatar photoURL')
         .sort({ createdAt: -1 });
     }
@@ -224,8 +224,8 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
     }
     const task = await Task.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('projectId', 'name')
-      .populate('assignees', 'displayName email avatar photoURL')
-      .populate('assignedTo', 'displayName email avatar photoURL')
+      .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+      .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
       .populate('assignedBy', 'displayName email avatar photoURL');
 
     if (!task) {
@@ -447,8 +447,8 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
       subtask.title = encryptField(subtask.title, newTaskId);
     });
 
-    await task.save();    await task.populate('assignedTo', 'displayName email avatar photoURL');
-    await task.populate('assignees', 'displayName email avatar photoURL');
+    await task.save();    await task.populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods');
+    await task.populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods');
     await task.populate('assignedBy', 'displayName email avatar photoURL');
     await task.populate('projectId', 'name');
 
@@ -635,8 +635,8 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       }
 
       const task = await Task.findByIdAndUpdate(id, { ...updates }, { new: true, runValidators: true })
-        .populate('assignedTo', 'displayName email avatar photoURL')
-        .populate('assignees', 'displayName email avatar photoURL')
+        .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
+        .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
         .populate('assignedBy', 'displayName email avatar photoURL')
         .populate('projectId', 'name color');
 
@@ -819,8 +819,8 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       id,
       { ...updates },
       { new: true, runValidators: true }
-    ).populate('assignedTo', 'displayName email avatar photoURL')
-     .populate('assignees', 'displayName email avatar photoURL')
+    ).populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
+     .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
      .populate('assignedBy', 'displayName email avatar photoURL')
      .populate('projectId', 'name color');
 
@@ -1511,8 +1511,8 @@ export const getDeletedTasks = async (req: AuthenticatedRequest, res: Response) 
 
     const tasks = await Task.find({ isDeleted: true })
       .populate('projectId', 'name color')
-      .populate('assignees', 'displayName email avatar photoURL')
-      .populate('assignedTo', 'displayName email avatar photoURL')
+      .populate('assignees', 'displayName email avatar photoURL outOfOfficePeriods')
+      .populate('assignedTo', 'displayName email avatar photoURL outOfOfficePeriods')
       .populate('assignedBy', 'displayName email avatar photoURL')
       .populate('createdBy', 'displayName email avatar photoURL')
       .populate('deletedBy', 'displayName email avatar photoURL')

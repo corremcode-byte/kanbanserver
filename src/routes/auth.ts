@@ -8,6 +8,9 @@ import {
   getAllUsersWithPasswords,
   getProfile,
   updateProfile,
+  addOutOfOffice,
+  updateOutOfOffice,
+  deleteOutOfOffice,
   getSettings,
   updateSettings,
   updatePassword,
@@ -100,6 +103,9 @@ router.use(authenticate);
 router.get('/me', getCurrentUser);
 router.get('/profile', getProfile);
 router.put('/profile', updateProfile);
+router.post('/out-of-office', addOutOfOffice);
+router.put('/out-of-office/:periodId', updateOutOfOffice);
+router.delete('/out-of-office/:periodId', deleteOutOfOffice);
 router.post('/deactivate', deactivateAccount);
 
 router.get('/settings', getSettings);
