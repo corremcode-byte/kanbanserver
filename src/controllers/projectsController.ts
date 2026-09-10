@@ -230,6 +230,53 @@ export const getProject = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+/**
+ * Current project members' NaCl public keys — used by the client to seal a
+ * task/subtask attachment's random AES file key to every current recipient
+ * (mirrors chatController.ts::getGroupMemberKeys for chat groups). Recipients
+ * are the union of ownerId + owners[] + members[] + managers[] — deliberately
+ * NOT just ownerId/members/managers, since owners[] (co-owners) also have full
+ * project access. No admin-recovery-key concept exists for projects; this
+ * response has no equivalent field, unlike chat's.
+ */
+export const getProjectMemberKeys = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!req.user) {
+      return errorResponse(res, 'User not authenticated', 401);
+    }
+    if (!Types.ObjectId.isValid(id)) {
+      return errorResponse(res, 'Invalid project ID', 400);
+    }
+
+    const project = await Project.findById(id);
+    if (!project) {
+      return notFoundResponse(res, 'Project not found');
+    }
+
+    const userId = req.user._id;
+    const recipientIds = new Set<string>();
+    if (project.ownerId) recipientIds.add(project.ownerId.toString());
+    (project.owners || []).forEach((o: any) => recipientIds.add(o.toString()));
+    (project.members || []).forEach((m: any) => recipientIds.add(m.toString()));
+    (project.managers || []).forEach((m: any) => recipientIds.add(m.toString()));
+
+    if (!recipientIds.has(userId)) {
+      return notFoundResponse(res, 'Project not found');
+    }
+
+    const members = await User.find({ _id: { $in: Array.from(recipientIds) } }).select('encryptionPublicKey');
+    const memberKeys = members
+      .filter((m: any) => !!m.encryptionPublicKey)
+      .map((m: any) => ({ userId: m._id.toString(), encryptionPublicKey: m.encryptionPublicKey as string }));
+
+    return successResponse(res, 'Project member keys retrieved', { memberKeys });
+  } catch (error) {
+    logger.error('Error getting project member keys:', error);
+    return internalServerErrorResponse(res, 'Failed to get project member keys');
+  }
+};
+
 export const createProject = async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Permission check is handled by middleware (checkCanCreateProject)

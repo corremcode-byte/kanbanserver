@@ -4,6 +4,7 @@ import Task from '../models/Task';
 import Project from '../models/Project';
 import { successResponse, errorResponse, internalServerErrorResponse } from '../utils/responses';
 import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
+import { filterAttachmentKeysForUser } from '../utils/attachmentKeyFiltering';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -66,6 +67,7 @@ export const search = async (req: AuthenticatedRequest, res: Response) => {
       .map((t: any) => decryptTaskFields(t))
       .filter((t: any) => queryRegex.test(t.title) || (t.description && queryRegex.test(t.description)))
       .slice(0, 20);
+    tasks.forEach((t: any) => filterAttachmentKeysForUser(t, userId));
 
     logger.info(`Search performed by ${req.user!.email} for query: "${query}"`);
 

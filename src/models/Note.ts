@@ -6,6 +6,26 @@ export interface ISharedWith {
   sharedAt: Date;
 }
 
+// Same shape/semantics as kanbanserver/src/models/Task.ts's ITaskAttachment —
+// see that file's comments for the encryptionVersion 0 vs 1 field meanings.
+export interface INoteAttachment {
+  id: string;
+  name: string;
+  url: string;
+  type: string;
+  size: number;
+  uploadedBy: mongoose.Types.ObjectId;
+  uploadedAt: Date;
+  attachmentId?: string;
+  isEncrypted?: boolean;
+  encryptionVersion?: number;
+  encryptionAlgorithm?: string;
+  containerVersion?: number;
+  chunkSize?: number;
+  originalMimeType?: string;
+  originalFileSize?: number;
+}
+
 export interface INote extends Document {
   title: string;
   description: string; // Kept for backward compatibility
@@ -13,6 +33,18 @@ export interface INote extends Document {
   contentType: 'plain' | 'html'; // Content format type
   userId: mongoose.Types.ObjectId;
   sharedWith?: ISharedWith[]; // Users with access to this note
+  attachments?: INoteAttachment[];
+  // Sealed per-recipient copies of every encrypted attachment's random AES
+  // file key. Recipients = this note's owner + sharedWith[].userId at upload
+  // time — see controllers/uploadController.ts and docs/E2EE_ATTACHMENTS.md.
+  // NO admin-recovery-sealed counterpart exists here, by design.
+  attachmentKeys?: {
+    attachmentId: string;
+    userId: mongoose.Types.ObjectId;
+    encryptedKey: string;
+    nonce: string;
+    senderPublicKey: string;
+  }[];
   reminderDate?: Date;
   reminderFrequency?: 'none' | '30minutes' | '1hour' | '3hours' | '12hours' | '24hours' | '48hours' | 'custom';
   customReminderMinutes?: number;
@@ -72,6 +104,33 @@ const NoteSchema = new Schema<INote>(
         default: Date.now
       }
     }],
+    attachments: [{
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+      url: { type: String, required: true },
+      type: { type: String, required: true },
+      size: { type: Number, required: true },
+      uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+      uploadedAt: { type: Date, default: Date.now },
+      attachmentId: String,
+      isEncrypted: Boolean,
+      encryptionVersion: { type: Number, default: 0 },
+      encryptionAlgorithm: String,
+      containerVersion: Number,
+      chunkSize: Number,
+      originalMimeType: String,
+      originalFileSize: Number
+    }],
+    attachmentKeys: {
+      type: [{
+        attachmentId: { type: String, required: true },
+        userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        encryptedKey: { type: String, required: true },
+        nonce: { type: String, required: true },
+        senderPublicKey: { type: String, required: true }
+      }],
+      default: []
+    },
     reminderDate: {
       type: Date
     },

@@ -35,6 +35,11 @@ export const getAdminUserModuleData = async (req: AuthenticatedRequest, res: Res
       }
 
       case 'tasks': {
+        // NOTE: this .select() deliberately excludes `attachments`/`attachmentKeys` —
+        // the super-admin has no NaCl private key that could use sealed attachment
+        // keys anyway. If this select list is ever widened to include them, use
+        // stripAttachmentKeys() (see utils/attachmentKeyFiltering.ts), never
+        // filterAttachmentKeysForUser() — the admin is not a legitimate recipient.
         const tasks = await Task.find({
           isDeleted: { $ne: true },
           $or: [{ assigneeId: uid }, { assignedTo: uid }, { assignees: uid }, { createdBy: uid }],

@@ -9,6 +9,7 @@ import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
 import { createNotification } from './notificationController';
 import { encryptField, decryptField, decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
+import { filterAttachmentKeysForUser, stripAttachmentKeys } from '../utils/attachmentKeyFiltering';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -207,7 +208,10 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
         .sort({ createdAt: -1 });
     }
 
-    tasks.forEach((t: any) => decryptTaskFields(t));
+    tasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      filterAttachmentKeysForUser(t, req.user._id.toString());
+    });
     return successResponse(res, 'Tasks retrieved successfully', tasks);
   } catch (error) {
     logger.error('Error getting tasks:', error);
@@ -233,6 +237,7 @@ export const getTask = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     decryptTaskFields(task as any);
+    filterAttachmentKeysForUser(task as any, req.user._id.toString());
 
     // Standalone task (no project): allow creator/assignee/assigner to view.
     if (!task.projectId) {
@@ -453,6 +458,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response) => {
     await task.populate('projectId', 'name');
 
     decryptTaskFields(task as any);
+    filterAttachmentKeysForUser(task as any, req.user._id.toString());
 
     logger.info(`Task created: ${task.title} in project ${projectId}`);
 
@@ -645,6 +651,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
       }
 
       decryptTaskFields(task as any);
+      filterAttachmentKeysForUser(task as any, req.user._id.toString());
       logger.info(`Standalone task updated: ${task.title}`);
       return successResponse(res, 'Task updated successfully', task);
     }
@@ -829,6 +836,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     decryptTaskFields(task as any);
+    filterAttachmentKeysForUser(task as any, req.user._id.toString());
 
     // Log audit action
     try {
@@ -1518,7 +1526,13 @@ export const getDeletedTasks = async (req: AuthenticatedRequest, res: Response) 
       .populate('deletedBy', 'displayName email avatar photoURL')
       .sort({ deletedAt: -1 });
 
-    tasks.forEach((t: any) => decryptTaskFields(t));
+    // Super-admin viewing deleted tasks system-wide, not necessarily a project
+    // member of any of them — strip entirely rather than filter to "their own"
+    // entries, same reasoning as SuperAdminChatViewer/superAdminController.ts.
+    tasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      stripAttachmentKeys(t);
+    });
     return successResponse(res, 'Deleted tasks retrieved successfully', tasks);
   } catch (error) {
     logger.error('Error fetching deleted tasks:', error);
@@ -1620,6 +1634,7 @@ export const followUpTask = async (req: AuthenticatedRequest, res: Response) => 
     if (!task) return notFoundResponse(res, 'Task not found');
 
     decryptTaskFields(task as any);
+    filterAttachmentKeysForUser(task as any, req.user._id.toString());
 
     const assigneeIds: string[] = Array.isArray(task.assignees)
       ? task.assignees.map((a: any) => (typeof a === 'object' ? a._id?.toString() ?? a.toString() : a.toString()))

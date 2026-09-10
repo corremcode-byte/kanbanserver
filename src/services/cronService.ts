@@ -88,6 +88,10 @@ class CronService {
         .populate('projectId', 'name')
         .lean();
 
+      // No attachmentKeys filtering needed here — this is server-internal reminder
+      // processing (building email/push notification text), never serialized to
+      // an HTTP client, so there's no "requesting user" to filter for and no
+      // exposure risk.
       tasks.forEach((t: any) => decryptTaskFields(t));
 
       logger.info(`Found ${tasks.length} tasks to check for reminders`);

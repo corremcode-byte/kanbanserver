@@ -8,6 +8,7 @@ const attachmentsDir = path.join(__dirname, '../../uploads/attachments');
 const taskAttachmentsDir = path.join(__dirname, '../../uploads/task-attachments');
 const chatAttachmentsDir = path.join(__dirname, '../../uploads/chat-attachments');
 const supportAttachmentsDir = path.join(__dirname, '../../uploads/support-attachments');
+const noteAttachmentsDir = path.join(__dirname, '../../uploads/note-attachments');
 
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir, { recursive: true });
@@ -27,6 +28,10 @@ if (!fs.existsSync(chatAttachmentsDir)) {
 
 if (!fs.existsSync(supportAttachmentsDir)) {
   fs.mkdirSync(supportAttachmentsDir, { recursive: true });
+}
+
+if (!fs.existsSync(noteAttachmentsDir)) {
+  fs.mkdirSync(noteAttachmentsDir, { recursive: true });
 }
 
 // Configure storage for avatars
@@ -103,57 +108,64 @@ const imageFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFil
 };
 
 // File filter - allow common file types (for attachments)
-const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedMimes = [
-    // Images
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/bmp',
-    'image/svg+xml',
-    // Documents
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'text/plain',
-    'text/csv',
-    // Videos
-    'video/mp4',
-    'video/webm',
-    'video/quicktime',
-    'video/x-msvideo',
-    'video/x-matroska',
-    'video/mpeg',
-    // Audio
-    'audio/webm',
-    'audio/mpeg',
-    'audio/mp3',
-    'audio/ogg',
-    'audio/wav',
-    'audio/x-wav',
-    // Archives
-    'application/zip',
-    'application/x-zip',
-    'application/x-zip-compressed',
-    'application/x-compressed',
-    'application/octet-stream',
-    'application/x-rar-compressed',
-    'application/vnd.rar',
-    'application/x-7z-compressed',
-    'application/x-tar',
-    'application/gzip',
-    'application/x-gzip',
-  ];
+//
+// Exported so uploadController.ts can reuse the exact same allowlist to
+// validate the client-declared `originalMimeType` field of an ENCRYPTED chat
+// upload — the wire bytes of an encrypted attachment are opaque ciphertext
+// (always application/octet-stream), so this filter can no longer content-sniff
+// them; the real MIME type check for those uploads happens in the controller
+// against this same list instead (see uploadChatAttachment).
+export const ALLOWED_ATTACHMENT_MIME_TYPES = [
+  // Images
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/svg+xml',
+  // Documents
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'text/csv',
+  // Videos
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+  'video/mpeg',
+  // Audio
+  'audio/webm',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/ogg',
+  'audio/wav',
+  'audio/x-wav',
+  // Archives
+  'application/zip',
+  'application/x-zip',
+  'application/x-zip-compressed',
+  'application/x-compressed',
+  'application/octet-stream',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+  'application/x-7z-compressed',
+  'application/x-tar',
+  'application/gzip',
+  'application/x-gzip',
+];
 
+const attachmentFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   // Check exact match OR prefix match (handles codec variants like audio/webm;codecs=opus)
   const baseType = file.mimetype.split(';')[0].trim();
-  if (allowedMimes.includes(file.mimetype) || allowedMimes.includes(baseType)) {
+  if (ALLOWED_ATTACHMENT_MIME_TYPES.includes(file.mimetype) || ALLOWED_ATTACHMENT_MIME_TYPES.includes(baseType)) {
     cb(null, true);
   } else {
     cb(new Error('Invalid file type. Please upload images, videos, audio, PDFs, documents, or archives (zip, rar, 7z).'));
@@ -215,6 +227,28 @@ export const uploadSupportAttachment = multer({
   fileFilter: attachmentFileFilter,
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
+  }
+});
+
+// Configure storage for note attachments
+const noteAttachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, noteAttachmentsDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const uuid = require('uuid').v4();
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    cb(null, `${timestamp}-${uuid}-${basename}${ext}`);
+  }
+});
+
+export const uploadNoteAttachment = multer({
+  storage: noteAttachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB, matching task attachments
   }
 });
 

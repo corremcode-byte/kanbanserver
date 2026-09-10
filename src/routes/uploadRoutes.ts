@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware } from '../middleware/upload';
+import { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware, uploadNoteAttachment as uploadNoteMiddleware } from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,
@@ -8,7 +8,10 @@ import {
   uploadSubtaskAttachment,
   deleteSubtaskAttachment,
   uploadChatAttachment,
-  uploadSupportAttachment
+  uploadSupportAttachment,
+  uploadNoteAttachment,
+  getNoteAttachments,
+  deleteNoteAttachment
 } from '../controllers/uploadController';
 import { MulterError } from 'multer';
 
@@ -96,5 +99,26 @@ router.post('/chat/:groupId', uploadChatMiddleware.single('file'), handleMulterE
  * @access  Private
  */
 router.post('/support', uploadSupportMiddleware.single('file'), handleMulterError, uploadSupportAttachment);
+
+/**
+ * @route   POST /api/upload/note/:noteId
+ * @desc    Upload attachment to a note
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.post('/note/:noteId', uploadNoteMiddleware.single('file'), handleMulterError, uploadNoteAttachment);
+
+/**
+ * @route   GET /api/upload/note/:noteId/attachments
+ * @desc    Get all attachments for a note
+ * @access  Private (note owner or shared-with users)
+ */
+router.get('/note/:noteId/attachments', getNoteAttachments);
+
+/**
+ * @route   DELETE /api/upload/note/:noteId/attachment/:attachmentId
+ * @desc    Delete attachment from a note
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.delete('/note/:noteId/attachment/:attachmentId', deleteNoteAttachment);
 
 export default router;

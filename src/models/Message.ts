@@ -21,15 +21,53 @@ export interface IMessage extends Document {
   // for every message that predates this field). Never rewritten after send/edit.
   keyVersion: number;
   attachments?: {
+    // Client-generated uuid, stable identity for this attachment. Absent on
+    // every pre-existing (encryptionVersion 0) row — never backfilled.
+    attachmentId?: string;
     fileName: string;
+    // For encryptionVersion 0: URL to the plaintext file. For 1: URL to the
+    // opaque encrypted container — the server never parses either.
     fileUrl: string;
+    // For encryptionVersion 0: the real MIME type. For 1: 'application/octet-stream'
+    // (the wire type of the encrypted container) — the real type is originalMimeType.
     fileType: string;
+    // For encryptionVersion 0: plaintext byte size. For 1: encrypted container size —
+    // the real size is originalFileSize.
     fileSize: number;
     duration?: number;
     mimeType?: string;
     // Compressed WebP copy for fast in-chat display, when the attachment is an
-    // image. fileUrl always stays the untouched original (used for Open/Download).
+    // unencrypted image. Never set for encryptionVersion 1 — the server cannot
+    // thumbnail ciphertext. fileUrl always stays the untouched original (used
+    // for Open/Download).
     thumbnailUrl?: string;
+    // 0 (default, absent on legacy rows) = plaintext, stored/served as-is.
+    // 1 = true E2EE: AES-256-GCM content, key never seen by the server (see
+    // attachmentKeys below). Never bumped in place — a re-upload is a new attachment.
+    isEncrypted?: boolean;
+    encryptionVersion?: number;
+    encryptionAlgorithm?: string; // e.g. 'AES-256-GCM', encryptionVersion 1 only
+    containerVersion?: number; // encrypted-container framing format version
+    chunkSize?: number; // plaintext bytes per chunk used at encryption time
+    originalMimeType?: string; // real content type, encryptionVersion 1 only
+    originalFileSize?: number; // real plaintext byte size, encryptionVersion 1 only
+  }[];
+  // Sealed copies of each encrypted attachment's random AES-256 file key, one
+  // per (attachmentId, current-group-member) pair — nacl.box'd to that member's
+  // encryptionPublicKey, same pattern as ChatGroup.keyEpochs[].memberKeys.
+  // Deliberately has NO admin-recovery-sealed counterpart anywhere in this
+  // array's shape: unlike text messages, attachment keys are never escrowed to
+  // the server-held admin-recovery keypair (see utils/adminRecoveryKey.ts) —
+  // that is what makes attachment content genuinely unreadable by a VPS/DB
+  // administrator. Server-side, callers MUST filter this to the requesting
+  // user's own entries before ever serializing a Message to a client — see
+  // utils/attachmentKeyFiltering.ts.
+  attachmentKeys?: {
+    attachmentId: string;
+    userId: mongoose.Types.ObjectId;
+    encryptedKey: string; // base64 nacl.box ciphertext of the raw 32-byte AES key
+    nonce: string; // base64
+    senderPublicKey: string; // base64 — sealer's (sender's) public key at seal time
   }[];
   replyTo?: mongoose.Types.ObjectId;
   readBy: {
@@ -82,14 +120,32 @@ const messageSchema = new Schema<IMessage>(
       default: 1
     },
     attachments: [{
+      attachmentId: String,
       fileName: String,
       fileUrl: String,
       fileType: String,
       fileSize: Number,
       duration: Number,
       mimeType: String,
-      thumbnailUrl: String
+      thumbnailUrl: String,
+      isEncrypted: Boolean,
+      encryptionVersion: { type: Number, default: 0 },
+      encryptionAlgorithm: String,
+      containerVersion: Number,
+      chunkSize: Number,
+      originalMimeType: String,
+      originalFileSize: Number
     }],
+    attachmentKeys: {
+      type: [{
+        attachmentId: { type: String, required: true },
+        userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        encryptedKey: { type: String, required: true },
+        nonce: { type: String, required: true },
+        senderPublicKey: { type: String, required: true }
+      }],
+      default: []
+    },
     replyTo: {
       type: Schema.Types.ObjectId,
       ref: 'Message'

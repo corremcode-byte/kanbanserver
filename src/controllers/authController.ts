@@ -7,6 +7,7 @@ import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
 import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
+import { filterAttachmentKeysForUser } from '../utils/attachmentKeyFiltering';
 import { validatePassword, validatePasskey } from '../utils/validation';
 import { summarizeOutOfOffice } from '../utils/outOfOffice';
 import { v4 as uuidv4 } from 'uuid';
@@ -420,7 +421,10 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
 
     // Task titles/descriptions, the populated project name, and project name/description
     // are encrypted at rest.
-    recentTasks.forEach((t: any) => decryptTaskFields(t));
+    recentTasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      filterAttachmentKeysForUser(t, userId);
+    });
     recentProjects.forEach((p: any) => decryptProjectFields(p));
 
     // Build activity timeline
@@ -786,7 +790,10 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
     ]);
 
     // Task titles/descriptions and the populated project name are encrypted at rest.
-    recentTasks.forEach((t: any) => decryptTaskFields(t));
+    recentTasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      filterAttachmentKeysForUser(t, userId);
+    });
 
     // Add roles information to projects
     const projectsWithRoles = projects.map(project => {
