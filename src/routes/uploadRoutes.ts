@@ -11,7 +11,10 @@ import {
   uploadSupportAttachment,
   uploadNoteAttachment,
   getNoteAttachments,
-  deleteNoteAttachment
+  deleteNoteAttachment,
+  changeTaskAttachmentPassword,
+  changeSubtaskAttachmentPassword,
+  changeNoteAttachmentPassword
 } from '../controllers/uploadController';
 import { MulterError } from 'multer';
 
@@ -73,6 +76,14 @@ router.get('/task/:taskId/attachments', getTaskAttachments);
 router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
 
 /**
+ * @route   PATCH /api/upload/task/:taskId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a task attachment's password protection —
+ *          metadata only, never touches the encrypted file bytes
+ * @access  Private (owner/co-owner/manager/uploader only)
+ */
+router.patch('/task/:taskId/attachment/:attachmentId/password', changeTaskAttachmentPassword);
+
+/**
  * @route   POST /api/upload/task/:taskId/subtask/:subtaskId
  * @desc    Upload attachment to a subtask
  * @access  Private (project members)
@@ -85,6 +96,13 @@ router.post('/task/:taskId/subtask/:subtaskId', uploadTaskMiddleware.single('fil
  * @access  Private
  */
 router.delete('/task/:taskId/subtask/:subtaskId/attachment/:attachmentId', deleteSubtaskAttachment);
+
+/**
+ * @route   PATCH /api/upload/task/:taskId/subtask/:subtaskId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a subtask attachment's password protection
+ * @access  Private (owner/co-owner/manager/uploader only)
+ */
+router.patch('/task/:taskId/subtask/:subtaskId/attachment/:attachmentId/password', changeSubtaskAttachmentPassword);
 
 /**
  * @route   POST /api/upload/chat/:groupId
@@ -120,5 +138,12 @@ router.get('/note/:noteId/attachments', getNoteAttachments);
  * @access  Private (note owner or shared-with-edit-permission users)
  */
 router.delete('/note/:noteId/attachment/:attachmentId', deleteNoteAttachment);
+
+/**
+ * @route   PATCH /api/upload/note/:noteId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a note attachment's password protection
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.patch('/note/:noteId/attachment/:attachmentId/password', changeNoteAttachmentPassword);
 
 export default router;

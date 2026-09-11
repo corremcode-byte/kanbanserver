@@ -24,6 +24,17 @@ export interface INoteAttachment {
   chunkSize?: number;
   originalMimeType?: string;
   originalFileSize?: number;
+  passwordProtected?: boolean;
+  passwordSalt?: string;
+  passwordKdfAlgorithm?: string;
+  passwordKdfParams?: {
+    iterations: number;
+    parallelism: number;
+    memorySize: number;
+    hashLength: number;
+  };
+  encryptedFileKeyByPassword?: string;
+  passwordFileKeyIv?: string;
 }
 
 export interface INote extends Document {
@@ -119,7 +130,18 @@ const NoteSchema = new Schema<INote>(
       containerVersion: Number,
       chunkSize: Number,
       originalMimeType: String,
-      originalFileSize: Number
+      originalFileSize: Number,
+      passwordProtected: Boolean,
+      passwordSalt: String,
+      passwordKdfAlgorithm: String,
+      passwordKdfParams: {
+        iterations: Number,
+        parallelism: Number,
+        memorySize: Number,
+        hashLength: Number
+      },
+      encryptedFileKeyByPassword: String,
+      passwordFileKeyIv: String
     }],
     attachmentKeys: {
       type: [{

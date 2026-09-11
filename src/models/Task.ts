@@ -29,6 +29,21 @@ export interface ITaskAttachment {
   chunkSize?: number;
   originalMimeType?: string;
   originalFileSize?: number;
+  // Optional ADDITIONAL password protection layer, independent of this task's
+  // top-level attachmentKeys[] nacl.box sealing — see
+  // kanbanclient/src/services/attachmentEncryptionService.ts. Opaque to the
+  // server; never derived/validated cryptographically here.
+  passwordProtected?: boolean;
+  passwordSalt?: string;
+  passwordKdfAlgorithm?: string;
+  passwordKdfParams?: {
+    iterations: number;
+    parallelism: number;
+    memorySize: number;
+    hashLength: number;
+  };
+  encryptedFileKeyByPassword?: string;
+  passwordFileKeyIv?: string;
 }
 
 export interface ITaskComment {
@@ -211,7 +226,18 @@ const TaskSchema = new Schema<ITask>({
     containerVersion: Number,
     chunkSize: Number,
     originalMimeType: String,
-    originalFileSize: Number
+    originalFileSize: Number,
+    passwordProtected: Boolean,
+    passwordSalt: String,
+    passwordKdfAlgorithm: String,
+    passwordKdfParams: {
+      iterations: Number,
+      parallelism: Number,
+      memorySize: Number,
+      hashLength: Number
+    },
+    encryptedFileKeyByPassword: String,
+    passwordFileKeyIv: String
   }],
   attachmentKeys: {
     type: [{
@@ -257,7 +283,18 @@ const TaskSchema = new Schema<ITask>({
       containerVersion: Number,
       chunkSize: Number,
       originalMimeType: String,
-      originalFileSize: Number
+      originalFileSize: Number,
+      passwordProtected: Boolean,
+      passwordSalt: String,
+      passwordKdfAlgorithm: String,
+      passwordKdfParams: {
+        iterations: Number,
+        parallelism: Number,
+        memorySize: Number,
+        hashLength: Number
+      },
+      encryptedFileKeyByPassword: String,
+      passwordFileKeyIv: String
     }]
   }],
   likes: [{ type: Schema.Types.ObjectId, ref: 'User' }],

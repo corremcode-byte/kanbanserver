@@ -51,6 +51,22 @@ export interface IMessage extends Document {
     chunkSize?: number; // plaintext bytes per chunk used at encryption time
     originalMimeType?: string; // real content type, encryptionVersion 1 only
     originalFileSize?: number; // real plaintext byte size, encryptionVersion 1 only
+    // Optional ADDITIONAL password protection layer, entirely independent of
+    // the nacl.box recipient sealing above (see attachmentKeys) — client-side
+    // only, see kanbanclient/src/services/attachmentEncryptionService.ts. The
+    // server stores these fields as opaque, never derives/validates their
+    // cryptographic content, and never sees the password or the derived key.
+    passwordProtected?: boolean;
+    passwordSalt?: string; // base64
+    passwordKdfAlgorithm?: string; // 'argon2id'
+    passwordKdfParams?: {
+      iterations: number;
+      parallelism: number;
+      memorySize: number;
+      hashLength: number;
+    };
+    encryptedFileKeyByPassword?: string; // base64 — the AES file key, wrapped
+    passwordFileKeyIv?: string; // base64
   }[];
   // Sealed copies of each encrypted attachment's random AES-256 file key, one
   // per (attachmentId, current-group-member) pair — nacl.box'd to that member's
@@ -134,7 +150,18 @@ const messageSchema = new Schema<IMessage>(
       containerVersion: Number,
       chunkSize: Number,
       originalMimeType: String,
-      originalFileSize: Number
+      originalFileSize: Number,
+      passwordProtected: Boolean,
+      passwordSalt: String,
+      passwordKdfAlgorithm: String,
+      passwordKdfParams: {
+        iterations: Number,
+        parallelism: Number,
+        memorySize: Number,
+        hashLength: Number
+      },
+      encryptedFileKeyByPassword: String,
+      passwordFileKeyIv: String
     }],
     attachmentKeys: {
       type: [{

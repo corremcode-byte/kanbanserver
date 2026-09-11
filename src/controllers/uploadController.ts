@@ -85,6 +85,70 @@ function parseEncryptedAttachmentMetadata(
 }
 
 /**
+ * Optional ADDITIONAL password-protection fields a client may send alongside
+ * an encrypted upload (or a standalone PATCH .../password request) — see
+ * kanbanclient/src/services/attachmentEncryptionService.ts. The server
+ * validates SHAPE only (non-empty strings/plausible numbers) and never
+ * inspects, derives, or verifies any of this cryptographically — it has no
+ * way to and must not try to. Returns `fields: null` (not an error) when
+ * `passwordProtected` isn't `'true'` at all — protection is optional and most
+ * uploads won't set these fields.
+ */
+interface PasswordProtectionMetadata {
+  passwordProtected: true;
+  passwordSalt: string;
+  passwordKdfAlgorithm: string;
+  passwordKdfParams: { iterations: number; parallelism: number; memorySize: number; hashLength: number };
+  encryptedFileKeyByPassword: string;
+  passwordFileKeyIv: string;
+}
+
+interface ParsedPasswordProtection {
+  error: string | null;
+  fields: PasswordProtectionMetadata | null;
+}
+
+function parsePasswordProtectionMetadata(body: any): ParsedPasswordProtection {
+  const requested = body?.passwordProtected === 'true' || body?.passwordProtected === true;
+  if (!requested) {
+    return { error: null, fields: null };
+  }
+
+  const passwordSalt = typeof body?.passwordSalt === 'string' ? body.passwordSalt : '';
+  const passwordKdfAlgorithm = typeof body?.passwordKdfAlgorithm === 'string' ? body.passwordKdfAlgorithm : '';
+  const encryptedFileKeyByPassword = typeof body?.encryptedFileKeyByPassword === 'string' ? body.encryptedFileKeyByPassword : '';
+  const passwordFileKeyIv = typeof body?.passwordFileKeyIv === 'string' ? body.passwordFileKeyIv : '';
+
+  if (!passwordSalt || !passwordKdfAlgorithm || !encryptedFileKeyByPassword || !passwordFileKeyIv) {
+    return { error: 'Missing password-protection fields', fields: null };
+  }
+
+  let kdfParams: unknown;
+  try {
+    kdfParams = typeof body?.passwordKdfParams === 'string' ? JSON.parse(body.passwordKdfParams) : body?.passwordKdfParams;
+  } catch {
+    return { error: 'passwordKdfParams must be valid JSON', fields: null };
+  }
+  const p = kdfParams as { iterations?: unknown; parallelism?: unknown; memorySize?: unknown; hashLength?: unknown } | null;
+  const isPositiveInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  if (!p || !isPositiveInt(p.iterations) || !isPositiveInt(p.parallelism) || !isPositiveInt(p.memorySize) || !isPositiveInt(p.hashLength)) {
+    return { error: 'Invalid passwordKdfParams', fields: null };
+  }
+
+  return {
+    error: null,
+    fields: {
+      passwordProtected: true,
+      passwordSalt,
+      passwordKdfAlgorithm,
+      passwordKdfParams: p as PasswordProtectionMetadata['passwordKdfParams'],
+      encryptedFileKeyByPassword,
+      passwordFileKeyIv
+    }
+  };
+}
+
+/**
  * Parses+validates the `attachmentKeys` multipart field (a JSON-stringified
  * array of sealed per-recipient AES-key copies) that travels alongside an
  * encrypted task/subtask/note upload — there's no separate "create parent"
@@ -262,6 +326,12 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
       }
       attachmentKeyEntries = keysResult.entries;
 
+      const passwordResult = parsePasswordProtectionMetadata(req.body);
+      if (passwordResult.error) {
+        res.status(400).json({ success: false, message: passwordResult.error });
+        return;
+      }
+
       const baseUrl = getBaseUrl(req);
       const publicUrl = `${baseUrl}/uploads/task-attachments/${file.filename}`;
       logger.info(`📦 Encrypted task file saved to disk: ${file.path} (attachmentId=${parsed.meta.attachmentId})`);
@@ -281,7 +351,8 @@ export const uploadTaskAttachment = async (req: Request, res: Response): Promise
         containerVersion: parsed.meta.containerVersion,
         chunkSize: parsed.meta.chunkSize,
         originalMimeType: parsed.meta.originalMimeType,
-        originalFileSize: parsed.meta.originalFileSize
+        originalFileSize: parsed.meta.originalFileSize,
+        ...(passwordResult.fields || {})
       };
     } else {
       // Legacy plaintext path — completely unchanged behavior.
@@ -521,6 +592,12 @@ export const uploadSubtaskAttachment = async (req: Request, res: Response): Prom
       }
       attachmentKeyEntries = keysResult.entries;
 
+      const passwordResult = parsePasswordProtectionMetadata(req.body);
+      if (passwordResult.error) {
+        res.status(400).json({ success: false, message: passwordResult.error });
+        return;
+      }
+
       const baseUrl = getBaseUrl(req);
       const publicUrl = `${baseUrl}/uploads/task-attachments/${file.filename}`;
       logger.info(`📦 Encrypted subtask file saved to disk: ${file.path} (attachmentId=${parsed.meta.attachmentId})`);
@@ -540,7 +617,8 @@ export const uploadSubtaskAttachment = async (req: Request, res: Response): Prom
         containerVersion: parsed.meta.containerVersion,
         chunkSize: parsed.meta.chunkSize,
         originalMimeType: parsed.meta.originalMimeType,
-        originalFileSize: parsed.meta.originalFileSize
+        originalFileSize: parsed.meta.originalFileSize,
+        ...(passwordResult.fields || {})
       };
     } else {
       const fileId = uuidv4();
@@ -735,6 +813,12 @@ export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Respo
         return;
       }
 
+      const passwordResult = parsePasswordProtectionMetadata(req.body);
+      if (passwordResult.error) {
+        res.status(400).json({ success: false, message: passwordResult.error });
+        return;
+      }
+
       const baseUrl = getBaseUrl(req);
       const publicUrl = `${baseUrl}/uploads/chat-attachments/${file.filename}`;
       logger.info(`📦 Encrypted chat file saved to disk: ${file.path} (attachmentId=${attachmentId})`);
@@ -752,7 +836,8 @@ export const uploadChatAttachment = async (req: AuthenticatedRequest, res: Respo
         containerVersion,
         chunkSize,
         originalMimeType,
-        originalFileSize
+        originalFileSize,
+        ...(passwordResult.fields || {})
       };
     } else {
       // Legacy plaintext path — completely unchanged behavior.
@@ -900,6 +985,12 @@ export const uploadNoteAttachment = async (req: AuthenticatedRequest, res: Respo
       }
       attachmentKeyEntries = keysResult.entries;
 
+      const passwordResult = parsePasswordProtectionMetadata(req.body);
+      if (passwordResult.error) {
+        res.status(400).json({ success: false, message: passwordResult.error });
+        return;
+      }
+
       const baseUrl = getBaseUrl(req);
       const publicUrl = `${baseUrl}/uploads/note-attachments/${file.filename}`;
       logger.info(`📦 Encrypted note file saved to disk: ${file.path} (attachmentId=${parsed.meta.attachmentId})`);
@@ -919,7 +1010,8 @@ export const uploadNoteAttachment = async (req: AuthenticatedRequest, res: Respo
         containerVersion: parsed.meta.containerVersion,
         chunkSize: parsed.meta.chunkSize,
         originalMimeType: parsed.meta.originalMimeType,
-        originalFileSize: parsed.meta.originalFileSize
+        originalFileSize: parsed.meta.originalFileSize,
+        ...(passwordResult.fields || {})
       };
     } else {
       const baseUrl = getBaseUrl(req);
@@ -1041,6 +1133,218 @@ export const deleteNoteAttachment = async (req: AuthenticatedRequest, res: Respo
     res.json({ success: true, message: 'Attachment deleted successfully' });
   } catch (error) {
     logger.error('Error in deleteNoteAttachment:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * Sets or clears an attachment's password-protection fields IN PLACE, on the
+ * attachment subdocument object itself — never touches `url`/file bytes. Used
+ * by the three "change password" endpoints below. `fields === null` means
+ * "remove protection" (the client sent `{ passwordProtected: false }`).
+ */
+function applyPasswordChange(attachment: any, fields: PasswordProtectionMetadata | null): void {
+  if (fields) {
+    attachment.passwordProtected = true;
+    attachment.passwordSalt = fields.passwordSalt;
+    attachment.passwordKdfAlgorithm = fields.passwordKdfAlgorithm;
+    attachment.passwordKdfParams = fields.passwordKdfParams;
+    attachment.encryptedFileKeyByPassword = fields.encryptedFileKeyByPassword;
+    attachment.passwordFileKeyIv = fields.passwordFileKeyIv;
+  } else {
+    attachment.passwordProtected = false;
+    attachment.passwordSalt = undefined;
+    attachment.passwordKdfAlgorithm = undefined;
+    attachment.passwordKdfParams = undefined;
+    attachment.encryptedFileKeyByPassword = undefined;
+    attachment.passwordFileKeyIv = undefined;
+  }
+}
+
+/**
+ * Change (or remove) a task-level attachment's password protection. Body is
+ * either the 6 password fields (to set/change) or `{ passwordProtected: false }`
+ * (to remove). Never touches the encrypted file itself — pure metadata PATCH,
+ * no multer/file involved. Same permission as deleteTaskAttachment.
+ */
+export const changeTaskAttachmentPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { taskId, attachmentId } = req.params;
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const task = await Task.findById(taskId).populate('projectId');
+    if (!task) {
+      res.status(404).json({ success: false, message: 'Task not found' });
+      return;
+    }
+    const project = await Project.findById(task.projectId);
+    if (!project) {
+      res.status(404).json({ success: false, message: 'Project not found' });
+      return;
+    }
+    const userId = req.user._id.toString();
+    const isOwner = project.ownerId.toString() === userId;
+    const isCoOwner = project.owners?.some((o: any) => o.toString() === userId);
+    const isManager = project.managers?.some((m: any) => m.toString() === userId);
+
+    const attachment = task.attachments.find((a: any) => a.id === attachmentId);
+    if (!attachment) {
+      res.status(404).json({ success: false, message: 'Attachment not found' });
+      return;
+    }
+    const isUploader = (attachment as any).uploadedBy?.toString() === userId;
+    if (!isOwner && !isCoOwner && !isManager && !isUploader) {
+      res.status(403).json({ success: false, message: 'Access denied' });
+      return;
+    }
+    if (!(attachment as any).isEncrypted) {
+      res.status(400).json({ success: false, message: 'Only encrypted attachments can be password protected' });
+      return;
+    }
+
+    const passwordResult = parsePasswordProtectionMetadata(req.body);
+    if (passwordResult.error) {
+      res.status(400).json({ success: false, message: passwordResult.error });
+      return;
+    }
+    if (req.body?.passwordProtected !== false && !passwordResult.fields) {
+      res.status(400).json({ success: false, message: 'Missing password-protection fields' });
+      return;
+    }
+
+    applyPasswordChange(attachment, passwordResult.fields);
+    task.markModified('attachments');
+    await task.save();
+
+    res.json({ success: true, message: 'Attachment password updated' });
+  } catch (error) {
+    logger.error('Error in changeTaskAttachmentPassword:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/** Same as changeTaskAttachmentPassword, for a subtask's attachment. */
+export const changeSubtaskAttachmentPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { taskId, subtaskId, attachmentId } = req.params;
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const task = await Task.findById(taskId).populate('projectId');
+    if (!task) {
+      res.status(404).json({ success: false, message: 'Task not found' });
+      return;
+    }
+    const project = await Project.findById(task.projectId);
+    if (!project) {
+      res.status(404).json({ success: false, message: 'Project not found' });
+      return;
+    }
+    const userId = req.user._id.toString();
+    const isOwner = project.ownerId.toString() === userId;
+    const isCoOwner = project.owners?.some((o: any) => o.toString() === userId);
+    const isManager = project.managers?.some((m: any) => m.toString() === userId);
+
+    const subtask = (task.subtasks as any[]).find((s) => s.id === subtaskId);
+    if (!subtask) {
+      res.status(404).json({ success: false, message: 'Subtask not found' });
+      return;
+    }
+    const attachment = (subtask.attachments || []).find((a: any) => a.id === attachmentId);
+    if (!attachment) {
+      res.status(404).json({ success: false, message: 'Attachment not found' });
+      return;
+    }
+    const isUploader = attachment.uploadedBy?.toString() === userId;
+    if (!isOwner && !isCoOwner && !isManager && !isUploader) {
+      res.status(403).json({ success: false, message: 'Access denied' });
+      return;
+    }
+    if (!attachment.isEncrypted) {
+      res.status(400).json({ success: false, message: 'Only encrypted attachments can be password protected' });
+      return;
+    }
+
+    const passwordResult = parsePasswordProtectionMetadata(req.body);
+    if (passwordResult.error) {
+      res.status(400).json({ success: false, message: passwordResult.error });
+      return;
+    }
+    if (req.body?.passwordProtected !== false && !passwordResult.fields) {
+      res.status(400).json({ success: false, message: 'Missing password-protection fields' });
+      return;
+    }
+
+    applyPasswordChange(attachment, passwordResult.fields);
+    task.markModified('subtasks');
+    await task.save();
+
+    res.json({ success: true, message: 'Attachment password updated' });
+  } catch (error) {
+    logger.error('Error in changeSubtaskAttachmentPassword:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/** Same as changeTaskAttachmentPassword, for a note's attachment. Same
+ *  permission as deleteNoteAttachment (owner or shared-with-edit-permission). */
+export const changeNoteAttachmentPassword = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { noteId, attachmentId } = req.params;
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const note = await Note.findOne({
+      _id: noteId,
+      $or: [{ userId: req.user._id }, { 'sharedWith.userId': req.user._id }]
+    });
+    if (!note) {
+      res.status(404).json({ success: false, message: 'Note not found' });
+      return;
+    }
+    const userId = req.user._id.toString();
+    const isOwner = note.userId.toString() === userId;
+    const sharedEntry = (note.sharedWith || []).find((s: any) => s.userId?.toString() === userId);
+    const canEdit = isOwner || sharedEntry?.permission === 'edit';
+    if (!canEdit) {
+      res.status(403).json({ success: false, message: 'You do not have permission to change attachment passwords on this note' });
+      return;
+    }
+
+    const attachment = (note.attachments || []).find((a: any) => a.id === attachmentId);
+    if (!attachment) {
+      res.status(404).json({ success: false, message: 'Attachment not found' });
+      return;
+    }
+    if (!attachment.isEncrypted) {
+      res.status(400).json({ success: false, message: 'Only encrypted attachments can be password protected' });
+      return;
+    }
+
+    const passwordResult = parsePasswordProtectionMetadata(req.body);
+    if (passwordResult.error) {
+      res.status(400).json({ success: false, message: passwordResult.error });
+      return;
+    }
+    if (req.body?.passwordProtected !== false && !passwordResult.fields) {
+      res.status(400).json({ success: false, message: 'Missing password-protection fields' });
+      return;
+    }
+
+    applyPasswordChange(attachment, passwordResult.fields);
+    note.markModified('attachments');
+    await note.save();
+
+    res.json({ success: true, message: 'Attachment password updated' });
+  } catch (error) {
+    logger.error('Error in changeNoteAttachmentPassword:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
