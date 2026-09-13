@@ -1,6 +1,11 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import {
+  PERSONAL_FILES_DIR,
+  PERSONAL_FILES_MAX_FILE_BYTES,
+  PERSONAL_FILES_ALLOWED_MIME_TYPES
+} from '../config/personalFiles';
 
 // Create uploads directories if they don't exist
 const avatarsDir = path.join(__dirname, '../../uploads/avatars');
@@ -219,3 +224,55 @@ export const uploadSupportAttachment = multer({
 });
 
 export default upload;
+
+// ── Personal Files ──────────────────────────────────────────────────────────
+// A DEDICATED multer instance for the Personal Files module. Deliberately kept
+// separate from every instance above (avatar/attachment/task/chat/support) so
+// Personal Files limits and its allow-list can be tuned without any risk of
+// changing existing upload behaviour.
+//
+// Physical storage is FLAT — the logical folder tree lives only in MongoDB. The
+// physical filename is generated server-side from a UUID and NEVER derived from
+// client input, so a malicious `originalname` (e.g. "../../etc/passwd") cannot
+// influence where the file lands. The user-visible name is stored (encrypted) in
+// the database instead.
+
+if (!fs.existsSync(PERSONAL_FILES_DIR)) {
+  fs.mkdirSync(PERSONAL_FILES_DIR, { recursive: true });
+}
+
+const personalFileStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, PERSONAL_FILES_DIR);
+  },
+  filename: (req, file, cb) => {
+    // `path.extname` on untrusted input is only used to keep a convenient suffix;
+    // it is sanitised to a short alphanumeric extension so nothing from the client
+    // can introduce a separator, a traversal sequence or a second extension.
+    const rawExt = path.extname(file.originalname || '');
+    const safeExt = /^\.[A-Za-z0-9]{1,12}$/.test(rawExt) ? rawExt.toLowerCase() : '';
+    const uuid = require('uuid').v4();
+    cb(null, `${Date.now()}-${uuid}${safeExt}`);
+  }
+});
+
+const personalFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const baseType = (file.mimetype || '').split(';')[0].trim().toLowerCase();
+  if (
+    PERSONAL_FILES_ALLOWED_MIME_TYPES.includes(file.mimetype) ||
+    PERSONAL_FILES_ALLOWED_MIME_TYPES.includes(baseType)
+  ) {
+    cb(null, true);
+  } else {
+    cb(new Error('This file type is not supported.'));
+  }
+};
+
+export const uploadPersonalFile = multer({
+  storage: personalFileStorage,
+  fileFilter: personalFileFilter,
+  limits: {
+    fileSize: PERSONAL_FILES_MAX_FILE_BYTES,
+    files: 1
+  }
+});

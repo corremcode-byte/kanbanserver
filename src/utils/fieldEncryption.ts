@@ -208,3 +208,23 @@ export function decryptMessageFields<T extends MessageLikeForDecryption>(message
   }
   return message;
 }
+
+interface PersonalFileLikeForDecryption {
+  _id: unknown;
+  name?: string;
+  storagePath?: string;
+  originalName?: string;
+}
+
+/** Decrypts name + storagePath + originalName on a personal-file-like object, in
+ *  place, keyed by the document's own id — same pattern and the same
+ *  no-op-on-plaintext backward compatibility as decryptNoteFields. `storagePath`
+ *  is a relative physical path and is decrypted for server-side filesystem
+ *  resolution only; it must never be included in an API response. */
+export function decryptPersonalFileFields<T extends PersonalFileLikeForDecryption>(item: T): T {
+  const itemId = String(item._id);
+  if (item.name) item.name = decryptField(item.name, itemId);
+  if (item.storagePath) item.storagePath = decryptField(item.storagePath, itemId);
+  if (item.originalName) item.originalName = decryptField(item.originalName, itemId);
+  return item;
+}
