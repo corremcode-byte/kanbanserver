@@ -79,6 +79,17 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Personal Files are PRIVATE: block the public static mount for them.
+// This MUST stay above the /uploads static handler below (which is otherwise
+// unchanged). Without it, the generic express.static mount would serve
+// uploads/personal-files/<filename> to anyone, unauthenticated, defeating the
+// per-user ownership checks on /api/personal-files. Personal file bytes are
+// served ONLY by the authenticated, owner-scoped
+// GET /api/personal-files/:id/download endpoint.
+app.use('/uploads/personal-files', (req, res) => {
+  res.status(404).json({ success: false, message: 'Not found' });
+});
+
 // Serve static files from uploads directory. Filenames are content-unique
 // (timestamp+uuid, and now a fresh name on every re-compression), so it's
 // safe to cache them forever — this avoids re-downloading the same chat

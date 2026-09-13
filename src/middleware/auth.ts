@@ -227,6 +227,60 @@ export const requireDataDeletionPermission = async (
   }
 };
 
+/**
+ * Personal Files module permission gate.
+ *
+ * Same shape as requireDataDeletionPermission above: super admins pass, everyone
+ * else needs the explicit permissions.modules.personalFiles.<action> flag, granted
+ * the same way as any other module permission (see PermissionsTable.tsx).
+ *
+ * This answers only "may this user use the Personal Files feature?". It deliberately
+ * says NOTHING about which files they may touch - that is ownership, enforced
+ * separately by scoping every query in personalFilesController to
+ * `userId: req.user._id`. The super-admin fast path therefore grants a super admin
+ * access to THEIR OWN drive, never to anyone else's; there is no admin bypass of
+ * ownership anywhere in this module.
+ *
+ * Missing/undefined flags are treated as GRANTED, matching the model default and
+ * the client's useModulePermission hook: Personal Files shipped ungated, so an
+ * absent flag means "this user predates the permission" and must not lose access.
+ * An explicit `false` always denies.
+ */
+export const requirePersonalFilesPermission = (
+  action: 'view' | 'create' | 'edit' | 'delete'
+) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      errorResponse(res, 'Authentication required', 401);
+      return;
+    }
+
+    if (req.user.role === 'superadmin') {
+      next();
+      return;
+    }
+
+    try {
+      const user = await User.findById(req.user._id).select('permissions.modules.personalFiles');
+      const modulePerms = user?.permissions?.modules?.personalFiles;
+
+      // Absent module or absent flag => granted (see note above). Only an explicit
+      // false denies.
+      const allowed = modulePerms === undefined || modulePerms[action] !== false;
+
+      if (!allowed) {
+        errorResponse(res, 'You do not have permission to perform this action on Personal Files', 403);
+        return;
+      }
+
+      next();
+    } catch (error) {
+      logger.error('Error checking Personal Files permission:', error);
+      errorResponse(res, 'Failed to verify permissions', 500);
+    }
+  };
+};
+
 // Additional middleware functions that might be referenced
 export const authorize = (roles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {

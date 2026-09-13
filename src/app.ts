@@ -72,6 +72,15 @@ app.use('/uploads', (req, res, next) => {
   next();
 });
 
+// Personal Files are PRIVATE and must never be reachable through the public
+// /uploads static mount below. This guard runs BEFORE express.static (it does not
+// modify it) so every request under /uploads/personal-files is refused outright,
+// whatever the physical filename. Personal files are served only by the
+// authenticated, ownership-checked GET /api/personal-files/:id/download endpoint.
+app.use('/uploads/personal-files', (req, res) => {
+  res.status(404).json({ success: false, message: 'Not found' });
+});
+
 // Use setHeaders to ensure CORS headers are set for static files
 app.use('/uploads', express.static(uploadsPath, {
   maxAge: '30d',

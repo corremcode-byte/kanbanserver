@@ -134,6 +134,17 @@ export interface IUser extends Document {
         edit?: boolean;
         [key: string]: boolean | undefined;
       };
+      // Personal Files is a PRIVATE per-user drive. These flags decide whether the
+      // user may use the feature at all; they never grant access to anyone else's
+      // files (every query in personalFilesController is scoped to
+      // `userId: req.user._id`, with no admin bypass).
+      personalFiles?: {
+        view?: boolean;
+        create?: boolean;
+        edit?: boolean;
+        delete?: boolean;
+        [key: string]: boolean | undefined;
+      };
       // "execute" (not "edit") since this permission runs an irreversible whole-database
       // wipe, not an edit of a record. Role 'superadmin' always has access regardless of
       // this flag (see requireDataDeletionPermission) — this only grants access to others.
@@ -382,6 +393,18 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       dataDeletion: {
         type: Schema.Types.Mixed,
         default: { view: false, execute: false }
+      },
+      // Defaults to GRANTED, unlike the modules above. Personal Files shipped as an
+      // ungated feature, so every existing user already has a personal drive; a
+      // `false` default would silently revoke access to their own files the moment
+      // this field was introduced. Mongoose applies a Mixed default when hydrating a
+      // stored document that lacks the path (verified), so the default is what every
+      // pre-existing user reads back — it has to be the permission-preserving value.
+      // This is safe to default open because these flags only decide whether someone
+      // may use their OWN drive; cross-user access is impossible by construction.
+      personalFiles: {
+        type: Schema.Types.Mixed,
+        default: { view: true, create: true, edit: true, delete: true }
       }
     }
   },
