@@ -7,6 +7,7 @@ import { emailService } from '../services/emailService';
 import jwt from 'jsonwebtoken';
 import { decrypt, encrypt } from '../utils/encryption';
 import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
+import { filterAttachmentKeysForUser } from '../utils/attachmentKeyFiltering';
 import { validatePassword, validatePasskey } from '../utils/validation';
 import { summarizeOutOfOffice } from '../utils/outOfOffice';
 import { v4 as uuidv4 } from 'uuid';
@@ -248,12 +249,12 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'Account is deactivated', 403);
     }
 
-    // Convert photoURL to absolute URL for client consumption
+    // Keep photoURL relative — the client resolves it against its own
+    // configured API origin (see avatarUtils.getAvatarUrl). Converting it to
+    // an absolute URL here using the server's own BASE_URL/localhost guess
+    // breaks avatars whenever that guess doesn't match the host the browser
+    // actually uses (e.g. behind a reverse proxy or a different public domain).
     const userData = user.toObject();
-    if (userData.photoURL && !userData.photoURL.startsWith('http')) {
-      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 4001}`;
-      userData.photoURL = `${baseUrl.replace(/\/+$/, '')}${userData.photoURL}`;
-    }
 
     return successResponse(res, 'User retrieved successfully', userData);
   } catch (error) {
@@ -269,17 +270,10 @@ export const getAllUsers = async (req: AuthenticatedRequest, res: Response) => {
       .select('-password') // Remove password field if it exists
       .sort({ createdAt: -1 });
 
-    // Convert photoURLs to absolute URLs for all users
-    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 4001}`;
-    const usersWithAbsoluteUrls = users.map(user => {
-      const userObj = user.toObject();
-      if (userObj.photoURL && !userObj.photoURL.startsWith('http')) {
-        userObj.photoURL = `${baseUrl.replace(/\/+$/, '')}${userObj.photoURL}`;
-      }
-      return userObj;
-    });
+    // Keep photoURL relative — see getCurrentUser for why.
+    const usersData = users.map(user => user.toObject());
 
-    return successResponse(res, 'Users retrieved successfully', usersWithAbsoluteUrls);
+    return successResponse(res, 'Users retrieved successfully', usersData);
   } catch (error) {
     logger.error('Error getting all users:', error);
     return internalServerErrorResponse(res, 'Failed to get users');
@@ -420,7 +414,10 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response) => {
 
     // Task titles/descriptions, the populated project name, and project name/description
     // are encrypted at rest.
-    recentTasks.forEach((t: any) => decryptTaskFields(t));
+    recentTasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      filterAttachmentKeysForUser(t, userId);
+    });
     recentProjects.forEach((p: any) => decryptProjectFields(p));
 
     // Build activity timeline
@@ -786,7 +783,10 @@ export const getDashboardData = async (req: AuthenticatedRequest, res: Response)
     ]);
 
     // Task titles/descriptions and the populated project name are encrypted at rest.
-    recentTasks.forEach((t: any) => decryptTaskFields(t));
+    recentTasks.forEach((t: any) => {
+      decryptTaskFields(t);
+      filterAttachmentKeysForUser(t, userId);
+    });
 
     // Add roles information to projects
     const projectsWithRoles = projects.map(project => {

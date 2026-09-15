@@ -12,6 +12,7 @@ router.use(authenticate);
 router.get('/', projectsController.getProjects);
 router.post('/', checkCanCreateProject, projectsController.createProject);
 router.get('/:id', projectsController.getProject);
+router.get('/:id/member-keys', projectsController.getProjectMemberKeys);
 router.put('/:id', checkPermission('canEditProject'), projectsController.updateProject);
 router.delete('/:id', checkCanDeleteProject, projectsController.deleteProject);
 

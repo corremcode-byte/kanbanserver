@@ -137,14 +137,21 @@ interface NoteLikeForDecryption {
   _id: unknown;
   title?: string;
   content?: string;
+  attachments?: Array<{ url?: string }>;
 }
 
-/** Decrypts title + content on a note-like object, in place. `description` (the
- *  legacy plaintext field) is intentionally left untouched — out of scope. */
+/** Decrypts title, content, and every attachment's url on a note-like object,
+ *  in place, all keyed by the note's own id. `description` (the legacy
+ *  plaintext field) is intentionally left untouched — out of scope. */
 export function decryptNoteFields<T extends NoteLikeForDecryption>(note: T): T {
   const noteId = String(note._id);
   if (note.title) note.title = decryptField(note.title, noteId);
   if (note.content) note.content = decryptField(note.content, noteId);
+  if (Array.isArray(note.attachments)) {
+    note.attachments.forEach((a) => {
+      if (a.url) a.url = decryptField(a.url, noteId);
+    });
+  }
   return note;
 }
 

@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
-import { Note } from '../models';
+import { Note, User } from '../models';
 import { successResponse, errorResponse, notFoundResponse, internalServerErrorResponse } from '../utils/responses';
 import { logger } from '../utils/logger';
 import { sanitizeHTMLContent, validateHtmlSize } from '../middleware/sanitizeHtml';
 import { encryptField, decryptNoteFields } from '../utils/fieldEncryption';
+import { filterAttachmentKeysForUser } from '../utils/attachmentKeyFiltering';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -33,7 +34,10 @@ export const getNotes = async (req: AuthenticatedRequest, res: Response): Promis
       .sort({ updatedAt: -1 })
       .lean();
 
-    notes.forEach((n: any) => decryptNoteFields(n));
+    notes.forEach((n: any) => {
+      decryptNoteFields(n);
+      filterAttachmentKeysForUser(n, req.user!._id.toString());
+    });
 
     // Add permission info to each note
     const notesWithPermissions = notes.map(note => ({
@@ -75,6 +79,7 @@ export const getNote = async (req: AuthenticatedRequest, res: Response): Promise
     }
 
     decryptNoteFields(note as any);
+    filterAttachmentKeysForUser(note as any, req.user._id.toString());
 
     // Add permission info
     const userPermission = note.userId.toString() === req.user._id.toString()
@@ -87,6 +92,53 @@ export const getNote = async (req: AuthenticatedRequest, res: Response): Promise
   } catch (error) {
     logger.error('Error in getNote:', error);
     internalServerErrorResponse(res, 'Failed to retrieve note');
+  }
+};
+
+/**
+ * Current recipients' (owner + sharedWith[]) NaCl public keys — used by the
+ * client to seal a note attachment's random AES file key to every current
+ * recipient (mirrors chatController.ts::getGroupMemberKeys /
+ * projectsController.ts::getProjectMemberKeys). No admin-recovery-key concept
+ * exists for notes; this response has no equivalent field.
+ */
+export const getNoteRecipientKeys = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user || !req.user._id) {
+      errorResponse(res, 'Authentication required', 401);
+      return;
+    }
+
+    const { id } = req.params;
+    const note = await Note.findOne({
+      _id: id,
+      $or: [
+        { userId: req.user._id },
+        { 'sharedWith.userId': req.user._id }
+      ]
+    }).lean();
+
+    if (!note) {
+      notFoundResponse(res, 'Note not found');
+      return;
+    }
+
+    const recipientIds = new Set<string>();
+    if (note.userId) recipientIds.add(note.userId.toString());
+    (note.sharedWith || []).forEach((s: any) => {
+      const uid = s.userId?.toString?.();
+      if (uid) recipientIds.add(uid);
+    });
+
+    const users = await User.find({ _id: { $in: Array.from(recipientIds) } }).select('encryptionPublicKey');
+    const memberKeys = users
+      .filter((u: any) => !!u.encryptionPublicKey)
+      .map((u: any) => ({ userId: u._id.toString(), encryptionPublicKey: u.encryptionPublicKey as string }));
+
+    successResponse(res, 'Note recipient keys retrieved', { memberKeys });
+  } catch (error) {
+    logger.error('Error in getNoteRecipientKeys:', error);
+    internalServerErrorResponse(res, 'Failed to retrieve note recipient keys');
   }
 };
 
@@ -169,6 +221,7 @@ export const createNote = async (req: AuthenticatedRequest, res: Response): Prom
     await note.save();
 
     decryptNoteFields(note as any);
+    filterAttachmentKeysForUser(note as any, req.user._id.toString());
 
     successResponse(res, 'Note created successfully', { note }, 201);
   } catch (error) {
@@ -286,6 +339,7 @@ export const updateNote = async (req: AuthenticatedRequest, res: Response): Prom
     await note.save();
 
     decryptNoteFields(note as any);
+    filterAttachmentKeysForUser(note as any, req.user._id.toString());
 
     successResponse(res, 'Note updated successfully', { note });
   } catch (error) {

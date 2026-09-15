@@ -3,11 +3,47 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface ITaskAttachment {
   id: string;
   name: string;
+  // For encryptionVersion 0 (legacy, default): direct URL to the plaintext
+  // file. For 1: URL to the opaque AES-256-GCM encrypted container — see
+  // kanbanclient/src/services/attachmentEncryptionService.ts. Either way this
+  // string is additionally obfuscated at rest via fieldEncryption.ts (keyed by
+  // the parent TASK's own id, even for subtask attachments) — unrelated to,
+  // and unaffected by, true E2EE.
   url: string;
+  // For encryptionVersion 0: the real MIME type. For 1: 'application/octet-stream'.
   type: string;
+  // For encryptionVersion 0: plaintext byte size. For 1: encrypted container size.
   size: number;
   uploadedBy: mongoose.Types.ObjectId;
   uploadedAt: Date;
+  // Stable client-generated uuid, present for encryptionVersion 1, absent on
+  // every pre-existing (legacy plaintext) attachment. Referenced by this
+  // task's own top-level attachmentKeys[] (see ITask.attachmentKeys below).
+  attachmentId?: string;
+  isEncrypted?: boolean;
+  // 0 (default/absent) = plaintext. 1 = true E2EE — the server never sees the
+  // plaintext file or the AES key; see docs/E2EE_ATTACHMENTS.md.
+  encryptionVersion?: number;
+  encryptionAlgorithm?: string;
+  containerVersion?: number;
+  chunkSize?: number;
+  originalMimeType?: string;
+  originalFileSize?: number;
+  // Optional ADDITIONAL password protection layer, independent of this task's
+  // top-level attachmentKeys[] nacl.box sealing — see
+  // kanbanclient/src/services/attachmentEncryptionService.ts. Opaque to the
+  // server; never derived/validated cryptographically here.
+  passwordProtected?: boolean;
+  passwordSalt?: string;
+  passwordKdfAlgorithm?: string;
+  passwordKdfParams?: {
+    iterations: number;
+    parallelism: number;
+    memorySize: number;
+    hashLength: number;
+  };
+  encryptedFileKeyByPassword?: string;
+  passwordFileKeyIv?: string;
 }
 
 export interface ITaskComment {
@@ -56,6 +92,21 @@ export interface ITask extends Document {
   reminderEndTime?: string;   // "HH:MM" e.g. "18:00"
   lastReminderSent?: Date;
   attachments: ITaskAttachment[];
+  // Sealed per-recipient copies of every encrypted attachment's random AES
+  // file key — covers BOTH task-level (attachments above) and subtask-level
+  // (subtasks[].attachments) attachments together in one flat array, keyed by
+  // attachmentId (a client-generated uuid, globally unique regardless of
+  // which array its metadata lives in). Recipients = this task's project's
+  // current owner/owners/members/managers at upload time — see
+  // controllers/uploadController.ts and docs/E2EE_ATTACHMENTS.md. NO
+  // admin-recovery-sealed counterpart exists here, by design.
+  attachmentKeys?: {
+    attachmentId: string;
+    userId: mongoose.Types.ObjectId;
+    encryptedKey: string;
+    nonce: string;
+    senderPublicKey: string;
+  }[];
   comments: ITaskComment[];
   subtasks: ISubtask[];
   order: number;
@@ -167,8 +218,37 @@ const TaskSchema = new Schema<ITask>({
     type: { type: String, required: true },
     size: { type: Number, required: true },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    uploadedAt: { type: Date, default: Date.now }
+    uploadedAt: { type: Date, default: Date.now },
+    attachmentId: String,
+    isEncrypted: Boolean,
+    encryptionVersion: { type: Number, default: 0 },
+    encryptionAlgorithm: String,
+    containerVersion: Number,
+    chunkSize: Number,
+    originalMimeType: String,
+    originalFileSize: Number,
+    passwordProtected: Boolean,
+    passwordSalt: String,
+    passwordKdfAlgorithm: String,
+    passwordKdfParams: {
+      iterations: Number,
+      parallelism: Number,
+      memorySize: Number,
+      hashLength: Number
+    },
+    encryptedFileKeyByPassword: String,
+    passwordFileKeyIv: String
   }],
+  attachmentKeys: {
+    type: [{
+      attachmentId: { type: String, required: true },
+      userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+      encryptedKey: { type: String, required: true },
+      nonce: { type: String, required: true },
+      senderPublicKey: { type: String, required: true }
+    }],
+    default: []
+  },
   comments: [{
     id: { type: String, required: true },
     text: { type: String, required: true, trim: true },
@@ -195,7 +275,26 @@ const TaskSchema = new Schema<ITask>({
       type: { type: String, required: true },
       size: { type: Number, required: true },
       uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-      uploadedAt: { type: Date, default: Date.now }
+      uploadedAt: { type: Date, default: Date.now },
+      attachmentId: String,
+      isEncrypted: Boolean,
+      encryptionVersion: { type: Number, default: 0 },
+      encryptionAlgorithm: String,
+      containerVersion: Number,
+      chunkSize: Number,
+      originalMimeType: String,
+      originalFileSize: Number,
+      passwordProtected: Boolean,
+      passwordSalt: String,
+      passwordKdfAlgorithm: String,
+      passwordKdfParams: {
+        iterations: Number,
+        parallelism: Number,
+        memorySize: Number,
+        hashLength: Number
+      },
+      encryptedFileKeyByPassword: String,
+      passwordFileKeyIv: String
     }]
   }],
   likes: [{ type: Schema.Types.ObjectId, ref: 'User' }],

@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware } from '../middleware/upload';
+import { uploadTaskAttachment as uploadTaskMiddleware, uploadChatAttachment as uploadChatMiddleware, uploadSupportAttachment as uploadSupportMiddleware, uploadNoteAttachment as uploadNoteMiddleware } from '../middleware/upload';
 import {
   uploadTaskAttachment,
   deleteTaskAttachment,
@@ -8,7 +8,13 @@ import {
   uploadSubtaskAttachment,
   deleteSubtaskAttachment,
   uploadChatAttachment,
-  uploadSupportAttachment
+  uploadSupportAttachment,
+  uploadNoteAttachment,
+  getNoteAttachments,
+  deleteNoteAttachment,
+  changeTaskAttachmentPassword,
+  changeSubtaskAttachmentPassword,
+  changeNoteAttachmentPassword
 } from '../controllers/uploadController';
 import { MulterError } from 'multer';
 
@@ -70,6 +76,14 @@ router.get('/task/:taskId/attachments', getTaskAttachments);
 router.delete('/task/:taskId/attachment/:attachmentId', deleteTaskAttachment);
 
 /**
+ * @route   PATCH /api/upload/task/:taskId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a task attachment's password protection —
+ *          metadata only, never touches the encrypted file bytes
+ * @access  Private (owner/co-owner/manager/uploader only)
+ */
+router.patch('/task/:taskId/attachment/:attachmentId/password', changeTaskAttachmentPassword);
+
+/**
  * @route   POST /api/upload/task/:taskId/subtask/:subtaskId
  * @desc    Upload attachment to a subtask
  * @access  Private (project members)
@@ -84,6 +98,13 @@ router.post('/task/:taskId/subtask/:subtaskId', uploadTaskMiddleware.single('fil
 router.delete('/task/:taskId/subtask/:subtaskId/attachment/:attachmentId', deleteSubtaskAttachment);
 
 /**
+ * @route   PATCH /api/upload/task/:taskId/subtask/:subtaskId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a subtask attachment's password protection
+ * @access  Private (owner/co-owner/manager/uploader only)
+ */
+router.patch('/task/:taskId/subtask/:subtaskId/attachment/:attachmentId/password', changeSubtaskAttachmentPassword);
+
+/**
  * @route   POST /api/upload/chat/:groupId
  * @desc    Upload attachment for chat message
  * @access  Private (chat group members only)
@@ -96,5 +117,33 @@ router.post('/chat/:groupId', uploadChatMiddleware.single('file'), handleMulterE
  * @access  Private
  */
 router.post('/support', uploadSupportMiddleware.single('file'), handleMulterError, uploadSupportAttachment);
+
+/**
+ * @route   POST /api/upload/note/:noteId
+ * @desc    Upload attachment to a note
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.post('/note/:noteId', uploadNoteMiddleware.single('file'), handleMulterError, uploadNoteAttachment);
+
+/**
+ * @route   GET /api/upload/note/:noteId/attachments
+ * @desc    Get all attachments for a note
+ * @access  Private (note owner or shared-with users)
+ */
+router.get('/note/:noteId/attachments', getNoteAttachments);
+
+/**
+ * @route   DELETE /api/upload/note/:noteId/attachment/:attachmentId
+ * @desc    Delete attachment from a note
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.delete('/note/:noteId/attachment/:attachmentId', deleteNoteAttachment);
+
+/**
+ * @route   PATCH /api/upload/note/:noteId/attachment/:attachmentId/password
+ * @desc    Set/change/remove a note attachment's password protection
+ * @access  Private (note owner or shared-with-edit-permission users)
+ */
+router.patch('/note/:noteId/attachment/:attachmentId/password', changeNoteAttachmentPassword);
 
 export default router;

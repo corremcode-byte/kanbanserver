@@ -12,8 +12,33 @@ import { convertPhotoURLsToAbsolute } from '../utils/urlHelper';
 import { encryptField, decryptMessageFields } from '../utils/fieldEncryption';
 import nacl from 'tweetnacl';
 import { getOrCreateAdminRecoveryKeyPair } from '../utils/adminRecoveryKey';
-import { validateAndBuildKeyEpoch } from '../utils/groupKeyValidation';
+import { validateAndBuildKeyEpoch, isValidSealedKeyEntryShape, memberKeysMatchGroupMembers } from '../utils/groupKeyValidation';
+import { filterAttachmentKeysForUser, pickAttachmentKeysForUser, stripAttachmentKeys } from '../utils/attachmentKeyFiltering';
 import { AuditLog } from '../models/AuditLog';
+
+// Emits a message-related socket event to every group member, giving each
+// recipient a payload containing ONLY their own attachmentKeys entries (see
+// utils/attachmentKeyFiltering.ts) — never a shared object carrying every
+// member's sealed attachment keys. `messageObj` should be a plain object
+// (already .toObject()'d / photoURL-absolutized) whose `attachmentKeys` is
+// still the FULL, unfiltered array; this function derives each recipient's
+// filtered copy from it, so it must be called before anything mutates that
+// array in place for a single recipient.
+function emitMessageEventToGroupMembers(
+  members: mongoose.Types.ObjectId[],
+  eventName: string,
+  groupId: mongoose.Types.ObjectId | string,
+  messageObj: any
+) {
+  members.forEach((memberId) => {
+    const memberIdStr = memberId.toString();
+    const payload = {
+      ...messageObj,
+      attachmentKeys: pickAttachmentKeysForUser(messageObj.attachmentKeys, memberIdStr)
+    };
+    io.to(`user:${memberIdStr}`).emit(eventName, { groupId, message: payload });
+  });
+}
 
 // The group creator is always an admin implicitly (never stored in `admins`
 // itself — see IChatGroup.admins), so admin status is always creator-or-listed.
@@ -268,7 +293,10 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           .lean();
 
         // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
-        if (lastMessage) decryptMessageFields(lastMessage as any);
+        if (lastMessage) {
+          decryptMessageFields(lastMessage as any);
+          if (userId) filterAttachmentKeysForUser(lastMessage as any, userId.toString());
+        }
 
         // Count unread messages for this user in this group
         const unreadCount = await Message.countDocuments({
@@ -408,7 +436,7 @@ export const muteGroup = async (req: AuthenticatedRequest, res: Response) => {
 // Send a message to a group
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { groupId, encryptedContent, nonce, attachments, replyTo, keyVersion } = req.body;
+    const { groupId, encryptedContent, nonce, attachments, attachmentKeys, replyTo, keyVersion } = req.body;
     const senderId = req.user?._id;
     const userId = senderId?.toString();
 
@@ -425,6 +453,47 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!chatGroup) {
       return res.status(403).json({ message: 'Not authorized to send messages to this group' });
+    }
+
+    // Validate attachmentKeys (sealed per-recipient copies of each encrypted
+    // attachment's AES file key — see models/Message.ts). There is deliberately
+    // no admin-recovery-sealed counterpart here: unlike group text keys, these
+    // are never escrowed, which is what makes attachment content genuinely
+    // unreadable server-side. Unlike text-key rotation's soft-fallback-to-legacy
+    // behavior, there is no safe fallback for a malformed attachmentKeys payload —
+    // an attachment with a bad/missing key would be silently undecryptable
+    // (including by its own sender), so the whole send is rejected instead.
+    const currentMemberIds = chatGroup.members.map((m) => m.toString());
+    let validatedAttachmentKeys: { attachmentId: string; userId: string; encryptedKey: string; nonce: string; senderPublicKey: string }[] = [];
+    if (attachmentKeys !== undefined) {
+      if (!Array.isArray(attachmentKeys)) {
+        return res.status(400).json({ message: 'attachmentKeys must be an array' });
+      }
+      if (!attachmentKeys.every((k: any) => typeof k?.attachmentId === 'string' && k.attachmentId.length > 0 && isValidSealedKeyEntryShape(k))) {
+        return res.status(400).json({ message: 'One or more attachmentKeys entries are malformed' });
+      }
+      if (!memberKeysMatchGroupMembers(attachmentKeys, currentMemberIds)) {
+        return res.status(400).json({ message: 'attachmentKeys may only be sealed to current group members' });
+      }
+      const attachmentIdsInRequest = new Set(
+        Array.isArray(attachments) ? attachments.map((a: any) => a?.attachmentId).filter(Boolean) : []
+      );
+      if (!attachmentKeys.every((k: any) => attachmentIdsInRequest.has(k.attachmentId))) {
+        return res.status(400).json({ message: 'attachmentKeys references an attachment not present in this message' });
+      }
+      validatedAttachmentKeys = attachmentKeys;
+    }
+
+    if (Array.isArray(attachments)) {
+      for (const att of attachments) {
+        if (att?.isEncrypted || att?.encryptionVersion === 1) {
+          if (!att.attachmentId || !validatedAttachmentKeys.some((k) => k.attachmentId === att.attachmentId)) {
+            return res.status(400).json({
+              message: 'Every encrypted attachment must include a valid attachmentId with at least one attachmentKeys entry'
+            });
+          }
+        }
+      }
     }
 
     // Check if user has sendMessages permission (group creators can always send)
@@ -468,6 +537,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       // it, preserving today's behavior exactly.
       keyVersion: Number.isInteger(keyVersion) && keyVersion >= 1 ? keyVersion : 1,
       attachments: attachments || [],
+      attachmentKeys: validatedAttachmentKeys,
       readBy: [{ userId: senderId, readAt: new Date() }]
     };
 
@@ -523,14 +593,10 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     // keyed by that message's own id.
     decryptMessageFields(message as any);
 
-    // Emit to all group members via Socket.IO with absolute photoURLs
+    // Emit to all group members via Socket.IO with absolute photoURLs. Each
+    // recipient gets a payload containing ONLY their own attachmentKeys entries.
     const messageWithAbsoluteUrls = convertPhotoURLsToAbsolute(message.toObject(), req);
-    chatGroup.members.forEach((memberId) => {
-      io.to(`user:${memberId.toString()}`).emit('chat:message:new', {
-        groupId,
-        message: messageWithAbsoluteUrls
-      });
-    });
+    emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:new', groupId, messageWithAbsoluteUrls);
 
     // Send notifications to members who are not the sender
     // Get sender's display name for the notification
@@ -594,6 +660,10 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
 
+    // Filtered AFTER the socket broadcast above (which needed every member's
+    // entries to build their individual payloads) — this HTTP response goes to
+    // the sender alone, so it only needs the sender's own entries.
+    filterAttachmentKeysForUser(message as any, userId);
     return res.status(201).json(message);
   } catch (error) {
     console.error('Error sending message:', error);
@@ -643,6 +713,7 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
     // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest —
     // no further save() follows, so decrypting in place is safe.
     messages.forEach((m: any) => decryptMessageFields(m));
+    messages.forEach((m: any) => filterAttachmentKeysForUser(m, userId?.toString() || ''));
 
     // Convert photoURLs to absolute URLs
     // convertPhotoURLsToAbsolute now handles ObjectId serialization internally
@@ -702,6 +773,7 @@ export const getGroupStarredMessages = async (req: AuthenticatedRequest, res: Re
     // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest —
     // no further save() follows, so decrypting in place is safe.
     messages.forEach((m: any) => decryptMessageFields(m));
+    messages.forEach((m: any) => filterAttachmentKeysForUser(m, userId?.toString() || ''));
 
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
 
@@ -820,17 +892,14 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
     // save() already happened above; safe to decrypt in place now.
     decryptMessageFields(message as any);
 
-    // Notify all group members via Socket.IO
+    // Notify all group members via Socket.IO — each recipient gets only their
+    // own attachmentKeys entries.
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
-      chatGroup.members.forEach((memberId) => {
-        io.to(`user:${memberId.toString()}`).emit('chat:message:updated', {
-          groupId: message.groupId,
-          message
-        });
-      });
+      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:updated', message.groupId, message.toObject());
     }
 
+    filterAttachmentKeysForUser(message as any, userId?.toString() || '');
     return res.json(message);
   } catch (error) {
     console.error('Error editing message:', error);
@@ -887,14 +956,11 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
     // save() already happened above; safe to decrypt in place now.
     decryptMessageFields(message as any);
 
-    // Notify all group members via Socket.IO
-    chatGroup.members.forEach((memberId) => {
-      io.to(`user:${memberId.toString()}`).emit('chat:message:deleted', {
-        groupId: message.groupId,
-        message
-      });
-    });
+    // Notify all group members via Socket.IO — each recipient gets only their
+    // own attachmentKeys entries.
+    emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:deleted', message.groupId, message.toObject());
 
+    filterAttachmentKeysForUser(message as any, userId?.toString() || '');
     return res.json({ success: true, message });
   } catch (error) {
     console.error('Error deleting message:', error);
@@ -949,17 +1015,14 @@ export const toggleReaction = async (req: AuthenticatedRequest, res: Response) =
     // save() already happened above; safe to decrypt in place now.
     decryptMessageFields(message as any);
 
-    // Notify all group members via Socket.IO
+    // Notify all group members via Socket.IO — each recipient gets only their
+    // own attachmentKeys entries.
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
-      chatGroup.members.forEach((memberId) => {
-        io.to(`user:${memberId.toString()}`).emit('chat:message:reacted', {
-          groupId: message.groupId,
-          message
-        });
-      });
+      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:reacted', message.groupId, message.toObject());
     }
 
+    filterAttachmentKeysForUser(message as any, userId?.toString() || '');
     return res.json({ success: true, message });
   } catch (error) {
     console.error('Error toggling reaction:', error);
@@ -987,17 +1050,14 @@ export const togglePin = async (req: AuthenticatedRequest, res: Response) => {
     // save() already happened above; safe to decrypt in place now.
     decryptMessageFields(message as any);
 
-    // Notify all group members via Socket.IO
+    // Notify all group members via Socket.IO — each recipient gets only their
+    // own attachmentKeys entries.
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
-      chatGroup.members.forEach((memberId) => {
-        io.to(`user:${memberId.toString()}`).emit('chat:message:pinned', {
-          groupId: message.groupId,
-          message
-        });
-      });
+      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:pinned', message.groupId, message.toObject());
     }
 
+    filterAttachmentKeysForUser(message as any, userId?.toString() || '');
     return res.json({ success: true, message });
   } catch (error) {
     console.error('Error toggling pin:', error);
@@ -1031,6 +1091,7 @@ export const toggleStar = async (req: AuthenticatedRequest, res: Response) => {
 
     // save() already happened above; safe to decrypt in place now.
     decryptMessageFields(message as any);
+    filterAttachmentKeysForUser(message as any, userId?.toString() || '');
 
     return res.json({
       success: true,
@@ -1937,7 +1998,12 @@ export const superAdminGetUserChatGroups = async (req: AuthenticatedRequest, res
           .lean();
 
         // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
-        if (lastMessage) decryptMessageFields(lastMessage as any);
+        // Admin has no NaCl private key that could use attachmentKeys — strip
+        // entirely rather than filter to "no one" (defense in depth).
+        if (lastMessage) {
+          decryptMessageFields(lastMessage as any);
+          stripAttachmentKeys(lastMessage as any);
+        }
 
         if (lastMessage && (lastMessage as any).keyVersion >= 2) {
           const epoch = (group.keyEpochs || []).find((e: any) => e.version === (lastMessage as any).keyVersion);
@@ -2082,6 +2148,10 @@ export const superAdminGetGroupMessages = async (req: AuthenticatedRequest, res:
       }
     });
 
+    // Admin has no NaCl private key that could use attachmentKeys — strip
+    // entirely rather than rely solely on "the admin just doesn't have the key".
+    messages.forEach((m: any) => stripAttachmentKeys(m));
+
     const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req) as any[];
     const messagesWithDecrypted = messagesWithAbsoluteUrls.map((m) => {
       const decrypted = decryptedContentById.get(m._id.toString());
@@ -2179,7 +2249,10 @@ export const createOrGetPersonalChat = async (req: AuthenticatedRequest, res: Re
         .lean();
 
       // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
-      if (lastMessage) decryptMessageFields(lastMessage as any);
+      if (lastMessage) {
+        decryptMessageFields(lastMessage as any);
+        filterAttachmentKeysForUser(lastMessage as any, currentUserId.toString());
+      }
 
       const unreadCount = await Message.countDocuments({
         groupId: existingPersonalChat._id,

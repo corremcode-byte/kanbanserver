@@ -10,6 +10,7 @@ router.use(authenticate);
 // Notes CRUD operations
 router.get('/', notesController.getNotes);
 router.get('/:id', notesController.getNote);
+router.get('/:id/recipient-keys', notesController.getNoteRecipientKeys);
 router.post('/', notesController.createNote);
 router.put('/:id', notesController.updateNote);
 router.delete('/:id', notesController.deleteNote);
