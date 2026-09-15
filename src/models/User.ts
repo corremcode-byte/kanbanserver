@@ -145,6 +145,16 @@ export interface IUser extends Document {
         delete?: boolean;
         [key: string]: boolean | undefined;
       };
+      // Shared Files is ONE GLOBAL repository. These flags decide whether the user
+      // may use the feature at all; a user with `view` sees EVERY shared file, not
+      // only their own uploads (sharedFilesController never filters by user).
+      sharedFiles?: {
+        view?: boolean;
+        create?: boolean;
+        edit?: boolean;
+        delete?: boolean;
+        [key: string]: boolean | undefined;
+      };
       // "execute" (not "edit") since this permission runs an irreversible whole-database
       // wipe, not an edit of a record. Role 'superadmin' always has access regardless of
       // this flag (see requireDataDeletionPermission) — this only grants access to others.
@@ -405,6 +415,15 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       personalFiles: {
         type: Schema.Types.Mixed,
         default: { view: true, create: true, edit: true, delete: true }
+      },
+      // Shared Files is a NEW, opt-in module and follows the closed default every
+      // other gated module uses (unlike personalFiles above, which is open only
+      // because it shipped ungated). An admin must grant it in User Management.
+      // The client sidebar hides the item and the page shows Access Denied on
+      // the same `view: false`, so no user ever sees a module the API denies.
+      sharedFiles: {
+        type: Schema.Types.Mixed,
+        default: { view: false, create: false, edit: false, delete: false }
       }
     }
   },

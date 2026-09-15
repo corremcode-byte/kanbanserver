@@ -90,6 +90,14 @@ app.use('/uploads/personal-files', (req, res) => {
   res.status(404).json({ success: false, message: 'Not found' });
 });
 
+// Shared Files are likewise PRIVATE (authenticated + sharedFiles.view). Same
+// guard, same placement: it MUST stay above the /uploads static mount below,
+// which is otherwise unchanged. Shared file bytes are served ONLY by the
+// authenticated, permission-checked GET /api/shared-files/:id/download endpoint.
+app.use('/uploads/shared-files', (req, res) => {
+  res.status(404).json({ success: false, message: 'Not found' });
+});
+
 // Serve static files from uploads directory. Filenames are content-unique
 // (timestamp+uuid, and now a fresh name on every re-compression), so it's
 // safe to cache them forever — this avoids re-downloading the same chat

@@ -6,6 +6,11 @@ import {
   PERSONAL_FILES_MAX_FILE_BYTES,
   PERSONAL_FILES_ALLOWED_MIME_TYPES
 } from '../config/personalFiles';
+import {
+  SHARED_FILES_DIR,
+  SHARED_FILES_MAX_FILE_BYTES,
+  SHARED_FILES_ALLOWED_MIME_TYPES
+} from '../config/sharedFiles';
 
 // Create uploads directories if they don't exist
 const avatarsDir = path.join(__dirname, '../../uploads/avatars');
@@ -273,6 +278,55 @@ export const uploadPersonalFile = multer({
   fileFilter: personalFileFilter,
   limits: {
     fileSize: PERSONAL_FILES_MAX_FILE_BYTES,
+    files: 1
+  }
+});
+
+// ── Shared Files ────────────────────────────────────────────────────────────
+// A DEDICATED multer instance for the Shared Files module, separate from every
+// instance above INCLUDING uploadPersonalFile: the two modules have different
+// storage directories (uploads/shared-files vs uploads/personal-files), separate
+// quotas and independently tunable allow-lists. Nothing here is shared with the
+// Personal Files instance, so neither module's upload policy can drift into the
+// other's.
+//
+// Same hardening as Personal Files: flat physical storage, a server-generated
+// UUID filename, and a sanitised extension — the client's `originalname` never
+// influences where bytes land.
+
+if (!fs.existsSync(SHARED_FILES_DIR)) {
+  fs.mkdirSync(SHARED_FILES_DIR, { recursive: true });
+}
+
+const sharedFileStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, SHARED_FILES_DIR);
+  },
+  filename: (req, file, cb) => {
+    const rawExt = path.extname(file.originalname || '');
+    const safeExt = /^\.[A-Za-z0-9]{1,12}$/.test(rawExt) ? rawExt.toLowerCase() : '';
+    const uuid = require('uuid').v4();
+    cb(null, `${Date.now()}-${uuid}${safeExt}`);
+  }
+});
+
+const sharedFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const baseType = (file.mimetype || '').split(';')[0].trim().toLowerCase();
+  if (
+    SHARED_FILES_ALLOWED_MIME_TYPES.includes(file.mimetype) ||
+    SHARED_FILES_ALLOWED_MIME_TYPES.includes(baseType)
+  ) {
+    cb(null, true);
+  } else {
+    cb(new Error('This file type is not supported.'));
+  }
+};
+
+export const uploadSharedFile = multer({
+  storage: sharedFileStorage,
+  fileFilter: sharedFileFilter,
+  limits: {
+    fileSize: SHARED_FILES_MAX_FILE_BYTES,
     files: 1
   }
 });

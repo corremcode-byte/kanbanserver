@@ -8,5 +8,6 @@ export { default as AuditLog, IAuditLog } from './AuditLog';
 export { Notification, INotification } from './Notification';
 export { default as Note, INote } from './Note';
 export { default as PersonalFile, IPersonalFile } from './PersonalFile';
+export { default as SharedFile, ISharedFile } from './SharedFile';
 
 export { Types, Document } from 'mongoose';

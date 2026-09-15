@@ -228,3 +228,25 @@ export function decryptPersonalFileFields<T extends PersonalFileLikeForDecryptio
   if (item.originalName) item.originalName = decryptField(item.originalName, itemId);
   return item;
 }
+
+interface SharedFileLikeForDecryption {
+  _id: unknown;
+  name?: string;
+  storagePath?: string;
+  originalName?: string;
+}
+
+/** Decrypts name + storagePath + originalName on a shared-file-like object, in
+ *  place, keyed by the document's own id — identical mechanics to
+ *  decryptPersonalFileFields (same algorithm, same key derivation, same
+ *  no-op-on-plaintext behaviour), kept as its own helper so the two modules never
+ *  share a code path that one of them might later specialise. `storagePath` is
+ *  decrypted for server-side filesystem resolution only and must never be
+ *  included in an API response. */
+export function decryptSharedFileFields<T extends SharedFileLikeForDecryption>(item: T): T {
+  const itemId = String(item._id);
+  if (item.name) item.name = decryptField(item.name, itemId);
+  if (item.storagePath) item.storagePath = decryptField(item.storagePath, itemId);
+  if (item.originalName) item.originalName = decryptField(item.originalName, itemId);
+  return item;
+}

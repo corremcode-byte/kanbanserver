@@ -281,6 +281,57 @@ export const requirePersonalFilesPermission = (
   };
 };
 
+/**
+ * Shared Files module permission gate.
+ *
+ * Same shape as requirePersonalFilesPermission above (super admins pass, everyone
+ * else needs permissions.modules.sharedFiles.<action>), with ONE deliberate
+ * difference in default: a missing module or missing flag is DENIED, not granted.
+ * Shared Files is a new, opt-in module (the User model defaults it to all-false,
+ * matching auditLog/remoteWorkspace/etc.); there are no pre-existing users to
+ * grandfather in, and an absent flag on a GLOBAL repository must fail closed.
+ * The client hides the sidebar item and shows Access Denied on the same
+ * `view !== true` reading, so UI and API can never disagree.
+ *
+ * This answers only "may this user use the Shared Files feature?". Unlike Personal
+ * Files there is NO ownership layer underneath it: the repository is global, and a
+ * user who passes this gate may act on every shared item regardless of who
+ * uploaded it. `uploadedBy` is metadata, never a filter.
+ */
+export const requireSharedFilesPermission = (
+  action: 'view' | 'create' | 'edit' | 'delete'
+) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      errorResponse(res, 'Authentication required', 401);
+      return;
+    }
+
+    if (req.user.role === 'superadmin') {
+      next();
+      return;
+    }
+
+    try {
+      const user = await User.findById(req.user._id).select('permissions.modules.sharedFiles');
+      const modulePerms = user?.permissions?.modules?.sharedFiles;
+
+      // Fail closed: only an explicit `true` grants.
+      const allowed = !!modulePerms && modulePerms[action] === true;
+
+      if (!allowed) {
+        errorResponse(res, 'You do not have permission to perform this action on Shared Files', 403);
+        return;
+      }
+
+      next();
+    } catch (error) {
+      logger.error('Error checking Shared Files permission:', error);
+      errorResponse(res, 'Failed to verify permissions', 500);
+    }
+  };
+};
+
 // Additional middleware functions that might be referenced
 export const authorize = (roles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
