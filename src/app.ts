@@ -81,6 +81,12 @@ app.use('/uploads/personal-files', (req, res) => {
   res.status(404).json({ success: false, message: 'Not found' });
 });
 
+// Same guard for Shared Files (authenticated, permission-gated module). Kept in
+// step with server.ts so the exposure cannot reappear through this bootstrap.
+app.use('/uploads/shared-files', (req, res) => {
+  res.status(404).json({ success: false, message: 'Not found' });
+});
+
 // Use setHeaders to ensure CORS headers are set for static files
 app.use('/uploads', express.static(uploadsPath, {
   maxAge: '30d',
