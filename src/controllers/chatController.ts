@@ -690,10 +690,11 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       return res.status(403).json({ message: 'Not authorized to view messages in this group' });
     }
 
-    // Get messages
+    // Get messages (soft-deleted ones are included so the client can render
+    // the "This message was deleted" placeholder instead of the message
+    // silently vanishing on refetch)
     const messages = await Message.find({
-      groupId,
-      isDeleted: false
+      groupId
     })
       .populate('senderId', 'displayName email photoURL')
       .populate({
@@ -706,8 +707,7 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
 
     // Get total count
     const totalCount = await Message.countDocuments({
-      groupId,
-      isDeleted: false
+      groupId
     });
 
     // Attachment fileUrls (incl. any populated replyTo's) are encrypted at rest —
