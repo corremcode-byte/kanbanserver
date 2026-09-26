@@ -150,6 +150,9 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
     } else {
       // No projectId ➜ fetch tasks based on user's role and permissions
       // Find all projects where user is owner, member, or manager
+      // One query fetches every project the user belongs to, including the
+      // managers/owners arrays, so the "manager or co-owner" subset below is
+      // derived in memory rather than with a second round trip to the DB.
       const userProjects = await Project.find({
         $or: [
           { ownerId: req.user._id },
@@ -157,24 +160,19 @@ export const getTasks = async (req: AuthenticatedRequest, res: Response) => {
           { managers: req.user._id },
           { owners: req.user._id }
         ]
-      }).select('_id ownerId');
+      }).select('_id ownerId managers owners').lean();
 
       const projectIds = userProjects.map(p => p._id);
+      const currentUserIdStr = req.user._id.toString();
 
-      // For managers/owners/co-owners: show ALL tasks in their projects
+      // For owners, managers and co-owners: show ALL tasks in their projects
       const managedProjectIds = userProjects
-        .filter(p => p.ownerId.toString() === req.user._id.toString())
+        .filter(p =>
+          p.ownerId?.toString() === currentUserIdStr ||
+          (p.managers || []).some(m => m.toString() === currentUserIdStr) ||
+          (p.owners || []).some(o => o.toString() === currentUserIdStr)
+        )
         .map(p => p._id);
-
-      // Also include projects where user is a manager or co-owner
-      const managerProjects = await Project.find({
-        $or: [
-          { managers: req.user._id },
-          { owners: req.user._id }
-        ]
-      }).select('_id');
-
-      managedProjectIds.push(...managerProjects.map(p => p._id));
 
       // Check for projects where user has canViewAllTasks permission
       const permissionsWithViewAll = await ProjectPermission.find({

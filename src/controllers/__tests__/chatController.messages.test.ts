@@ -242,18 +242,62 @@ describe('getGroupMessages — membership scoping', () => {
     });
   });
 
-  it('returns messages for a member, excluding deleted ones', async () => {
+  // Deleted messages ARE returned (so the client can render the "This message was
+  // deleted" placeholder in place) — but with their content stripped.
+  it('returns messages for a member, including deleted ones (for the placeholder)', async () => {
     (ChatGroup.findOne as jest.Mock).mockResolvedValue(makeGroup());
     mockMessageFind([]);
     const res = makeRes();
 
     await getGroupMessages(makeReq({ params: { groupId: GROUP_A } }), res);
 
-    expect((Message.find as jest.Mock).mock.calls[0][0]).toEqual({
-      groupId: GROUP_A,
-      isDeleted: false,
-    });
+    expect((Message.find as jest.Mock).mock.calls[0][0]).toEqual({ groupId: GROUP_A });
     expect(payloadOf(res)).toHaveProperty('messages');
+  });
+
+  it('strips the content of deleted messages but leaves live ones untouched', async () => {
+    (ChatGroup.findOne as jest.Mock).mockResolvedValue(makeGroup());
+    mockMessageFind([
+      makeMessageDoc({ _id: 'live-1', encryptedContent: 'live-cipher', nonce: 'live-nonce' }),
+      makeMessageDoc({
+        _id: 'gone-1',
+        isDeleted: true,
+        encryptedContent: 'secret-cipher',
+        nonce: 'secret-nonce',
+        attachmentKeys: [{ attachmentId: 'a1', userId: USER_A, encryptedKey: 'k', nonce: 'n', senderPublicKey: 'p' }],
+        reactions: [{ emoji: 'x', userId: USER_B }],
+      }),
+    ]);
+    const res = makeRes();
+
+    await getGroupMessages(makeReq({ params: { groupId: GROUP_A } }), res);
+
+    const byId = Object.fromEntries(payloadOf(res).messages.map((m: any) => [m._id, m]));
+    expect(byId['live-1'].encryptedContent).toBe('live-cipher');
+    expect(byId['live-1'].nonce).toBe('live-nonce');
+    expect(byId['gone-1'].isDeleted).toBe(true);
+    expect(byId['gone-1'].encryptedContent).toBe('');
+    expect(byId['gone-1'].nonce).toBe('');
+    expect(byId['gone-1'].attachmentKeys).toEqual([]);
+    expect(byId['gone-1'].reactions).toEqual([]);
+  });
+
+  it('does not leak a deleted message through a reply preview', async () => {
+    (ChatGroup.findOne as jest.Mock).mockResolvedValue(makeGroup());
+    mockMessageFind([
+      makeMessageDoc({
+        _id: 'reply-1',
+        replyTo: { _id: 'gone-2', isDeleted: true, encryptedContent: 'quoted-secret', nonce: 'q-nonce' },
+      }),
+    ]);
+    const res = makeRes();
+
+    await getGroupMessages(makeReq({ params: { groupId: GROUP_A } }), res);
+
+    const [reply] = payloadOf(res).messages;
+    expect(reply.encryptedContent).toBe('cipher');
+    expect(reply.replyTo.encryptedContent).toBe('');
+    expect(reply.replyTo.nonce).toBe('');
   });
 
   it('applies the default page size and offset', async () => {
@@ -683,5 +727,27 @@ describe('rotateGroupKey — epoch validation and concurrency', () => {
     const update = (ChatGroup.findOneAndUpdate as jest.Mock).mock.calls[0][1];
     expect(update.$push.keyEpochs.version).toBe(4);
     expect(update.$set.currentKeyVersion).toBe(4);
+  });
+});
+
+describe('deleteMessage — deleted content never leaves the server', () => {
+  it('returns the deleted message without its content or attachment keys', async () => {
+    const doc = makeMessageDoc({
+      senderId: { toString: () => USER_A },
+      attachmentKeys: [{ attachmentId: 'a1', userId: { toString: () => USER_A }, encryptedKey: 'k', nonce: 'n', senderPublicKey: 'p' }],
+    });
+    (Message.findById as jest.Mock).mockResolvedValue(doc);
+    (User.findById as jest.Mock).mockResolvedValue({ permissions: { modules: { chat: { deleteMessages: true } } } });
+    (ChatGroup.findById as jest.Mock).mockResolvedValue(makeGroup()); // created by USER_A
+    const res = makeRes();
+
+    await deleteMessage(makeReq({ params: { messageId: MESSAGE_B } }), res);
+
+    const sent = payloadOf(res).message;
+    expect(doc.save).toHaveBeenCalled();
+    expect(sent.isDeleted).toBe(true);
+    expect(sent.encryptedContent).toBe('');
+    expect(sent.nonce).toBe('');
+    expect(sent.attachmentKeys).toEqual([]);
   });
 });

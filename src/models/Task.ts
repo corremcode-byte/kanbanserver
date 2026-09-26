@@ -316,6 +316,12 @@ const TaskSchema = new Schema<ITask>({
 TaskSchema.index({ projectId: 1, status: 1, order: 1 });
 TaskSchema.index({ projectId: 1, listId: 1, order: 1 });
 TaskSchema.index({ assigneeId: 1 });
+// MongoDB can only serve an $or query from indexes when EVERY branch is indexed.
+// getTasks ORs assignedTo/assignees/assignedBy/projectId, and the performance
+// matrix ORs assigneeId/assignedTo/assignees/createdBy — without these two, both
+// fall back to a full collection scan.
+TaskSchema.index({ assignees: 1 });
+TaskSchema.index({ createdBy: 1 });
 
 // Pre-save hook to sync listId with status for backward compatibility
 TaskSchema.pre('save', function(next) {

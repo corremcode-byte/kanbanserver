@@ -125,7 +125,17 @@ app.use(errorHandler);
 const connectDB = async () => {
   try {
     const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/asana-clone';
-    await mongoose.connect(mongoURI);
+    await mongoose.connect(mongoURI, {
+      // Without these, mongoose falls back to a single default-sized pool per
+      // process — under concurrent requests (every page load fans out several
+      // API calls) connections queue up waiting for a free socket.
+      maxPoolSize: 50,
+      minPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      family: 4,
+      retryWrites: true,
+    });
     logger.info('MongoDB connected successfully');
   } catch (error) {
     logger.error('MongoDB connection failed:', error instanceof Error ? error.message : String(error));
@@ -140,16 +150,19 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    // Start cron jobs
-    await cronService.start();
-
     server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
       logger.info(`Health check: http://localhost:${PORT}/health`);
       logger.info(`API endpoint: http://localhost:${PORT}/api`);
       logger.info(`Socket.IO enabled: ws://localhost:${PORT}`);
-      logger.info(`Cron jobs started`);
     });
+
+    // Start cron jobs after the port is already open — clearStaleReminderEndTimes()
+    // does a full collection write and shouldn't delay the server from accepting
+    // requests on every restart.
+    cronService.start()
+      .then(() => logger.info('Cron jobs started'))
+      .catch((error) => logger.error('Failed to start cron jobs:', error));
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

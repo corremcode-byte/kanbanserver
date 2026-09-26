@@ -73,12 +73,6 @@ export const authenticate = async (
 
     next();
   } catch (error) {
-    console.error('Auth debug - JWT verification failed:', error instanceof Error ? error.message : error);
-    if (error instanceof Error && error.name === 'JsonWebTokenError') {
-      console.error('Auth debug - JWT Error details:', error.message);
-    } else if (error instanceof Error && error.name === 'TokenExpiredError') {
-      console.error('Auth debug - Token has expired');
-    }
     logger.error('Authentication error:', error);
     errorResponse(res, 'Invalid token', 401);
     return;

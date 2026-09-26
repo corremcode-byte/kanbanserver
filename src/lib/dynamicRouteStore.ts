@@ -28,13 +28,14 @@ const userDestIndex = new Map<string, Map<string, string>>();
 // userId → Set<token>  (for bulk logout invalidation)
 const userTokenIndex = new Map<string, Set<string>>();
 
-// Sweep expired entries every 5 minutes
+// Sweep expired entries every 5 minutes. unref() so this housekeeping timer
+// never keeps the Node process (or a test run) alive on its own.
 setInterval(() => {
   const now = Date.now();
   for (const [token, entry] of memoryRoutes) {
     if (entry.expiresAt < now) memoryRoutes.delete(token);
   }
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000).unref?.();
 
 // ── Redis singleton ─────────────────────────────────────────────────────────────
 
@@ -61,21 +62,33 @@ const tokenSet  = (userId: string)               => `dyn_tokens:${userId}`;
 
 // ── Public API ──────────────────────────────────────────────────────────────────
 
+// One live token per user + destination. If that token is still valid it is
+// REUSED (TTL refreshed) rather than rotated: rotating deleted the old token,
+// which broke any other open tab — or a hover-prefetch — still holding that
+// page's /r/<token> URL, sending it back to the root page on refresh.
+// Tokens remain per-user, still expire after ROUTE_TTL of inactivity, and are
+// still all wiped by clearUserRoutes() on logout.
 async function generateRoute(userId: string, destination: string): Promise<string> {
   const redis = getRedis();
-  const token = generateToken();
 
   if (redis) {
-    // Invalidate previous token for same user + destination
-    const oldToken = await redis.get(destKey(userId, destination));
-    if (oldToken) {
-      const pipe = redis.pipeline();
-      pipe.del(routeKey(oldToken));
-      pipe.srem(tokenSet(userId), oldToken);
-      await pipe.exec();
+    const existing = await redis.get(destKey(userId, destination));
+    if (existing) {
+      const raw = await redis.get(routeKey(existing));
+      const entry = raw ? (JSON.parse(raw) as RouteEntry) : null;
+      if (entry && entry.userId === userId && entry.destination === destination) {
+        const pipe = redis.pipeline();
+        pipe.expire(routeKey(existing), ROUTE_TTL);
+        pipe.expire(destKey(userId, destination), ROUTE_TTL);
+        pipe.sadd(tokenSet(userId), existing);
+        pipe.expire(tokenSet(userId), ROUTE_TTL);
+        await pipe.exec();
+        return existing;
+      }
     }
 
-    // Store new token
+    // No live token for this destination — store a new one
+    const token = generateToken();
     const entry: RouteEntry = { userId, destination, createdAt: Date.now() };
     const pipe = redis.pipeline();
     pipe.setex(routeKey(token), ROUTE_TTL, JSON.stringify(entry));
@@ -83,25 +96,31 @@ async function generateRoute(userId: string, destination: string): Promise<strin
     pipe.sadd(tokenSet(userId), token);
     pipe.expire(tokenSet(userId), ROUTE_TTL);
     await pipe.exec();
-  } else {
-    // Memory fallback
-    const userDest = userDestIndex.get(userId);
-    if (userDest) {
-      const oldToken = userDest.get(destination);
-      if (oldToken) {
-        memoryRoutes.delete(oldToken);
-        userTokenIndex.get(userId)?.delete(oldToken);
-        userDest.delete(destination);
-      }
-    }
-    const expiresAt = Date.now() + ROUTE_TTL * 1000;
-    memoryRoutes.set(token, { userId, destination, createdAt: Date.now(), expiresAt });
-    if (!userDestIndex.has(userId))  userDestIndex.set(userId, new Map());
-    if (!userTokenIndex.has(userId)) userTokenIndex.set(userId, new Set());
-    userDestIndex.get(userId)!.set(destination, token);
-    userTokenIndex.get(userId)!.add(token);
+    return token;
   }
 
+  // Memory fallback — same reuse-if-still-valid rule as the Redis path
+  const now = Date.now();
+  const userDest = userDestIndex.get(userId);
+  const existing = userDest?.get(destination);
+  if (existing) {
+    const entry = memoryRoutes.get(existing);
+    if (entry && entry.expiresAt >= now && entry.userId === userId && entry.destination === destination) {
+      entry.expiresAt = now + ROUTE_TTL * 1000;
+      return existing;
+    }
+    // Stale mapping (expired or swept) — drop it before issuing a new token
+    memoryRoutes.delete(existing);
+    userTokenIndex.get(userId)?.delete(existing);
+    userDest!.delete(destination);
+  }
+
+  const token = generateToken();
+  memoryRoutes.set(token, { userId, destination, createdAt: now, expiresAt: now + ROUTE_TTL * 1000 });
+  if (!userDestIndex.has(userId))  userDestIndex.set(userId, new Map());
+  if (!userTokenIndex.has(userId)) userTokenIndex.set(userId, new Set());
+  userDestIndex.get(userId)!.set(destination, token);
+  userTokenIndex.get(userId)!.add(token);
   return token;
 }
 

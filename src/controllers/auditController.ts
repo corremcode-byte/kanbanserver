@@ -443,17 +443,21 @@ export const getAuditLogs = async (req: any, res: Response) => {
       }
     });
 
-    // Filter out logs for deleted, inactive, or superadmin users
+    // Filter out logs for deleted, inactive, or superadmin users.
+    // Look every referenced user up in ONE query instead of one per log row.
+    const logUserId = (log: any): string =>
+      typeof log.userId === 'object' && log.userId._id ? log.userId._id.toString() : log.userId.toString();
+
+    const referencedUserIds = Array.from(new Set(auditLogs.filter((l: any) => l.userId).map(logUserId)));
+    const referencedUsers = await User.find({ _id: { $in: referencedUserIds } }).select('isActive role').lean();
+    const userById = new Map(referencedUsers.map((u: any) => [u._id.toString(), u]));
+
     const activeLogs: any[] = [];
 
     for (const log of auditLogs) {
       if (log.userId) {
-        const userId = typeof log.userId === 'object' && (log.userId as any)._id
-          ? (log.userId as any)._id.toString()
-          : log.userId.toString();
-
         // Check if user exists, is active, and is not a superadmin
-        const user = await User.findById(userId).select('isActive role').lean();
+        const user: any = userById.get(logUserId(log));
         if (user && user.isActive !== false && user.role !== 'superadmin') {
           activeLogs.push(log);
           if (activeLogs.length >= parsedLimit) {

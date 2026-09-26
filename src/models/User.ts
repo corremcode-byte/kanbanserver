@@ -197,6 +197,14 @@ export interface IUser extends Document {
       method?: 'passkey' | 'emoji';
       emoji?: string;
     };
+    doNotDisturb?: {
+      pausedUntil?: Date | null;
+      scheduleEnabled?: boolean;
+      scheduleStart?: string;
+      scheduleEnd?: string;
+      daysOff?: number[];
+      timezone?: string;
+    };
   };
   createdAt: Date;
   updatedAt: Date;
@@ -510,6 +518,15 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
     perChatLock: {
       method: { type: String, enum: ['passkey', 'emoji'] },
       emoji: { type: String }
+    },
+    // Do Not Disturb — see utils/doNotDisturb.ts. Suppresses web push only.
+    doNotDisturb: {
+      pausedUntil: { type: Date, default: null },
+      scheduleEnabled: { type: Boolean, default: false },
+      scheduleStart: { type: String, default: '17:00' },
+      scheduleEnd: { type: String, default: '09:00' },
+      daysOff: { type: [Number], default: [] },
+      timezone: { type: String, default: 'UTC' }
     }
   }
 }, {

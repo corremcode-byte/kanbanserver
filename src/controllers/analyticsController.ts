@@ -419,70 +419,44 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           let totalCompletionTime = 0;
           let completedTasksCount = 0;
 
-          // Aggregate stats across all projects
-          for (const project of allProjects) {
-            // Get audit log stats
-            const stats = await AuditLog.getUserStats(project._id.toString(), memberId, start, end);
+          // Aggregate stats across all projects. Each project's queries are
+          // independent, so run them concurrently rather than one round-trip
+          // at a time; totals are plain sums, so the result is unchanged.
+          const memberOr = [
+            { assigneeId: memberId },
+            { assignedTo: memberId },
+            { assignees: memberId },
+            { createdBy: memberId }
+          ];
+          const perProjectStats = await Promise.all(allProjects.map(async (project) => {
+            const [stats, tasksAssigned, tasksInProgress, tasksCompleted, overdueTasks, completedTasksForTime] = await Promise.all([
+              AuditLog.getUserStats(project._id.toString(), memberId, start, end),
+              Task.countDocuments({ projectId: project._id, $or: memberOr }),
+              Task.countDocuments({
+                projectId: project._id,
+                $or: memberOr,
+                status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
+              }),
+              Task.countDocuments({ projectId: project._id, $or: memberOr, status: 'completed' }),
+              Task.countDocuments({
+                projectId: project._id,
+                $or: memberOr,
+                status: { $ne: 'completed' },
+                dueDate: { $exists: true, $lt: new Date() }
+              }),
+              // Completed tasks for time calculation (including dueDate for speed bonus)
+              Task.find({
+                projectId: project._id,
+                $or: memberOr,
+                status: 'completed',
+                assignedAt: { $exists: true },
+                completedAt: { $exists: true, $gte: start, $lte: end }
+              }).select('assignedAt completedAt dueDate'),
+            ]);
+            return { stats, tasksAssigned, tasksInProgress, tasksCompleted, overdueTasks, completedTasksForTime };
+          }));
 
-            // Get task statistics - check all assignment fields AND createdBy to match dashboard behavior
-            const tasksAssigned = await Task.countDocuments({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ]
-            });
-
-            const tasksInProgress = await Task.countDocuments({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ],
-              status: { $in: ['in-progress', 'in_progress', 'inprogress'] }
-            });
-
-            const tasksCompleted = await Task.countDocuments({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ],
-              status: 'completed'
-            });
-
-            const overdueTasks = await Task.countDocuments({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ],
-              status: { $ne: 'completed' },
-              dueDate: { $exists: true, $lt: new Date() }
-            });
-
-            // Get completed tasks for time calculation (including dueDate for speed bonus)
-            const completedTasksForTime = await Task.find({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ],
-              status: 'completed',
-              assignedAt: { $exists: true },
-              completedAt: { $exists: true, $gte: start, $lte: end }
-            }).select('assignedAt completedAt dueDate');
-
+          for (const { stats, tasksAssigned, tasksInProgress, tasksCompleted, overdueTasks, completedTasksForTime } of perProjectStats) {
             if (completedTasksForTime.length > 0) {
               const projectTime = completedTasksForTime.reduce((sum, task: any) => {
                 if (task.completedAt && task.assignedAt) {
@@ -516,23 +490,17 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           let speedBonus = 0;
           if (totalTasksCompleted > 0) {
             // Collect all completed tasks with deadlines across all projects
-            const allCompletedTasksWithDeadlines: any[] = [];
-            for (const project of allProjects) {
-              const tasks = await Task.find({
+            const perProjectDeadlineTasks = await Promise.all(allProjects.map((project) =>
+              Task.find({
                 projectId: project._id,
-                $or: [
-                  { assigneeId: memberId },
-                  { assignedTo: memberId },
-                  { assignees: memberId },
-                  { createdBy: memberId }
-                ],
+                $or: memberOr,
                 status: 'completed',
                 assignedAt: { $exists: true },
                 completedAt: { $exists: true, $gte: start, $lte: end },
                 dueDate: { $exists: true }
-              }).select('assignedAt completedAt dueDate');
-              allCompletedTasksWithDeadlines.push(...tasks);
-            }
+              }).select('assignedAt completedAt dueDate')
+            ));
+            const allCompletedTasksWithDeadlines: any[] = perProjectDeadlineTasks.flat();
 
             if (allCompletedTasksWithDeadlines.length > 0) {
               // Calculate per-task speed score based on fraction of completion time to deadline
@@ -590,33 +558,28 @@ export const getPerformanceMatrix = async (req: AuthenticatedRequest, res: Respo
           }
 
           // Get recent activity from all projects
-          const recentActivities = [];
-          for (const project of allProjects) {
-            const activity = await AuditLog.getProjectActivity(project._id.toString(), {
+          // Fetched concurrently, flattened in the same project order as before
+          // so the (stable) sort below yields an identical list.
+          const perProjectActivity = await Promise.all(allProjects.map((project) =>
+            AuditLog.getProjectActivity(project._id.toString(), {
               userId: memberId,
               startDate: start,
               endDate: end,
               limit: 5
-            });
-            recentActivities.push(...activity);
-          }
+            })
+          ));
+          const recentActivities = perProjectActivity.flat();
 
           // Sort by date and take the most recent ones
           recentActivities.sort((a: any, b: any) => b.createdAt - a.createdAt);
 
           // Get task details for this member across all projects - don't filter by date
           const tasks: any[] = [];
-          for (const project of allProjects) {
-            const memberTasks = await Task.find({
-              projectId: project._id,
-              $or: [
-                { assigneeId: memberId },
-                { assignedTo: memberId },
-                { assignees: memberId },
-                { createdBy: memberId }
-              ]
-            }).select('title assignees assignedAt completedAt status priority createdAt');
-
+          const perProjectMemberTasks = await Promise.all(allProjects.map((project) =>
+            Task.find({ projectId: project._id, $or: memberOr })
+              .select('title assignees assignedAt completedAt status priority createdAt')
+          ));
+          for (const memberTasks of perProjectMemberTasks) {
             for (const task of memberTasks) {
               const assignedAt = task.assignedAt || task.createdAt;
               const completedAt = task.completedAt;
