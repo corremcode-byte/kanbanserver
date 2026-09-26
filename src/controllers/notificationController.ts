@@ -6,6 +6,8 @@ import mongoose from 'mongoose';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { getIO } from '../socket';
 import { broadcastToUser } from '../socket/socketHandlers';
+import { User } from '../models/User';
+import { PROJECT_CATEGORY_BY_TYPE, allowsProjectNotification } from '../utils/projectNotificationPrefs';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -199,6 +201,24 @@ export const createNotification = async (data: {
   };
 }) => {
   try {
+    // Project notification preferences: a switched-off category or a muted
+    // project means the notification isn't created (no bell, push or toast).
+    const category = PROJECT_CATEGORY_BY_TYPE[data.type];
+    if (category) {
+      try {
+        const recipient = await User.findById(data.userId)
+          .select('settings.projectNotifications settings.mutedProjects')
+          .lean();
+        if (recipient && !allowsProjectNotification(recipient.settings, category, data.metadata?.projectId)) {
+          logger.info(`Notification skipped for user ${data.userId} (${data.type}) — turned off in project notification settings`);
+          return null;
+        }
+      } catch (prefErr) {
+        // Fail open: a preferences lookup problem must never drop notifications.
+        logger.warn(`Could not read project notification settings for ${data.userId}:`, prefErr);
+      }
+    }
+
     const notification = new Notification({
       userId: data.userId,
       type: data.type,

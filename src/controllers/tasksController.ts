@@ -8,6 +8,7 @@ import { getIO } from '../socket';
 import { broadcastToProject, broadcastToUser } from '../socket/socketHandlers';
 import { emailService } from '../services/emailService';
 import { createNotification } from './notificationController';
+import { allowsProjectNotification } from '../utils/projectNotificationPrefs';
 import { encryptField, decryptField, decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryption';
 import { filterAttachmentKeysForUser, stripAttachmentKeys } from '../utils/attachmentKeyFiltering';
 
@@ -1085,7 +1086,10 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
               }
 
               // Send real-time socket notifications for task moved
-              const usersToNotify = allUsers;
+              // Respect each member's 'Task moved' switch and per-project mute.
+              const usersToNotify = allUsers.filter(user =>
+                allowsProjectNotification(user.settings, 'taskMoved', task.projectId)
+              );
 
               usersToNotify.forEach(user => {
                 broadcastToUser(io, user._id.toString(), 'notification:task:moved', {
@@ -1210,7 +1214,11 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response) => {
         }
 
         // Send real-time socket notifications to newly assigned users (excluding self)
-        const usersToNotify = users.filter(user => user._id.toString() !== req.user._id);
+        // Respect each assignee's 'Tasks assigned to me' switch and per-project mute.
+        const usersToNotify = users.filter(user =>
+          user._id.toString() !== req.user._id &&
+          allowsProjectNotification(user.settings, 'tasksAssigned', task.projectId)
+        );
         usersToNotify.forEach(user => {
           broadcastToUser(io, user._id.toString(), 'notification:task:assigned', {
             task: {
