@@ -140,6 +140,9 @@ const AuditLogSchema = new Schema<IAuditLog>({
 });
 
 // Indexes for efficient querying
+// The Audit Log page's default view is "all logs, newest first" (no projectId),
+// which can't use any of the projectId-prefixed indexes below.
+AuditLogSchema.index({ createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, userId: 1, createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, action: 1, createdAt: -1 });

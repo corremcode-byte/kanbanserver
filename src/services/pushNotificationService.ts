@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import { User } from '../models';
 import { logger } from '../utils/logger';
+import { isDoNotDisturbActive } from '../utils/doNotDisturb';
 
 // Configure web-push with VAPID keys
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || '';
@@ -94,6 +95,13 @@ class PushNotificationService {
 
       if (!user || !user.pushSubscriptions || user.pushSubscriptions.length === 0) {
         logger.info('No push subscriptions found for user', { userId });
+        return { sent: 0, failed: 0 };
+      }
+
+      // Do Not Disturb: the notification is still stored in-app; only the
+      // interruptive push is held back.
+      if (isDoNotDisturbActive(user.settings?.doNotDisturb)) {
+        logger.info('Push skipped — user is in Do Not Disturb', { userId });
         return { sent: 0, failed: 0 };
       }
 

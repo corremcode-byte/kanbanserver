@@ -16,6 +16,28 @@ import { validateAndBuildKeyEpoch, isValidSealedKeyEntryShape, memberKeysMatchGr
 import { filterAttachmentKeysForUser, pickAttachmentKeysForUser, stripAttachmentKeys } from '../utils/attachmentKeyFiltering';
 import { AuditLog } from '../models/AuditLog';
 
+// A soft-deleted message keeps its row so clients can render the "This message
+// was deleted" placeholder in place — but its content must never leave the
+// server again: strip the (member-decryptable) text, attachments, attachment
+// keys and reactions. Stored data is untouched (the super-admin audit viewer
+// reads it through its own endpoint).
+function redactDeletedMessage<T>(msg: T): T {
+  const m = msg as unknown as ({ isDeleted?: boolean } & Record<string, unknown>) | null;
+  if (!m || !m.isDeleted) return msg;
+  m.encryptedContent = '';
+  m.nonce = '';
+  m.attachments = [];
+  m.attachmentKeys = [];
+  m.reactions = [];
+  if ('systemMessageText' in m) m.systemMessageText = '';
+  return msg;
+}
+
+/** Response-safe form of a message doc: unchanged when live, redacted plain object when deleted. */
+function sendableMessage<D extends { isDeleted?: boolean; toObject: () => unknown }>(doc: D): D | unknown {
+  return doc.isDeleted ? redactDeletedMessage(doc.toObject()) : doc;
+}
+
 // Emits a message-related socket event to every group member, giving each
 // recipient a payload containing ONLY their own attachmentKeys entries (see
 // utils/attachmentKeyFiltering.ts) — never a shared object carrying every
@@ -276,34 +298,54 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
       return true;
     });
 
-    // For each group, get unread count and last message
     // Get the user's per-chat lock credential method (stored once on User, not per-chat)
     const currentUserDoc = await User.findById(userId).select('settings');
     const perChatLockMethod = currentUserDoc?.settings?.perChatLock?.method ?? null;
 
-    const groupsWithMetadata = await Promise.all(
-      chatGroups.map(async (group) => {
-        // Get last message for this group
-        const lastMessage = await Message.findOne({
-          groupId: group._id,
-          isDeleted: false
-        })
-          .populate('senderId', 'displayName email photoURL')
-          .sort({ createdAt: -1 })
-          .lean();
+    // Batch-fetch each group's last message + unread count in 2 queries total
+    // instead of 2 queries PER chat group (previously N+1 inside the loop below).
+    const groupIds = chatGroups.map((g) => g._id);
+    const userObjectId = new mongoose.Types.ObjectId(userId);
 
-        // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
-        if (lastMessage) {
-          decryptMessageFields(lastMessage as any);
-          if (userId) filterAttachmentKeysForUser(lastMessage as any, userId.toString());
-        }
+    const [lastMessageRows, unreadCountRows] = groupIds.length
+      ? await Promise.all([
+          Message.aggregate([
+            { $match: { groupId: { $in: groupIds }, isDeleted: false } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: '$groupId', doc: { $first: '$$ROOT' } } },
+          ]),
+          Message.aggregate([
+            {
+              $match: {
+                groupId: { $in: groupIds },
+                isDeleted: false,
+                'readBy.userId': { $ne: userObjectId },
+              },
+            },
+            { $group: { _id: '$groupId', count: { $sum: 1 } } },
+          ]),
+        ])
+      : [[], []];
 
-        // Count unread messages for this user in this group
-        const unreadCount = await Message.countDocuments({
-          groupId: group._id,
-          isDeleted: false,
-          'readBy.userId': { $ne: userId }
-        });
+    const lastMessageDocs = lastMessageRows.map((row: any) => row.doc);
+    await Message.populate(lastMessageDocs, { path: 'senderId', select: 'displayName email photoURL' });
+
+    const lastMessageByGroup = new Map<string, any>();
+    for (const doc of lastMessageDocs) {
+      // Attachment fileUrl is encrypted at rest, keyed by the message's own id.
+      decryptMessageFields(doc as any);
+      if (userId) filterAttachmentKeysForUser(doc as any, userId.toString());
+      lastMessageByGroup.set(String(doc.groupId), doc);
+    }
+
+    const unreadCountByGroup = new Map<string, number>();
+    for (const row of unreadCountRows) {
+      unreadCountByGroup.set(String(row._id), row.count);
+    }
+
+    const groupsWithMetadata = chatGroups.map((group) => {
+        const lastMessage = lastMessageByGroup.get(group._id.toString()) ?? null;
+        const unreadCount = unreadCountByGroup.get(group._id.toString()) ?? 0;
 
         // Check if this is a self-chat group (only one member and it's the user)
         const isSelfChat = group.members.length === 1 &&
@@ -346,8 +388,7 @@ export const getUserChatGroups = async (req: AuthenticatedRequest, res: Response
           isArchived,
           isMarkedUnread,
         };
-      })
-    );
+      });
 
     // Sort by last message timestamp (most recent first)
     groupsWithMetadata.sort((a, b) => {
@@ -717,7 +758,13 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
 
     // Convert photoURLs to absolute URLs
     // convertPhotoURLsToAbsolute now handles ObjectId serialization internally
-    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => m.toObject()), req);
+    const messagesWithAbsoluteUrls = convertPhotoURLsToAbsolute(messages.map(m => {
+      const obj = redactDeletedMessage(m.toObject());
+      // A reply to a deleted message must not leak it via the reply preview either
+      const replyTo = (obj as { replyTo?: unknown }).replyTo;
+      if (replyTo && typeof replyTo === 'object') redactDeletedMessage(replyTo);
+      return obj;
+    }), req);
 
     return res.json({
       messages: messagesWithAbsoluteUrls.reverse(), // Reverse to get chronological order
@@ -958,10 +1005,10 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
 
     // Notify all group members via Socket.IO — each recipient gets only their
     // own attachmentKeys entries.
-    emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:deleted', message.groupId, message.toObject());
+    emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:deleted', message.groupId, redactDeletedMessage(message.toObject()));
 
     filterAttachmentKeysForUser(message as any, userId?.toString() || '');
-    return res.json({ success: true, message });
+    return res.json({ success: true, message: sendableMessage(message) });
   } catch (error) {
     console.error('Error deleting message:', error);
     return res.status(500).json({ message: 'Failed to delete message' });
@@ -1019,11 +1066,11 @@ export const toggleReaction = async (req: AuthenticatedRequest, res: Response) =
     // own attachmentKeys entries.
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
-      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:reacted', message.groupId, message.toObject());
+      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:reacted', message.groupId, redactDeletedMessage(message.toObject()));
     }
 
     filterAttachmentKeysForUser(message as any, userId?.toString() || '');
-    return res.json({ success: true, message });
+    return res.json({ success: true, message: sendableMessage(message) });
   } catch (error) {
     console.error('Error toggling reaction:', error);
     return res.status(500).json({ message: 'Failed to toggle reaction' });
@@ -1054,11 +1101,11 @@ export const togglePin = async (req: AuthenticatedRequest, res: Response) => {
     // own attachmentKeys entries.
     const chatGroup = await ChatGroup.findById(message.groupId);
     if (chatGroup) {
-      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:pinned', message.groupId, message.toObject());
+      emitMessageEventToGroupMembers(chatGroup.members, 'chat:message:pinned', message.groupId, redactDeletedMessage(message.toObject()));
     }
 
     filterAttachmentKeysForUser(message as any, userId?.toString() || '');
-    return res.json({ success: true, message });
+    return res.json({ success: true, message: sendableMessage(message) });
   } catch (error) {
     console.error('Error toggling pin:', error);
     return res.status(500).json({ message: 'Failed to toggle pin' });
@@ -1095,7 +1142,7 @@ export const toggleStar = async (req: AuthenticatedRequest, res: Response) => {
 
     return res.json({
       success: true,
-      message,
+      message: sendableMessage(message),
       isStarred: starIndex === -1
     });
   } catch (error) {

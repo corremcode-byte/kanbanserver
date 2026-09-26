@@ -73,11 +73,19 @@ function mockAuditFind(logs: any[]) {
   return chain;
 }
 
-/** User.findById(...).select(...).lean() — the active/superadmin filter. */
+/**
+ * User.find({ _id: { $in: ids } }).select(...).lean() — the batched
+ * active/superadmin filter. Every requested id resolves to `user`
+ * (or to nothing when `user` is null, i.e. the actor no longer exists).
+ */
 function mockUserLookup(user: any) {
-  (User.findById as jest.Mock).mockReturnValue({
-    select: jest.fn(() => ({ lean: jest.fn().mockResolvedValue(user) })),
-  });
+  (User.find as jest.Mock).mockImplementation((query: any) => ({
+    select: jest.fn(() => ({
+      lean: jest.fn().mockResolvedValue(
+        user ? (query?._id?.$in ?? []).map((id: string) => ({ ...user, _id: id })) : []
+      ),
+    })),
+  }));
 }
 
 beforeEach(() => {

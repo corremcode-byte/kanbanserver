@@ -105,6 +105,13 @@ ProjectSchema.pre('save', function(next) {
   next();
 });
 
+// Every project list/board/search query filters by one of these fields via
+// an $or — without indexes, each lookup forces a full collection scan.
+ProjectSchema.index({ ownerId: 1 });
+ProjectSchema.index({ owners: 1 });
+ProjectSchema.index({ members: 1 });
+ProjectSchema.index({ managers: 1 });
+
 // Find projects by user (either as owner, manager, or member)
 ProjectSchema.statics.findByUser = function(userId: string): Promise<IProject[]> {
   return this.find({

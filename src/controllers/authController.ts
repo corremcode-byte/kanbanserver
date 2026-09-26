@@ -10,6 +10,7 @@ import { decryptTaskFields, decryptProjectFields } from '../utils/fieldEncryptio
 import { filterAttachmentKeysForUser } from '../utils/attachmentKeyFiltering';
 import { validatePassword, validatePasskey } from '../utils/validation';
 import { summarizeOutOfOffice } from '../utils/outOfOffice';
+import { DND_DEFAULTS, mergeDoNotDisturbUpdate } from '../utils/doNotDisturb';
 import { v4 as uuidv4 } from 'uuid';
 
 function detectDeviceType(userAgent: string): 'mobile' | 'desktop' {
@@ -913,7 +914,8 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
         defaultView: 'kanban',
         autoArchiveCompleted: false,
         taskSorting: 'due_date'
-      }
+      },
+      doNotDisturb: DND_DEFAULTS
     };
 
     return successResponse(res, 'Settings retrieved successfully', settings);
@@ -929,7 +931,7 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
       return errorResponse(res, 'User not authenticated', 401);
     }
 
-    const { appearance, notifications, boardPreferences } = req.body;
+    const { appearance, notifications, boardPreferences, doNotDisturb } = req.body;
 
     const user = await User.findById(req.user._id);
     if (!user) {
@@ -987,6 +989,16 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
       if (notifications.dailyDigest !== undefined) {
         user.settings.notifications.dailyDigest = notifications.dailyDigest;
       }
+    }
+
+    // Update Do Not Disturb (validated; partial updates merge onto the current value)
+    if (doNotDisturb !== undefined) {
+      const current = user.settings.doNotDisturb as Parameters<typeof mergeDoNotDisturbUpdate>[1];
+      const merged = mergeDoNotDisturbUpdate(doNotDisturb, current);
+      if ('error' in merged) {
+        return errorResponse(res, merged.error, 400);
+      }
+      user.settings.doNotDisturb = merged.value as NonNullable<typeof user.settings.doNotDisturb>;
     }
 
     // Update board preferences
