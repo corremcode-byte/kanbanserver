@@ -197,6 +197,14 @@ export interface IUser extends Document {
       method?: 'passkey' | 'emoji';
       emoji?: string;
     };
+    projectNotifications?: {
+      invitations?: boolean;
+      addedToProject?: boolean;
+      tasksAssigned?: boolean;
+      taskMessages?: boolean;
+      taskMoved?: boolean;
+    };
+    mutedProjects?: mongoose.Types.ObjectId[];
     doNotDisturb?: {
       pausedUntil?: Date | null;
       scheduleEnabled?: boolean;
@@ -519,6 +527,15 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       method: { type: String, enum: ['passkey', 'emoji'] },
       emoji: { type: String }
     },
+    // Project notification switches + per-project mute — see utils/projectNotificationPrefs.ts.
+    projectNotifications: {
+      invitations: { type: Boolean, default: true },
+      addedToProject: { type: Boolean, default: true },
+      tasksAssigned: { type: Boolean, default: true },
+      taskMessages: { type: Boolean, default: true },
+      taskMoved: { type: Boolean, default: true }
+    },
+    mutedProjects: { type: [{ type: Schema.Types.ObjectId, ref: 'Project' }], default: [] },
     // Do Not Disturb — see utils/doNotDisturb.ts. Suppresses web push only.
     doNotDisturb: {
       pausedUntil: { type: Date, default: null },
