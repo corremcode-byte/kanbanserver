@@ -11,6 +11,7 @@ import {
   SHARED_FILES_MAX_FILE_BYTES,
   SHARED_FILES_ALLOWED_MIME_TYPES
 } from '../config/sharedFiles';
+import { CONFLUENCE_IMAGES_DIR, CONFLUENCE_MAX_IMAGE_BYTES } from '../config/confluence';
 
 // Create uploads directories if they don't exist
 const avatarsDir = path.join(__dirname, '../../uploads/avatars');
@@ -361,6 +362,37 @@ export const uploadSharedFile = multer({
   fileFilter: sharedFileFilter,
   limits: {
     fileSize: SHARED_FILES_MAX_FILE_BYTES,
+    files: 1
+  }
+});
+
+// ── Confluence page images ──────────────────────────────────────────────────
+// Images inserted into a Confluence page from the editor. A DEDICATED instance
+// (its own directory and limit) so nothing here can change any other module's
+// upload behaviour. Reuses the existing image-only filter; the physical filename
+// is a server-generated UUID with a sanitised extension, never client input.
+
+if (!fs.existsSync(CONFLUENCE_IMAGES_DIR)) {
+  fs.mkdirSync(CONFLUENCE_IMAGES_DIR, { recursive: true });
+}
+
+const confluenceImageStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, CONFLUENCE_IMAGES_DIR);
+  },
+  filename: (req, file, cb) => {
+    const rawExt = path.extname(file.originalname || '');
+    const safeExt = /^\.[A-Za-z0-9]{1,12}$/.test(rawExt) ? rawExt.toLowerCase() : '';
+    const uuid = require('uuid').v4();
+    cb(null, `${Date.now()}-${uuid}${safeExt}`);
+  }
+});
+
+export const uploadConfluenceImage = multer({
+  storage: confluenceImageStorage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: CONFLUENCE_MAX_IMAGE_BYTES,
     files: 1
   }
 });

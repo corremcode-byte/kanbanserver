@@ -326,6 +326,53 @@ export const requireSharedFilesPermission = (
   };
 };
 
+/** Every Confluence module flag administered in User Management. */
+export type ConfluenceAction = 'view' | 'create' | 'edit' | 'comment' | 'publish' | 'delete';
+
+/**
+ * Confluence (knowledge pages) module permission gate.
+ *
+ * Same fail-closed semantics as requireSharedFilesPermission: super admins pass,
+ * everyone else needs an explicit `permissions.modules.confluence.<action> === true`;
+ * a missing module or flag is DENIED. Confluence is a new opt-in module, so there
+ * is nobody to grandfather in.
+ *
+ * This is only the coarse "may this user do X in Confluence at all?" gate. The
+ * finer page-level rules (draft visibility, page restrictions, owner-may-edit-own,
+ * who may publish/delete a given page) live in confluenceController.
+ */
+export const requireConfluencePermission = (action: ConfluenceAction) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      errorResponse(res, 'Authentication required', 401);
+      return;
+    }
+
+    if (req.user.role === 'superadmin') {
+      next();
+      return;
+    }
+
+    try {
+      const user = await User.findById(req.user._id).select('permissions.modules.confluence');
+      const modulePerms = user?.permissions?.modules?.confluence;
+
+      // Fail closed: only an explicit `true` grants.
+      const allowed = !!modulePerms && modulePerms[action] === true;
+
+      if (!allowed) {
+        errorResponse(res, 'You do not have permission to perform this action in Confluence', 403);
+        return;
+      }
+
+      next();
+    } catch (error) {
+      logger.error('Error checking Confluence permission:', error);
+      errorResponse(res, 'Failed to verify permissions', 500);
+    }
+  };
+};
+
 // Additional middleware functions that might be referenced
 export const authorize = (roles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {

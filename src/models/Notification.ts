@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'task_chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'task_chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder' | 'confluence_mention' | 'confluence_review_requested' | 'confluence_changes_requested' | 'confluence_page_approved';
   title: string;
   message: string;
   read: boolean;
@@ -19,6 +19,11 @@ export interface INotification extends Document {
     messageId?: mongoose.Types.ObjectId;
     noteId?: mongoose.Types.ObjectId;
     noteTitle?: string;
+    // Confluence (confluence_*): which page/comment to open. Only ever
+    // created for a recipient who can access the page at that moment.
+    confluencePageId?: mongoose.Types.ObjectId;
+    confluenceCommentId?: mongoose.Types.ObjectId;
+    confluencePageTitle?: string;
   };
   createdAt: Date;
   readAt?: Date;
@@ -34,7 +39,7 @@ const NotificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update', 'chat_message', 'task_chat_message', 'group_added', 'note_reminder', 'task_deadline_reminder'],
+      enum: ['project_invitation', 'task_assigned', 'project_added', 'task_update', 'project_update', 'chat_message', 'task_chat_message', 'group_added', 'note_reminder', 'task_deadline_reminder', 'confluence_mention', 'confluence_review_requested', 'confluence_changes_requested', 'confluence_page_approved'],
       required: true,
     },
     title: {
@@ -63,6 +68,9 @@ const NotificationSchema = new Schema<INotification>(
       messageId: { type: Schema.Types.ObjectId, ref: 'Message' },
       noteId: { type: Schema.Types.ObjectId, ref: 'Note' },
       noteTitle: String,
+      confluencePageId: { type: Schema.Types.ObjectId, ref: 'ConfluencePage' },
+      confluenceCommentId: { type: Schema.Types.ObjectId, ref: 'ConfluenceComment' },
+      confluencePageTitle: String,
     },
     readAt: Date,
   },

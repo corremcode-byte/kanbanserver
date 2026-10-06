@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { AuthenticatedSocket, getSocketUserId, canJoinRoom } from './socketAuth';
 import { logger } from '../utils/logger';
 import { User } from '../models';
+import { registerConfluencePresence } from './confluencePresence';
 
 // Store active connections
 const activeConnections = new Map<string, Set<string>>(); // userId -> Set of socketIds
@@ -93,6 +94,9 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     addSocketRoom(socket.id, userRoom);
 
     logger.info(`User ${socket.user?.name || userId} joined room: ${userRoom}`);
+
+    // Confluence page presence (self-contained; see confluencePresence.ts)
+    registerConfluencePresence(io, socket);
     
     // Handle project room management
     socket.on('join:project', async (projectId: string) => {

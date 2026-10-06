@@ -360,3 +360,74 @@ describe('getAuditLogs — tenant/project isolation (IDOR regression)', () => {
     expect(entry.metadata.after).toEqual({ value: 'b' });
   });
 });
+
+describe('getAuditLogs — Confluence entries', () => {
+  // Real field encryption: Confluence activity stores its page-title snapshot
+  // encrypted, keyed by the audit entry's own id.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { encryptField } = require('../../utils/fieldEncryption');
+  const LOG_ID = '6f0000000000000000000001';
+
+  function confluenceLog(action: string, metadata: Record<string, any>) {
+    return makeLog({
+      _id: { toString: () => LOG_ID },
+      action,
+      entityType: 'confluence_page',
+      projectId: undefined,
+      metadata: { module: 'confluence', ...metadata }
+    });
+  }
+
+  it('shows the decrypted page title, a friendly event name and details', async () => {
+    mockAuditFind([confluenceLog('confluence_page_published', { pageTitle: encryptField('CAM Workflow', LOG_ID), version: 3 })]);
+    const res = makeRes();
+    await getAuditLogs(makeReq(), res);
+
+    const [log] = payloadOf(res).data;
+    expect(log.event).toBe('confluence.page_published');
+    expect(log.resource).toBe('CAM Workflow');
+    expect(log.details).toBe('Published "CAM Workflow" (version 3)');
+    expect(JSON.stringify(log)).not.toContain('enc:v1:');
+  });
+
+  it('describes draft-stage entries without any title', async () => {
+    mockAuditFind([confluenceLog('confluence_draft_saved', { draftOnly: true })]);
+    const res = makeRes();
+    await getAuditLogs(makeReq(), res);
+
+    const [log] = payloadOf(res).data;
+    expect(log.resource).toBe('Confluence page');
+    expect(log.details).toBe('Saved a draft of a Confluence page');
+  });
+
+  it('filters by a Confluence event type', async () => {
+    await getAuditLogs(makeReq({ eventType: 'confluence.page_published' }), makeRes());
+    expect(AuditLog.find).toHaveBeenCalledWith({ action: 'confluence_page_published' });
+  });
+});
+
+describe('getAuditLogs — Confluence review entries', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { encryptField } = require('../../utils/fieldEncryption');
+  const LOG_ID = '6f0000000000000000000002';
+  const reviewLog = (action: string, metadata: Record<string, any>) => makeLog({
+    _id: { toString: () => LOG_ID }, action, entityType: 'confluence_page', projectId: undefined,
+    metadata: { module: 'confluence', ...metadata }
+  });
+
+  it.each([
+    ['confluence_review_approved', { pageTitle: 'CAM Workflow', version: 6 }, 'confluence.review_approved', 'Approved "CAM Workflow" (published as version 6)'],
+    ['confluence_review_changes_requested', { draftOnly: true }, 'confluence.review_changes_requested', 'Requested changes to a Confluence page'],
+    ['confluence_review_submitted', { draftOnly: true }, 'confluence.review_submitted', 'Submitted a Confluence page for review'],
+    ['confluence_review_withdrawn', { draftOnly: true }, 'confluence.review_withdrawn', 'Withdrew a Confluence page from review']
+  ])('%s is shown as %s', async (action, meta, event, details) => {
+    const metadata: Record<string, any> = { ...meta };
+    if (metadata.pageTitle) metadata.pageTitle = encryptField(metadata.pageTitle, LOG_ID);
+    mockAuditFind([reviewLog(action, metadata)]);
+    const res = makeRes();
+    await getAuditLogs(makeReq(), res);
+    const [log] = payloadOf(res).data;
+    expect(log.event).toBe(event);
+    expect(log.details).toBe(details);
+  });
+});

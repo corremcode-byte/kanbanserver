@@ -182,7 +182,7 @@ export const getTaskNotificationDetails = async (req: AuthenticatedRequest, res:
 // Create notification (helper function)
 export const createNotification = async (data: {
   userId: string | mongoose.Types.ObjectId;
-  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'task_chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder';
+  type: 'project_invitation' | 'task_assigned' | 'project_added' | 'task_update' | 'project_update' | 'chat_message' | 'task_chat_message' | 'group_added' | 'note_reminder' | 'task_deadline_reminder' | 'confluence_mention' | 'confluence_review_requested' | 'confluence_changes_requested' | 'confluence_page_approved';
   title: string;
   message: string;
   metadata?: {
@@ -198,6 +198,9 @@ export const createNotification = async (data: {
     messageId?: string | mongoose.Types.ObjectId;
     noteId?: string | mongoose.Types.ObjectId;
     noteTitle?: string;
+    confluencePageId?: string | mongoose.Types.ObjectId;
+    confluenceCommentId?: string | mongoose.Types.ObjectId;
+    confluencePageTitle?: string;
   };
 }) => {
   try {
@@ -252,6 +255,8 @@ export const createNotification = async (data: {
         url = `/chat?groupId=${data.metadata.groupId}`;
       } else if (data.metadata?.noteId) {
         url = '/notes';
+      } else if (data.metadata?.confluencePageId) {
+        url = '/confluence';
       } else if (data.metadata?.taskId && data.metadata?.projectId) {
         url = `/projects/${data.metadata.projectId}?taskId=${data.metadata.taskId}`;
       } else if (data.metadata?.projectId) {
@@ -347,6 +352,10 @@ const TYPE_TO_MODULE: Record<string, string> = {
   task_chat_message:      '/my-tasks',
   group_added:            '/chat',
   note_reminder:          '/notes',
+  confluence_mention:     '/confluence',
+  confluence_review_requested:  '/confluence',
+  confluence_changes_requested: '/confluence',
+  confluence_page_approved:     '/confluence',
 };
 
 // Lightweight endpoint: returns per-module unread counts + IDs (for mark-as-read)

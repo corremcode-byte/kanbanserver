@@ -155,6 +155,19 @@ export interface IUser extends Document {
         delete?: boolean;
         [key: string]: boolean | undefined;
       };
+      // Confluence: company knowledge pages (NOT files). view = read published
+      // pages; create = write own pages/drafts/templates; edit = edit any page
+      // (and see drafts); comment; publish = make drafts live (and see drafts);
+      // delete = delete any page.
+      confluence?: {
+        view?: boolean;
+        create?: boolean;
+        edit?: boolean;
+        comment?: boolean;
+        publish?: boolean;
+        delete?: boolean;
+        [key: string]: boolean | undefined;
+      };
       // "execute" (not "edit") since this permission runs an irreversible whole-database
       // wipe, not an edit of a record. Role 'superadmin' always has access regardless of
       // this flag (see requireDataDeletionPermission) — this only grants access to others.
@@ -440,6 +453,12 @@ const userSchema = new Schema<IUser, IUserModel, IUserMethods>({
       sharedFiles: {
         type: Schema.Types.Mixed,
         default: { view: false, create: false, edit: false, delete: false }
+      },
+      // Confluence is a NEW opt-in module: closed by default like sharedFiles.
+      // An admin grants it in User Management; nobody gains access implicitly.
+      confluence: {
+        type: Schema.Types.Mixed,
+        default: { view: false, create: false, edit: false, comment: false, publish: false, delete: false }
       }
     }
   },
