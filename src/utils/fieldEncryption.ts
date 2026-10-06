@@ -257,3 +257,52 @@ export function decryptSharedFileFields<T extends SharedFileLikeForDecryption>(i
   if (item.originalName) item.originalName = decryptField(item.originalName, itemId);
   return item;
 }
+
+interface ConfluencePageLikeForDecryption {
+  _id: unknown;
+  title?: string;
+  content?: string;
+  draftTitle?: string;
+  draftContent?: string;
+}
+
+/** Decrypts title + content + draftTitle + draftContent on a Confluence-page-like
+ *  object, in place, keyed by the page's own id. Same algorithm and the same
+ *  no-op-on-plaintext behaviour as every other decrypt helper here. Callers are
+ *  responsible for stripping the draft fields before responding to a user who may
+ *  not see drafts. */
+export function decryptConfluencePageFields<T extends ConfluencePageLikeForDecryption>(page: T): T {
+  const pageId = String(page._id);
+  if (page.title) page.title = decryptField(page.title, pageId);
+  if (page.content) page.content = decryptField(page.content, pageId);
+  if (page.draftTitle) page.draftTitle = decryptField(page.draftTitle, pageId);
+  if (page.draftContent) page.draftContent = decryptField(page.draftContent, pageId);
+  return page;
+}
+
+interface ConfluenceCommentLikeForDecryption {
+  _id: unknown;
+  content?: string;
+}
+
+/** Decrypts a Confluence comment's content in place, keyed by the comment's own id. */
+export function decryptConfluenceCommentFields<T extends ConfluenceCommentLikeForDecryption>(comment: T): T {
+  if (comment.content) comment.content = decryptField(comment.content, String(comment._id));
+  return comment;
+}
+
+interface ConfluenceVersionLikeForDecryption {
+  _id: unknown;
+  title?: string;
+  content?: string;
+}
+
+/** Decrypts a historical Confluence page version in place, keyed by the VERSION
+ *  document's own id (not the page's). Callers that only need the title (the
+ *  history list) should not load `content` at all. */
+export function decryptConfluenceVersionFields<T extends ConfluenceVersionLikeForDecryption>(version: T): T {
+  const versionId = String(version._id);
+  if (version.title) version.title = decryptField(version.title, versionId);
+  if (version.content) version.content = decryptField(version.content, versionId);
+  return version;
+}

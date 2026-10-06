@@ -17,12 +17,23 @@ export const AUDIT_ACTIONS = [
   'user_passkey_changed', 'user_password_reset', 'user_sensitive_profile_updated',
   'user_sensitive_profile_updated_by_admin', 'user_passkey_updated_by_admin', 'biometric_registered',
   'remote_workspace_accessed',
+  // Confluence page activity (written by services/confluenceActivityService.ts,
+  // which deliberately does NOT use logAction's global socket broadcast).
+  'confluence_page_created', 'confluence_page_edited', 'confluence_draft_saved', 'confluence_draft_discarded',
+  'confluence_page_published', 'confluence_version_restored',
+  'confluence_comment_added', 'confluence_comment_edited', 'confluence_comment_deleted',
+  'confluence_labels_changed', 'confluence_page_moved', 'confluence_restrictions_changed',
+  'confluence_page_favorited', 'confluence_page_unfavorited', 'confluence_page_deleted',
+  'confluence_review_submitted', 'confluence_review_withdrawn', 'confluence_review_changes_requested',
+  'confluence_review_approved',
+  'confluence_whiteboard_added', 'confluence_whiteboard_edited', 'confluence_whiteboard_cleared', 'confluence_whiteboard_removed',
+  'confluence_table_added', 'confluence_table_edited', 'confluence_table_columns_changed', 'confluence_table_cleared', 'confluence_table_removed',
 ] as const;
 export type AuditAction = typeof AUDIT_ACTIONS[number];
 
 export const AUDIT_ENTITY_TYPES = [
   'task', 'project', 'member', 'permission', 'comment', 'time_log',
-  'chat_group', 'message', 'user', 'remote_server',
+  'chat_group', 'message', 'user', 'remote_server', 'confluence_page',
 ] as const;
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];
 
@@ -146,6 +157,8 @@ AuditLogSchema.index({ createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, userId: 1, createdAt: -1 });
 AuditLogSchema.index({ projectId: 1, action: 1, createdAt: -1 });
+// Per-entity activity feed, newest first (the Confluence page Activity panel).
+AuditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 
 // Static method to log an action
 AuditLogSchema.statics.logAction = async function(data: {

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuditLog } from '../models/AuditLog';
 import { User } from '../models/User';
 import { decryptProjectFields } from '../utils/fieldEncryption';
+import { decryptConfluenceActivityTitle } from '../services/confluenceActivityService';
 
 /**
  * Audit Controller
@@ -28,12 +29,84 @@ const actionToEventMap: Record<string, string> = {
   'task_message_sent': 'task_message.sent',
   'user_login': 'user.login',
   'user_logout': 'user.logout',
-  'user_created': 'user.created'
+  'user_created': 'user.created',
+  'confluence_page_created': 'confluence.page_created',
+  'confluence_page_edited': 'confluence.page_edited',
+  'confluence_draft_saved': 'confluence.draft_saved',
+  'confluence_draft_discarded': 'confluence.draft_discarded',
+  'confluence_page_published': 'confluence.page_published',
+  'confluence_version_restored': 'confluence.version_restored',
+  'confluence_comment_added': 'confluence.comment_added',
+  'confluence_comment_edited': 'confluence.comment_edited',
+  'confluence_comment_deleted': 'confluence.comment_deleted',
+  'confluence_labels_changed': 'confluence.labels_changed',
+  'confluence_page_moved': 'confluence.page_moved',
+  'confluence_restrictions_changed': 'confluence.restrictions_changed',
+  'confluence_page_favorited': 'confluence.page_favorited',
+  'confluence_page_unfavorited': 'confluence.page_unfavorited',
+  'confluence_page_deleted': 'confluence.page_deleted',
+  'confluence_review_submitted': 'confluence.review_submitted',
+  'confluence_review_withdrawn': 'confluence.review_withdrawn',
+  'confluence_review_changes_requested': 'confluence.review_changes_requested',
+  'confluence_review_approved': 'confluence.review_approved',
+  'confluence_whiteboard_added': 'confluence.whiteboard_added',
+  'confluence_whiteboard_edited': 'confluence.whiteboard_edited',
+  'confluence_whiteboard_cleared': 'confluence.whiteboard_cleared',
+  'confluence_whiteboard_removed': 'confluence.whiteboard_removed',
+  'confluence_table_added': 'confluence.table_added',
+  'confluence_table_edited': 'confluence.table_edited',
+  'confluence_table_columns_changed': 'confluence.table_columns_changed',
+  'confluence_table_cleared': 'confluence.table_cleared',
+  'confluence_table_removed': 'confluence.table_removed'
+};
+
+/** Admin Audit Log wording for Confluence entries. `pageTitle` has already been
+ *  decrypted (see getAuditLogs); draft-stage entries carry no title by design. */
+const confluenceDetails = (action: string, metadata: any): string => {
+  const page = metadata.pageTitle ? `"${metadata.pageTitle}"` : 'a Confluence page';
+  switch (action) {
+    case 'confluence_page_created': return `Created Confluence page ${page}`;
+    case 'confluence_page_edited': return `Edited Confluence template ${page}`;
+    case 'confluence_draft_saved': return `Saved a draft of ${page}`;
+    case 'confluence_draft_discarded': return `Discarded unpublished changes to ${page}`;
+    case 'confluence_page_published': return `Published ${page}${metadata.version ? ` (version ${metadata.version})` : ''}`;
+    case 'confluence_version_restored':
+      return metadata.mode === 'draft'
+        ? `Restored version ${metadata.fromVersion} of ${page} to its draft`
+        : `Restored version ${metadata.fromVersion} of ${page} as version ${metadata.version}`;
+    case 'confluence_comment_added': return `Commented on ${page}`;
+    case 'confluence_comment_edited': return `Edited a comment on ${page}`;
+    case 'confluence_comment_deleted': return `Deleted a comment on ${page}`;
+    case 'confluence_labels_changed': return `Changed labels on ${page}`;
+    case 'confluence_page_moved': return `Moved ${page}`;
+    case 'confluence_restrictions_changed': return metadata.restricted ? `Restricted ${page}` : `Removed restrictions from ${page}`;
+    case 'confluence_page_favorited': return `Added ${page} to favorites`;
+    case 'confluence_page_unfavorited': return `Removed ${page} from favorites`;
+    case 'confluence_page_deleted': return `Deleted ${page}`;
+    case 'confluence_review_submitted': return `Submitted ${page} for review`;
+    case 'confluence_review_withdrawn': return `Withdrew ${page} from review`;
+    case 'confluence_review_changes_requested': return `Requested changes to ${page}`;
+    case 'confluence_review_approved': return `Approved ${page}${metadata.version ? ` (published as version ${metadata.version})` : ''}`;
+    case 'confluence_whiteboard_added': return `Added a whiteboard to ${page}`;
+    case 'confluence_whiteboard_edited': return `Edited a whiteboard on ${page}`;
+    case 'confluence_whiteboard_cleared': return `Cleared a whiteboard on ${page}`;
+    case 'confluence_whiteboard_removed': return `Removed a whiteboard from ${page}`;
+    case 'confluence_table_added': return `Added a structured table to ${page}`;
+    case 'confluence_table_edited': return `Edited a structured table on ${page}`;
+    case 'confluence_table_columns_changed': return `Changed structured table columns on ${page}`;
+    case 'confluence_table_cleared': return `Cleared a structured table on ${page}`;
+    case 'confluence_table_removed': return `Removed a structured table from ${page}`;
+    default: return `Performed action: ${action}`;
+  }
 };
 
 // Generate user-friendly details from audit log entry
 const generateDetails = (log: any): string => {
   const metadata = log.metadata || {};
+
+  if (typeof log.action === 'string' && log.action.startsWith('confluence_')) {
+    return confluenceDetails(log.action, metadata);
+  }
 
   switch (log.action) {
     case 'task_created':
@@ -441,6 +514,11 @@ export const getAuditLogs = async (req: any, res: Response) => {
       if (log.projectId && typeof log.projectId === 'object') {
         decryptProjectFields(log.projectId);
       }
+      // Confluence entries store their page-title snapshot encrypted (see
+      // services/confluenceActivityService.ts); this admin view shows it decrypted.
+      if (log.entityType === 'confluence_page' && log.metadata?.pageTitle) {
+        log.metadata.pageTitle = decryptConfluenceActivityTitle(log);
+      }
     });
 
     // Filter out logs for deleted, inactive, or superadmin users.
@@ -484,7 +562,9 @@ export const getAuditLogs = async (req: any, res: Response) => {
           email: user.email || 'unknown@email.com',
         },
         event: actionToEventMap[log.action] || log.action,
-        resource: log.metadata?.taskTitle || log.metadata?.groupName || project?.name || log.metadata?.userName || log.metadata?.userEmail || log.entityType || 'System',
+        resource: log.metadata?.taskTitle || log.metadata?.groupName || project?.name || log.metadata?.userName || log.metadata?.userEmail
+          || (log.entityType === 'confluence_page' ? (log.metadata?.pageTitle || 'Confluence page') : '')
+          || log.entityType || 'System',
         details: generateDetails(log),
         source: 'Web App', // Default to Web App for now
         metadata: {

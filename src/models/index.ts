@@ -9,5 +9,9 @@ export { Notification, INotification } from './Notification';
 export { default as Note, INote } from './Note';
 export { default as PersonalFile, IPersonalFile } from './PersonalFile';
 export { default as SharedFile, ISharedFile } from './SharedFile';
+export { default as ConfluencePage, IConfluencePage } from './ConfluencePage';
+export { default as ConfluenceComment, IConfluenceComment } from './ConfluenceComment';
+export { default as ConfluencePageView, IConfluencePageView } from './ConfluencePageView';
+export { default as ConfluencePageVersion, IConfluencePageVersion } from './ConfluencePageVersion';
 
 export { Types, Document } from 'mongoose';

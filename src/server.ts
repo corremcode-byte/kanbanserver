@@ -25,6 +25,7 @@ import routes from './routes';
 import { errorHandler } from './middleware';
 import { logger } from './utils/logger';
 import { cronService } from './services/cronService';
+import { CONFLUENCE_JSON_BODY_LIMIT } from './config/confluence';
 
 // Create Express app
 const app = express();
@@ -76,6 +77,10 @@ app.use(helmet({
 }));
 app.use(compression());
 app.use(cookieParser());
+// Confluence pages carry rich HTML bodies larger than the 100kb default below.
+// Scoped to /api/confluence only and registered first: body-parser never re-parses
+// a body that has already been parsed, so every other route keeps the default.
+app.use('/api/confluence', express.json({ limit: CONFLUENCE_JSON_BODY_LIMIT }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
